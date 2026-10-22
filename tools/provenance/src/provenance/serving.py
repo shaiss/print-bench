@@ -61,21 +61,34 @@ attempt-2 link 1 (00:34:31–00:38:50) and backlog-burn run 34654859877's
 attempt-2 link 1 (00:34:36–00:40:48) BOTH contain the #592 SHIP-LOCK at
 00:35:31 (the owner re-ran both at 00:34); #592 carries ``design-brief``
 only, so only the design run claims it and the backlog-burn window fails the
-key. Then (:func:`ship_key_ok`), for an owner or Actions-bot author:
+key. Two rules keep a lock from making the wrong run's claim. The settle
+job's constant stub (``brief.claimed`` with ``fields.settle``, the
+``ship_lock_settle`` lead — #864) never counts: it is posted after every
+agent step, so the only windows that can hold it are other runs'. And an
+Actions-bot lock counts toward one routine only, told apart by its body: the
+design-run §2 contract names the design (``fields.design_name``; the
+#860–#864 runs' agent posted it as the Actions bot inside its window), the
+burn's /ship-issue contract does not — so the burn's lock on a brief that
+carries both opt-in labels is not also an overlapping design run's claim
+(owner locks keep the label rule alone; NVC-4's negative control is that
+dual-label case). Then (:func:`ship_key_ok`), for an owner or Actions-bot
+author:
 
 * a ``brief.*`` event on issue ``N`` (the claim itself included) iff the run
-  claimed ``N`` — so a design-run settle lock, stop or delivered comment that
-  lands inside a backlog-burn window stays ``login`` instead of becoming the
+  claimed ``N`` — so a design-run stop or delivered comment that lands
+  inside a backlog-burn window stays ``login`` instead of becoming the
   burn's work, and a previous run's delivered comment inside the next run's
-  window is not that run's;
+  window is not that run's; a settle stub is never attributed by window;
 * a ``pr.opened`` / ``commit.*`` iff the PR's ``head_ref`` is
-  ``claude/issue-<N>-…`` and the run claimed ``N``; for an Actions-bot
-  author in a run with NO claim (every unattended design run since #864:
-  its lock is settle-posted, outside its windows) iff ``N`` is an issue that
-  routine can select — a captured brief (``record.briefs``: only
+  ``claude/issue-<N>-…`` and the run claimed ``N``. An Actions-bot one also
+  joins (a claim on another issue widens nothing and narrows nothing: since
+  #864 a design-run window's only locks are someone else's) when it predates
+  the PR — since #858 the deliverer opens the PR after the run ends, so a
+  run's own commits all predate it while the design coach's iterations,
+  pushed as the same login after the open, never do — and ``N`` is an issue
+  that routine selects: a captured brief (``record.briefs``: only
   ``design-brief`` issues are captured) for design-run, any other issue for
-  backlog-burn — so the agent's own commits still join while the other
-  routine's bundle commits on its branch do not;
+  backlog-burn, so the other routine's bundle commits on its branch do not;
 * otherwise the trust stays ``login`` (an owner PR on any other branch
   inside a design-run window, a run that declined without claiming, the
   deliver workflow's owner ``pr.opened`` — no window contains it).
@@ -1083,13 +1096,16 @@ def run_claims(brief_records: list[dict[str, Any]], index: ReceiptIndex, *,
         labels = set(rec.get("labels") or [])
         for e in rec.get("events") or []:
             login = (e.get("signals") or {}).get("login")
-            if e.get("kind") != "brief.claimed" or login not in claimers:
+            fields = e.get("fields") or {}
+            if e.get("kind") != "brief.claimed" or login not in claimers or fields.get("settle"):
                 continue
             issue = e.get("issue") or rec.get("issue")
             if not isinstance(issue, int):
                 continue
             for w in containing_windows(index, ts=e.get("ts"), roles=KIND_ROLES["brief.claimed"],
                                         author_login=login, owner_login=owner_login):
+                if login != owner_login and (w.role == "design-run") != bool(fields.get("design_name")):
+                    continue
                 if SHIP_ROUTINE_LABELS.get(w.role) in labels:
                     per_run.setdefault(w.run_id, set()).add(issue)
     return {rid: next(iter(c)) for rid, c in sorted(per_run.items()) if len(c) == 1}
@@ -1105,8 +1121,9 @@ def _kind_key(event: dict[str, Any]) -> str:
 def ship_key_ok(event: dict[str, Any], w: StepWindow, record: dict[str, Any],
                 claims: dict[int, int], owner_login: str) -> bool:
     """§2b: may ship window ``w`` hold ``event`` of ``record``? Always for a non-ship role and for
-    an author other than the owner or the Actions bot; otherwise only through ``w``'s run's claim
-    (``claims``) — or, for an Actions-bot PR event of a run with no claim, the routine's issue kind."""
+    an author other than the owner or the Actions bot; never for the settle job's lock stub;
+    otherwise through ``w``'s run's claim (``claims``) — and, for an Actions-bot PR event, also
+    when it predates the PR and its branch is an issue ``w``'s routine selects."""
     login = (event.get("signals") or {}).get("login")
     is_owner = login == owner_login
     if w.role not in SHIP_ROLES or not (is_owner or login in ACTIONS_BOT_LOGINS):
@@ -1114,16 +1131,22 @@ def ship_key_ok(event: dict[str, Any], w: StepWindow, record: dict[str, Any],
     claimed = claims.get(w.run_id)
     kind = event.get("kind", "")
     if kind.startswith("brief."):
+        if kind == "brief.claimed" and (event.get("fields") or {}).get("settle"):
+            return False
         return claimed is not None and (event.get("issue") or record.get("issue")) == claimed
     if kind == "pr.opened" or kind.startswith("commit."):
         m = CLAIM_BRANCH_RE.match(record.get("head_ref") or "")
         if not m:
             return False
-        if claimed is not None:
-            return int(m.group(1)) == claimed
+        n = int(m.group(1))
+        if claimed is not None and n == claimed:
+            return True
         if is_owner:
             return False
-        return (int(m.group(1)) in set(record.get("briefs") or [])) == (w.role == "design-run")
+        t, opened = ts_epoch(event.get("ts")), ts_epoch(record.get("created_at"))
+        if t is None or opened is None or t >= opened:
+            return False
+        return (n in set(record.get("briefs") or [])) == (w.role == "design-run")
     return False
 
 

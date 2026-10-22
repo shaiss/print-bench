@@ -194,7 +194,7 @@ def test_two_locks_on_one_issue_are_one_claim():
 
 
 def test_actions_bot_ship_artifacts_need_the_key():
-    """§2b since #858/#864/#868: the Actions bot writes for BOTH ship routines (the burn agent's SHIP-LOCK, design-run's post-agent settle job, the deliverers' delivered comment, claude-code-action's commits), so a bot artifact inside a ship window is keyed like an owner one. A design-run settle lock on a design-brief issue inside a backlog-burn window stays login (it used to become the burn's, trust window); the burn's own bot lock on an issue carrying autonomy-ok claims it; a delivered comment on an issue the run did not claim stays login; a bot commit joins a run with no claim only on a branch that routine can select."""
+    """§2b since #858/#864/#868: the Actions bot writes for BOTH ship routines (the burn agent's SHIP-LOCK, design-run's post-agent settle job, the deliverers' delivered comment, claude-code-action's commits, the design coach's iterations), so a bot artifact inside a ship window is keyed like an owner one. A design-run settle lock or delivered comment inside a backlog-burn window stays login (it used to become the burn's, trust window); the burn's own bot lock claims its issue; a delivered comment on an issue the run did not claim stays login; a bot commit joins through the claim, or — predating the PR — on a branch its routine selects."""
     bot = "github-actions[bot]"
     burn = H.shifted_receipt(receipt(BURN_RUN), run_id=34654859999, seconds=6 * 3600)
     idx = index(burn)
@@ -203,19 +203,60 @@ def test_actions_bot_ship_artifacts_need_the_key():
         idx, ts=t_burn, roles=serving.SHIP_ROLES, author_login=bot, owner_login=OWNER_LOGIN)] == \
         [("backlog-burn", 34654859999)]
 
-    def lock(n, labels):
-        return H.brief_record(n, [H.event(f"issuecomment:{9100000000 + n}", "brief.claimed", t_burn, login=bot,
-                                          issue=n, fields={"design_name": None})], labels=labels)
+    def lock(n, labels, ts=t_burn, **fields):
+        return H.brief_record(n, [H.event(f"issuecomment:{9100000000 + n}", "brief.claimed", ts, login=bot, issue=n,
+                                          fields={"design_name": None, "settle": False, **fields})], labels=labels)
 
-    settle = lock(710, ("design-brief",))
-    assert run_claims([settle], idx, owner_login=OWNER_LOGIN) == {}
-    e = annotate(settle, idx=idx, briefs=[settle])["events"][0]
-    assert (e["trust"], e["runtime"]["run_id"], e["runtime"]["model_basis"]) == ("login", None, "none")
+    def one(rec, briefs):
+        e = annotate(rec, idx=idx, briefs=briefs)["events"][0]
+        return e["trust"], e["runtime"]["run_id"]
+
+    on_design = lock(710, ("design-brief",))
+    assert run_claims([on_design], idx, owner_login=OWNER_LOGIN) == {}
+    assert one(on_design, [on_design]) == ("login", None)
     # Positive control: the burn's own bot lock on an issue carrying its opt-in label claims it.
     own = lock(711, ("autonomy-ok", "design-brief"))
     assert run_claims([own], idx, owner_login=OWNER_LOGIN) == {34654859999: 711}
-    e = annotate(own, idx=idx, briefs=[own])["events"][0]
-    assert (e["trust"], e["runtime"]["run_id"]) == ("window", 34654859999)
+    assert one(own, [own]) == ("window", 34654859999)
+
+    # The settle stub on a brief that ALSO carries autonomy-ok (design-run.yml names the collision):
+    # no claim, so its lock, the deliverer's delivered comment and owner pr.opened stay login, and
+    # the burn's own commit on its non-brief issue still joins the burn.
+    settle = lock(720, ("autonomy-ok", "design-brief"), settle=True)
+    assert run_claims([settle], idx, owner_login=OWNER_LOGIN) == {}
+    assert one(settle, [settle]) == ("login", None)
+    shipped = H.brief_record(720, [H.event("issuecomment:9100002720", "brief.shipped", "2026-09-12T06:38:30Z",
+                                           login=bot, issue=720, fields={"design_name": None, "shipped_pr": 970})],
+                             labels=("autonomy-ok", "design-brief"))
+    assert one(shipped, [settle]) == ("login", None)
+
+    def pr(n, briefs, events_at, *, kind="commit.design", login=bot, opened="2026-09-12T23:00:00Z"):
+        ev_ = H.event(f"pr:{970 + n % 10}:opened", kind, events_at, login=login, pr=970 + n % 10,
+                      fields={"draft": True}) if kind == "pr.opened" else \
+            H.event(f"commit:{n:040d}", kind, events_at, login=login, sha=f"{n:040d}")
+        rec = H.pr_record(970 + n % 10, [ev_], head_ref=f"claude/issue-{n}-x", created_at=opened, closed_at=None)
+        rec["briefs"] = list(briefs)
+        return rec
+
+    opened_720 = pr(720, [720], "2026-09-12T06:38:00Z", kind="pr.opened", login=OWNER_LOGIN,
+                    opened="2026-09-12T06:38:00Z")
+    assert one(opened_720, [settle]) == ("login", None)
+    assert one(pr(801, [], "2026-09-12T06:36:00Z"), [settle]) == ("window", 34654859999)
+
+    # Scenario C: the burn's bot lock on a dual-labelled brief inside BOTH the burn and design-run
+    # windows (00:36) is the burn's claim only — the burn's lock names no design. The deliverer's
+    # owner pr.opened on its branch (00:50, inside the design run only) stays login, and the design
+    # run's own commit on #592 still joins it.
+    t_both = "2026-09-12T00:36:00Z"
+    burn730 = lock(730, ("autonomy-ok", "design-brief"), ts=t_both)
+    assert run_claims([burn730], idx, owner_login=OWNER_LOGIN) == {BURN_RUN: 730}
+    assert one(pr(730, [730], "2026-09-12T00:50:00Z", kind="pr.opened", login=OWNER_LOGIN,
+                  opened="2026-09-12T00:50:00Z"), [burn730]) == ("login", None)
+    assert one(pr(592, [592], "2026-09-12T01:30:00Z"), [burn730]) == ("window", DESIGN_RUN)
+    # A #860–#864-era design-run lock (posted by its agent as the bot, naming the design) is the
+    # design run's claim only, though the same dual-labelled brief would admit the burn.
+    named = lock(731, ("autonomy-ok", "design-brief"), ts="2026-09-12T00:36:30Z", design_name="vent-cap")
+    assert run_claims([named], idx, owner_login=OWNER_LOGIN) == {DESIGN_RUN: 731}
 
     # A delivered comment (bot brief.shipped) inside design-run run 34661448637, which claimed #592.
     t_dr = "2026-09-12T01:30:00Z"
@@ -224,31 +265,24 @@ def test_actions_bot_ship_artifacts_need_the_key():
         return H.brief_record(n, [H.event(f"issuecomment:{9100001000 + n}", "brief.shipped", t_dr, login=bot, issue=n,
                                           fields={"design_name": None, "shipped_pr": 950})])
 
-    assert annotate(delivered(712), idx=idx)["events"][0]["trust"] == "login"
-    on592 = annotate(delivered(592), idx=idx)["events"][0]
-    assert (on592["trust"], on592["runtime"]["run_id"]) == ("window", DESIGN_RUN)
+    assert one(delivered(712), None) == ("login", None)
+    assert one(delivered(592), None) == ("window", DESIGN_RUN)
 
-    # Bot commits: a run with a claim needs claude/issue-<claim>; a run with none needs a branch its
-    # routine can select (a captured brief for design-run, anything else for the burn).
-    def commit_pr(ts, n, briefs):
-        rec = H.pr_record(960 + n % 10, [H.event(f"commit:{n:040d}", "commit.design", ts, login=bot, sha=f"{n:040d}")],
-                          head_ref=f"claude/issue-{n}-x", created_at=ts, closed_at=None)
-        rec["briefs"] = list(briefs)
-        return rec
-
-    def joined(rec, *, claims_from):
-        out = annotate(rec, idx=idx, briefs=claims_from)["events"][0]
-        return out["trust"], out["runtime"]["run_id"]
-
-    assert joined(commit_pr(t_dr, 713, [713]), claims_from=None) == ("login", None)       # run claimed #592
-    assert joined(commit_pr(t_dr, 713, [713]), claims_from=[]) == ("window", DESIGN_RUN)  # no claim, a brief
-    assert joined(commit_pr(t_dr, 714, []), claims_from=[]) == ("login", None)            # no claim, not a brief
-    assert joined(commit_pr(t_burn, 715, [715]), claims_from=[]) == ("login", None)       # design brief in a burn window
-    assert joined(commit_pr(t_burn, 716, []), claims_from=[]) == ("window", 34654859999)  # the burn's own issue
+    # Bot commits: the claim joins its branch and narrows nothing; without it a commit joins only
+    # when it predates the PR (the coach's iterations land after the deliverer's open) on a branch
+    # its routine selects (a captured brief for design-run, anything else for the burn).
+    assert one(pr(713, [713], t_dr), None) == ("window", DESIGN_RUN)        # claim is #592: no narrowing
+    assert one(pr(713, [713], t_dr), []) == ("window", DESIGN_RUN)          # no claim, a brief
+    assert one(pr(714, [], t_dr), []) == ("login", None)                    # no claim, not a brief
+    assert one(pr(713, [713], t_dr, opened="2026-09-12T01:00:00Z"), []) == ("login", None)  # coach-style
+    assert one(pr(713, [713], t_dr, kind="pr.opened", opened=t_dr), []) == ("login", None)  # bot open
+    assert one(pr(715, [715], t_burn), []) == ("login", None)               # design brief in a burn window
+    assert one(pr(716, [], t_burn), []) == ("window", 34654859999)          # the burn's own issue
+    assert one(pr(716, [], t_burn, opened="2026-09-12T06:00:00Z"), []) == ("login", None)  # coach-style
     # claude[bot] keeps plain containment.
-    plain = commit_pr(t_burn, 715, [715])
+    plain = pr(715, [715], t_burn)
     plain["events"][0]["signals"]["login"] = "claude[bot]"
-    assert joined(plain, claims_from=[]) == ("window", 34654859999)
+    assert one(plain, []) == ("window", 34654859999)
 
 
 def test_nvc5_reviewers_glm53():

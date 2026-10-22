@@ -244,7 +244,7 @@ def test_brief_records(standins):
     assert by_kind["brief.filed"]["signals"]["login"] == "github-actions[bot]"
     assert by_kind["brief.filed"]["fields"] == {"design_name": None}
     assert by_kind["brief.filed"]["trust"] == "login" and by_kind["brief.filed"]["runtime"]["platform"] == "github-actions"
-    assert by_kind["brief.claimed"]["fields"] == {"design_name": "nuggs-vent-cap"}
+    assert by_kind["brief.claimed"]["fields"] == {"design_name": "nuggs-vent-cap", "settle": False}
     assert by_kind["brief.claimed"]["ts"] == "2026-09-12T00:35:31Z" and by_kind["brief.claimed"]["signals"]["login"] == OWNER_LOGIN
     assert by_kind["brief.shipped"]["fields"]["shipped_pr"] == 636 and by_kind["brief.shipped"]["pr"] == 636
     assert by_kind["brief.closed"]["fields"] == {"closed_by_pr": 636, "design_name": "nuggs-vent-cap",
@@ -298,7 +298,7 @@ def test_brief_after_settle_and_delivery(standins):
     assert rec["design_name"] == "nuggs-vent-cap" and 950 in rec["prs"]
     ship = events_of(rec, "brief.shipped")[0]
     assert (ship["pr"], ship["fields"]["shipped_pr"], ship["signals"]["login"]) == (950, 950, "github-actions[bot]")
-    assert events_of(rec, "brief.claimed")[0]["fields"] == {"design_name": None}
+    assert events_of(rec, "brief.claimed")[0]["fields"] == {"design_name": None, "settle": True}
     # A claimed brief with no trusted contract stays null — never the title's first word.
     assert build(lock)["design_name"] is None
     # An outsider's contract is ignored; so is an outsider's named lock.
@@ -310,6 +310,7 @@ def test_brief_after_settle_and_delivery(standins):
     owner = {"login": OWNER_LOGIN, "type": "User"}
     attended = comment(6, "🚢 SHIP-LOCK — running\n\n**Design name:** `spool-arm`\n", owner, "2026-09-12T00:41:00Z")
     assert build(attended)["design_name"] == "spool-arm"
+    assert events_of(build(attended), "brief.claimed")[0]["fields"]["settle"] is False
     assert build()["design_name"] == "wall-mounted"
 
 

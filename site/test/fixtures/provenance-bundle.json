@@ -1,5 +1,5 @@
 {
- "content_sha256": "6c71a0aeaf1d3245dd9ac9af7258d3c731381815d8a9feeb6a2a81b564eff4a1",
+ "content_sha256": "e4158bd80f6151a02f85458cb739743cb2c68ce70fc916b6ef96a13a7ebe890a",
  "contract": 1,
  "evidence_sha": "0000000000000000000000000000000000000000",
  "extractor": "provenance-extract 2",
@@ -214,7 +214,8 @@
      },
      "episode": "E0:brief:501",
      "fields": {
-      "design_name": "alpha-clip"
+      "design_name": "alpha-clip",
+      "settle": false
      },
      "head_sha": null,
      "id": "issuecomment:6100",
@@ -430,7 +431,8 @@
      },
      "episode": "E0:brief:501",
      "fields": {
-      "design_name": "alpha-clip"
+      "design_name": "alpha-clip",
+      "settle": false
      },
      "head_sha": null,
      "id": "issuecomment:6102",
@@ -2101,7 +2103,8 @@
      },
      "episode": "E0:brief:520",
      "fields": {
-      "design_name": "b-hinge"
+      "design_name": "b-hinge",
+      "settle": false
      },
      "head_sha": null,
      "id": "issuecomment:6201",
@@ -2825,8 +2828,8 @@
   }
  },
  "views_sha256": {
-  "alpha-clip": "def22ccd1a8e206263569f7fb114026094cb17f5c5d76d58c1e089aa31d0e694",
-  "beta-hinge": "cbfc6a0ac6cf066eb3cfbada8da0aabc030d3115232ac64159a96ce814d52457",
+  "alpha-clip": "b0a028339d89973bf29aa2b9ee3bf4a1eae16ffd187e3327937ef6a64a42e3b8",
+  "beta-hinge": "03af3b41b12335f77dd4e7578d9aad1d4d824f524051230c6b54cced9e6fbabe",
   "gamma-stand": "27c36645f78fcbea8e6f45faaa997fd4298f1a2fb34279de1de25579f7e17c82"
  }
 }

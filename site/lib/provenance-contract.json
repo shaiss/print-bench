@@ -134,6 +134,7 @@
   ],
   "lead": [
    "ship_lock_withdrawn",
+   "ship_lock_settle",
    "ship_lock",
    "declined",
    "deferred",
@@ -292,6 +293,7 @@
      "t": "enum",
      "of": [
       "ship_lock_withdrawn",
+      "ship_lock_settle",
       "ship_lock",
       "declined",
       "deferred",
@@ -867,6 +869,10 @@
     "t": "ref",
     "to": "design",
     "null": true,
+    "tag": "D"
+   },
+   "settle": {
+    "t": "bool",
     "tag": "D"
    }
   },

@@ -62,7 +62,8 @@
    },
    "episode": "E0:brief:520",
    "fields": {
-    "design_name": "b-hinge"
+    "design_name": "b-hinge",
+    "settle": false
    },
    "head_sha": null,
    "id": "issuecomment:6201",

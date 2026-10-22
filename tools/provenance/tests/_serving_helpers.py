@@ -197,8 +197,8 @@ def brief_record(n: int, events: list[dict], *, labels: Iterable[str] = ("design
             "prs": [], "evidence": evidence(f"raw/brief/{n}.json.gz")}
 
 
-_LEAD_KIND = {"ship_lock": "brief.claimed", "shipped": "brief.shipped", "declined": "brief.declined",
-              "deferred": "brief.deferred", "ship_lock_withdrawn": "brief.withdrawn"}
+_LEAD_KIND = {"ship_lock": "brief.claimed", "ship_lock_settle": "brief.claimed", "shipped": "brief.shipped",
+              "declined": "brief.declined", "deferred": "brief.deferred", "ship_lock_withdrawn": "brief.withdrawn"}
 
 
 def brief_from_raw(raw: dict) -> dict[str, Any]:
@@ -216,6 +216,8 @@ def brief_from_raw(raw: dict) -> dict[str, Any]:
         fields = {"design_name": lead.get("design_name")}
         if kind == "brief.shipped":
             fields["shipped_pr"] = lead.get("shipped_pr")
+        if kind == "brief.claimed":
+            fields["settle"] = c["body"]["lead"] == "ship_lock_settle"
         evs.append(event(f"issuecomment:{c['id']}", kind, c["created_at"], login=c["user"]["login"],
                          issue=n, url=f"{url}#issuecomment-{c['id']}", fields=fields))
     return brief_record(n, evs, labels=issue["labels"], created_at=issue["created_at"])

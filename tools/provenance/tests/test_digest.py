@@ -11,7 +11,7 @@ import pathlib
 import re
 
 from conftest import REPO, raw_brief, raw_pr
-from provenance import digest
+from provenance import contract, digest
 
 FOOTER = digest.FOOTER
 
@@ -120,12 +120,40 @@ def test_contract_lead_carries_the_design_name():
     assert digest.classify_lead("**Design name:** Not A Slug\n") == ("contract", {"design_name": None})
     assert digest.classify_lead("Contract below.\n**Design name:** widget") == (None, {})
     text = DELIVER_SH.read_text(encoding="utf-8")
+    assert digest.classify_lead(_settle_body(text)) == ("ship_lock_settle", {})
+    assert digest.body_digest(_settle_body(text))["marker_lines"] == [
+        re.search(r"^SHIP_LOCK_HTML_MARKER='([^']*)'$", text, re.M).group(1)]
+    # The burn's /ship-issue lock carries the same marker; only the first line tells them apart.
+    assert digest.classify_lead("🚢 SHIP-LOCK — shipping this as one PR.\n\n<!-- design-run-ship-lock:v1 -->\n")[0] == \
+        "ship_lock"
+    # Negative control: a drifted STOP_LOCK_MARKER moves the real stub off the settle class.
+    drifted = text.replace("STOP_LOCK_MARKER='🚢 SHIP-LOCK'", "STOP_LOCK_MARKER='🔒 SHIP-LOCK'")
+    assert digest.classify_lead(_settle_body(drifted))[0] != "ship_lock_settle"
+
+
+def _settle_body(text: str) -> str:
+    """``SHIP_LOCK_SETTLE_BODY`` as bash expands it, from scripts/design-run-deliver.sh's own variables."""
+    lock = re.search(r"^STOP_LOCK_MARKER='([^']*)'$", text, re.M)
     stub = re.search(r'^SHIP_LOCK_SETTLE_BODY="\$\{STOP_LOCK_MARKER\}([^"]*)"$', text, re.M | re.S)
     marker = re.search(r"^SHIP_LOCK_HTML_MARKER='([^']*)'$", text, re.M)
-    assert stub and marker
-    body = "🚢 SHIP-LOCK" + stub.group(1).replace("${SHIP_LOCK_HTML_MARKER}", marker.group(1))
-    assert digest.classify_lead(body) == ("ship_lock", {"design_name": None})
-    assert digest.body_digest(body)["marker_lines"] == [marker.group(1)]
+    assert lock and stub and marker
+    return lock.group(1) + stub.group(1).replace("${SHIP_LOCK_HTML_MARKER}", marker.group(1))
+
+
+def test_shipped_pr_zero_names_no_pr():
+    """``#0`` / ``pull/0`` names no PR (as in refs_closes): ``shipped_pr`` is null, so a commenter
+    cannot hold a unit back as contract-invalid with the contract's ``min 1``."""
+    for body in ("✅ **SHIPPED — #0**", "📦 **Draft PR opened: #0**",
+                 digest.DELIVERED_LINES[1] + "\n\n- pull request: https://github.com/a/b/pull/0",
+                 digest.DELIVERED_LINES[0] + "\n\n- pull request: https://github.com/a/b/pull/00"):
+        assert digest.classify_lead(body) == ("shipped", {"shipped_pr": None, "design_name": None}), body
+    assert digest.classify_lead(digest.DELIVERED_LINES[0] + "\n\n- pull request: https://github.com/a/b/pull/007")[1][
+        "shipped_pr"] == 7
+    raw = raw_pr(636)
+    comment = dict(raw["issue_comments"][0], id=1, user={"login": "mallory", "type": "User"},
+                   body=digest.body_digest(digest.DELIVERED_LINES[1] + "\n\n- pull request: https://github.com/a/b/pull/0"))
+    raw["issue_comments"].append(comment)
+    assert contract.validate("raw-pr@1", raw) == []
 
 
 def test_refs_closes_drops_issue_zero():

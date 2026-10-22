@@ -148,7 +148,10 @@ tests/fixtures/acceptance.json).
 
 **Brief events** (:func:`extract_brief`): ``issue:<n>:filed`` (brief.filed,
 ``fields.design_name`` null — the claim or the contract carries the name),
-comment leads ``ship_lock``→brief.claimed, ``shipped``→brief.shipped,
+comment leads ``ship_lock``/``ship_lock_settle``→brief.claimed (``fields.settle``
+true for the settle job's constant stub, #864 — posted after every agent step,
+so the serving join never window-attributes it or counts it as a claim),
+``shipped``→brief.shipped,
 ``declined``/``deferred``/``ship_lock_withdrawn``→brief.declined/deferred/
 withdrawn (each with its own ``lead_fields.design_name``), timeline
 ``closed`` → brief.closed (``closed_by_pr`` when a PR in ``ctx.merge_shas``
@@ -166,10 +169,10 @@ can paste ``**Design name:**`` on a public issue. An attended run names the
 design in its own SHIP-LOCK; since #864 an unattended run's lock is the
 settle job's constant stub and the §2 contract travels as a separate
 ``**Design name:**``-led comment (lead ``contract``). Only a brief with no
-trusted ``ship_lock`` at all falls back to the slug of a ``Design brief:
-<slug>`` title prefix: a claimed brief whose name is unrecoverable stays
-null rather than minting a title word ("Design brief: wall-mounted spool
-holder" → ``wall-mounted``) as a view alias. ``record.prs`` = every ``shipped_pr`` and
+trusted claim at all (``ship_lock`` or ``ship_lock_settle``) falls back to
+the slug of a ``Design brief: <slug>`` title prefix: a claimed brief whose
+name is unrecoverable stays null rather than minting a title word ("Design
+brief: wall-mounted spool holder" → ``wall-mounted``) as a view alias. ``record.prs`` = every ``shipped_pr`` and
 ``closed_by_pr``. Brief trust: ``brief.filed`` by the Actions bot is
 ``login`` until serving finds a unique scout window; an issue body with
 ``last_edited_at`` set is ``claimed``/``marker:edited``.
@@ -302,8 +305,8 @@ NOISE_LEADS = frozenset({"bugbot_limit", "qodo_paused", "decision_needed", "clea
 #: The non-owner authors whose ``ship_lock`` / ``contract`` comment may name a brief's design
 #: (the Actions bot: the settle job and the burn agent post as it since #864/#868).
 NAME_AUTHOR_LOGINS = frozenset({"github-actions[bot]"})
-BRIEF_LEAD_KINDS = {"ship_lock": "brief.claimed", "shipped": "brief.shipped",
-                    "declined": "brief.declined", "deferred": "brief.deferred",
+BRIEF_LEAD_KINDS = {"ship_lock": "brief.claimed", "ship_lock_settle": "brief.claimed",
+                    "shipped": "brief.shipped", "declined": "brief.declined", "deferred": "brief.deferred",
                     "ship_lock_withdrawn": "brief.withdrawn"}
 CLOSE_REFERENCE_SECONDS = 60
 #: ``trust.status_tier``'s verified result — the only status tier that carries a runtime join.
@@ -1091,11 +1094,11 @@ def extract_brief(raw_brief: dict[str, Any], ctx: ExtractContext) -> dict[str, A
     comments = raw_brief.get("comments") or []
     timeline = raw_brief.get("timeline") or []
     name_authors = NAME_AUTHOR_LOGINS | {ctx.owner_login}
-    trusted = [c for c in comments if c["body"].get("lead") in ("ship_lock", "contract")
+    trusted = [c for c in comments if c["body"].get("lead") in ("ship_lock", "ship_lock_settle", "contract")
                and _login(c.get("user")) in name_authors]
     design_name = next((_slug(c["body"]["lead_fields"].get("design_name")) for c in reversed(trusted)
                         if _slug((c["body"].get("lead_fields") or {}).get("design_name"))), None)
-    if design_name is None and not any(c["body"].get("lead") == "ship_lock" for c in trusted):
+    if design_name is None and not any(c["body"].get("lead") in ("ship_lock", "ship_lock_settle") for c in trusted):
         m = _TITLE_SLUG_RE.match(issue.get("title") or "")
         design_name = m.group(1) if m else None
     events: list[dict[str, Any]] = []
@@ -1115,6 +1118,8 @@ def extract_brief(raw_brief: dict[str, Any], ctx: ExtractContext) -> dict[str, A
             continue
         lead_fields = comment["body"].get("lead_fields") or {}
         fields: dict[str, Any] = {"design_name": _slug(lead_fields.get("design_name"))}
+        if kind == "brief.claimed":
+            fields["settle"] = comment["body"].get("lead") == "ship_lock_settle"
         pr = None
         if kind == "brief.shipped":
             shipped = lead_fields.get("shipped_pr")

@@ -482,17 +482,18 @@ release body:
 | `lead` | the class of the lead line — the first non-blank line that is not a full-line marker — under the lead rules below; else `null` |
 | `lead_fields` | validated fields the lead's class carries (below); `{}` otherwise |
 | `refs_closes` | sorted unique issue numbers after a GitHub closing keyword (`close[sd]`, `fix(e[sd])`, `resolve[sd]`, optional colon); only a PR body's are used |
-| `digest` | `body-digest@2`. An `@1` digest (the contract still accepts it) predates the deliverers' `shipped` line and the `contract` class, so its `lead` is `null` where `@2` classifies — a `refreeze` re-reads it |
+| `digest` | `body-digest@2`. An `@1` digest (the contract still accepts it) predates the deliverers' `shipped` line and the `ship_lock_settle` and `contract` classes, so its `lead` is `null` (or `ship_lock` for a settle stub) where `@2` classifies differently |
 
 Lead rules (first match wins, anchored at the start of the stripped lead line):
 
 | Class | Pattern | Fields |
 |---|---|---|
 | `ship_lock_withdrawn` | `🚢 SHIP-LOCK WITHDRAWN` | `design_name` |
+| `ship_lock_settle` | exactly `🚢 SHIP-LOCK — settle claim` — the settle job's constant stub since #864 (`STOP_LOCK_MARKER` + ` — settle claim` in `scripts/design-run-deliver.sh`, drift-pinned). Its own class because the burn's /ship-issue lock carries the same `design-run-ship-lock:v1` marker | — |
 | `ship_lock` | `🚢 SHIP-LOCK` | `design_name` |
 | `declined` | `🚢 DECLINED` | `design_name` |
 | `deferred` | `🚢 DEFERRED` | `design_name` |
-| `shipped` | `✅ **SHIPPED … #N` or `📦 **Draft PR opened: #N**` (the agent's own line, before #858), or exactly `🚢 design-run delivered — branch and draft PR verified` / `🚢 backlog-burn delivered — branch and draft PR verified` (the deliverers' line since #858 — drift-pinned to `DELIVERED_LINE` in `scripts/design-run-deliver.sh`; the PR comes from the body's `- pull request: https://github.com/<o>/<r>/pull/<N>` line) | `shipped_pr`, `design_name` |
+| `shipped` | `✅ **SHIPPED … #N` or `📦 **Draft PR opened: #N**` (the agent's own line, before #858; `#0` names no PR), or exactly `🚢 design-run delivered — branch and draft PR verified` / `🚢 backlog-burn delivered — branch and draft PR verified` (the deliverers' line since #858 — drift-pinned to `DELIVERED_LINE` in `scripts/design-run-deliver.sh`; the PR comes from the body's `- pull request: https://github.com/<o>/<r>/pull/<N>` line) | `shipped_pr`, `design_name` |
 | `decision_needed` | `🚦 DECISION NEEDED` | — |
 | `coach_lock` | `🎓 COACH-LOCK` | — |
 | `coach_round` | `Round <N><a-z?> — ` | `round`, `round_sub` |
@@ -805,6 +806,7 @@ Kinds (closed): `brief.filed|claimed|shipped|declined|deferred|withdrawn|closed`
 `release`.
 
 Per-kind fields (all required, closed): `brief.*` `design_name` (+
+`settle` for claimed — true for the settle job's `ship_lock_settle` stub;
 `shipped_pr` for shipped; `state_reason`, `closed_by_pr` for closed);
 `pr.opened` `draft`; `pr.merged` `merge_method`, `merged_by_login`,
 `main_subject` (main's squash subject, owner decision 5); `commit.design|fix|
@@ -1043,19 +1045,28 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    that routine's opt-in label (the selector claims one issue per run; a run
    whose windows hold SHIP-LOCKs on two or more distinct issues claims
    nothing; several locks on one issue, like #281's two in run 32026482297,
-   are one claim). The SHIP-LOCK itself and owner/bot `brief.*` events on
-   that issue get `window`, as do owner/bot `pr.opened` / `commit.*` on a
-   `claude/issue-<N>-…` branch whose N is the claimed issue. An Actions-bot
-   `pr.opened` / `commit.*` in a run with NO claim (every unattended design
-   run since #864 — its lock is settle-posted, outside its windows) gets
-   `window` only when N is an issue that routine can select: a captured brief
-   (`briefs` — design briefs only) for design-run, any other issue for
-   backlog-burn; so the agent's own commits still join while the other
-   routine's bundle commits do not. Anything else stays `login`: an owner PR
-   on another branch inside a routine window, a run that declined without
-   claiming, a design-run settle lock or delivered comment that lands inside
-   a backlog-burn window (before this key it became the burn's work at trust
-   `window`). `claude[bot]` keeps the plain rule. Run 34661448637 claimed
+   are one claim). The settle job's stub (`settle: true`) never counts — it
+   is posted after every agent step, so only other runs' windows can hold it
+   — and an Actions-bot lock counts toward one routine: toward design-run
+   when it names the design (the #860–#864 runs' agent posted its §2
+   contract as the bot), toward backlog-burn when it does not (the
+   /ship-issue contract names none), so the burn's lock on a brief carrying
+   both opt-in labels is not also an overlapping design run's claim. The
+   SHIP-LOCK itself and owner/bot `brief.*` events on that issue get
+   `window`, as do owner/bot `pr.opened` / `commit.*` on a
+   `claude/issue-<N>-…` branch whose N is the claimed issue; a settle stub
+   never does. An Actions-bot `pr.opened` / `commit.*` also gets `window`
+   (a claim on another issue does not block it: since #864 a design-run
+   window's only locks are someone else's) when it predates the PR and N is
+   an issue that routine selects — a captured brief (`briefs` — design
+   briefs only) for design-run, any other issue for backlog-burn. Since #858
+   the deliverer opens the PR after the run ends, so the agent's own commits
+   all predate it, while the design coach's iterations (the same login,
+   pushed after the open) and the other routine's bundle commits do not
+   join. Anything else stays `login`: an owner PR on another branch inside a
+   routine window, a run that declined without claiming, a design-run settle
+   lock, stop or delivered comment that lands inside a backlog-burn window
+   (before this key it became the burn's work at trust `window`). `claude[bot]` keeps the plain rule. Run 34661448637 claimed
    #592 and #636's head is `claude/issue-592-nuggs-vent-cap`, so NVC-3 and
    NVC-4 hold.
    **Not joined yet.** Since #864 a design run's own claim, stops and
@@ -1064,7 +1075,11 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    step), so they stay `login` — lost attribution, not wrong attribution;
    the run link of those PRs comes from the agent's commits. Joining them
    through the run's `settle` job and the delivered comment's `- run:` URL is
-   a separate change.
+   a separate change. **Known limit:** an attended owner SHIP-LOCK posted
+   while a design run's window is open still becomes that run's claim, as it
+   did before #858 (owner locks were then the run's own); telling the two
+   eras apart needs the run's workflow revision, which this join does not
+   read.
 3. **Code basis** — what each run checked out:
    - `schedule` / `workflow_dispatch` (design-run, backlog-burn and the other
      routines): `run.head_sha`, exact;

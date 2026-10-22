@@ -17,9 +17,9 @@ shape cannot be applied to frozen units by re-extraction; it needs a
 bodies can be re-read). Every digest therefore records :data:`DIGEST_VERSION`.
 
 Body digest fields (contract ``body-digest@2``; an ``@1`` digest was computed
-before the ``delivered`` alternative of ``shipped`` and the ``contract`` class
-existed, so its ``lead`` is ``null`` where ``@2`` would classify — a refreeze
-re-reads it):
+before the ``delivered`` alternative of ``shipped`` and the ``ship_lock_settle``
+and ``contract`` classes existed, so its ``lead`` is ``null`` (or ``ship_lock``
+for a settle stub) where ``@2`` would classify differently):
 
 ``sha256``
     lower-hex SHA-256 of the body's UTF-8 bytes, exactly as the API returned
@@ -69,7 +69,9 @@ re-reads it):
     ``shipped`` lead takes ``shipped_pr`` from the lead line (``✅ **SHIPPED …
     #N``, ``📦 **Draft PR opened: #N**``) or, for the delivery step's
     ``🚢 <routine> delivered — …`` line, from the body's ``- pull request:
-    …/pull/<N>`` line (:data:`DELIVERED_PR_RE`).
+    …/pull/<N>`` line (:data:`DELIVERED_PR_RE`); a ``0`` (``#0``, ``pull/00``)
+    names no PR and is ``null``, as in ``refs_closes`` — the contract's ``min
+    1`` would otherwise hold the unit back as contract-invalid.
 ``refs_closes``
     sorted unique issue numbers named by a GitHub closing keyword
     (``Closes #N`` …) anywhere in the body — only a PR body's are used.
@@ -141,6 +143,11 @@ DELIVERED_LINES = (
     "🚢 design-run delivered — branch and draft PR verified",
     "🚢 backlog-burn delivered — branch and draft PR verified",
 )
+#: The settle job's constant SHIP-LOCK first line: ``STOP_LOCK_MARKER`` + `` — settle claim`` in
+#: scripts/design-run-deliver.sh's ``SHIP_LOCK_SETTLE_BODY`` (drift-pinned by tests/test_digest.py).
+#: Its own class because both the settle stub and the burn's /ship-issue lock carry the
+#: ``design-run-ship-lock:v1`` marker, and only this line tells the stub apart.
+SETTLE_LOCK_LINE = "🚢 SHIP-LOCK — settle claim"
 #: The ``- pull request: <url>`` line ``post_success`` writes under the delivered lead.
 DELIVERED_PR_RE = re.compile(
     r"^- pull request: https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/pull/(?P<pr>[0-9]{1,7})$", re.M)
@@ -152,6 +159,7 @@ DELIVERED_PR_RE = re.compile(
 #: settle SHIP-LOCK is a constant stub with no ``**Design name:**``).
 LEAD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ship_lock_withdrawn", re.compile(r"^🚢 SHIP-LOCK WITHDRAWN\b")),
+    ("ship_lock_settle", re.compile("^" + re.escape(SETTLE_LOCK_LINE) + "$")),
     ("ship_lock", re.compile(r"^🚢 SHIP-LOCK\b")),
     ("declined", re.compile(r"^🚢 DECLINED\b")),
     ("deferred", re.compile(r"^🚢 DEFERRED\b")),
@@ -321,7 +329,8 @@ def classify_lead(body: str) -> tuple[Optional[str], dict[str, Any]]:
             if pr is None and m.group("delivered"):
                 pm = DELIVERED_PR_RE.search(body)
                 pr = pm.group("pr") if pm else None
-            fields["shipped_pr"] = int(pr) if pr else None
+            n = int(pr) if pr else 0
+            fields["shipped_pr"] = n if n >= 1 else None
         if name == "coach_round":
             fields["round"] = int(m.group("round"))
             fields["round_sub"] = m.group("sub") or None
