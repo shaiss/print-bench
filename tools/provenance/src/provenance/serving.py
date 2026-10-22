@@ -61,10 +61,15 @@ attempt-2 link 1 (00:34:31–00:38:50) and backlog-burn run 34654859877's
 attempt-2 link 1 (00:34:36–00:40:48) BOTH contain the #592 SHIP-LOCK at
 00:35:31 (the owner re-ran both at 00:34); #592 carries ``design-brief``
 only, so only the design run claims it and the backlog-burn window fails the
-key. Two rules keep a lock from making the wrong run's claim. The settle
-job's constant stub (``brief.claimed`` with ``fields.settle``, the
-``ship_lock_settle`` lead — #864) never counts: it is posted after every
-agent step, so the only windows that can hold it are other runs'. And an
+key. An Actions-bot ``brief.withdrawn`` that is the agent releasing its own
+claim (§0.6 edits the lock's first line to WITHDRAWN, keeping its
+``created_at``) counts like the lock it was. Two rules keep a lock from
+making the wrong run's claim. The settle job's constant stub
+(``brief.claimed`` with ``fields.settle``, the ``ship_lock_settle`` lead —
+#864) and routine-lock-cleanup.sh's dead-run notice (``brief.withdrawn``
+with ``fields.death``) never count and are never window-attributed: both
+are posted after every agent step, so the only windows that can hold them
+are other runs'. And an
 Actions-bot lock counts toward one routine only, told apart by its body: the
 design-run §2 contract names the design (``fields.design_name``; the
 #860–#864 runs' agent posted it as the Actions bot inside its window), the
@@ -88,7 +93,10 @@ author:
   pushed as the same login after the open, never do — and ``N`` is an issue
   that routine selects: a captured brief (``record.briefs``: only
   ``design-brief`` issues are captured) for design-run, any other issue for
-  backlog-burn, so the other routine's bundle commits on its branch do not;
+  backlog-burn, so the other routine's bundle commits on its branch do not.
+  (An owner-PAT-era agent that opened its own PR and pushed after it keeps
+  those commits through its owner claim; the claimless ones of that era —
+  #340, #586, #807 — touch no ``designs/`` file, so they are never records);
 * otherwise the trust stays ``login`` (an owner PR on any other branch
   inside a design-run window, a run that declined without claiming, the
   deliver workflow's owner ``pr.opened`` — no window contains it).
@@ -1084,7 +1092,9 @@ SHIP_ROUTINE_LABELS = {"design-run": "design-brief", "backlog-burn": "autonomy-o
 def run_claims(brief_records: list[dict[str, Any]], index: ReceiptIndex, *,
                owner_login: str) -> dict[int, int]:
     """``{ship-routine run id: claimed issue}`` (§2b): the one issue whose owner- or
-    Actions-bot-authored ``brief.claimed`` lies inside that run's windows; runs whose windows hold
+    Actions-bot-authored ``brief.claimed`` — or Actions-bot release of it (a ``brief.withdrawn``
+    that is no dead-run notice: the agent edits its lock's first line, or posts the release, in its
+    own window) — lies inside that run's windows; runs whose windows hold
     SHIP-LOCKs on zero or on two or more DISTINCT issues are absent. Several SHIP-LOCKs on one issue
     are one claim (review round 2, issue 4: design-run run 32026482297 holds #281's locks 5315682248
     and 5316408268)."""
@@ -1097,12 +1107,14 @@ def run_claims(brief_records: list[dict[str, Any]], index: ReceiptIndex, *,
         for e in rec.get("events") or []:
             login = (e.get("signals") or {}).get("login")
             fields = e.get("fields") or {}
-            if e.get("kind") != "brief.claimed" or login not in claimers or fields.get("settle"):
+            kind = e.get("kind")
+            released = kind == "brief.withdrawn" and login in ACTIONS_BOT_LOGINS and fields.get("death") is False
+            if (kind != "brief.claimed" and not released) or login not in claimers or fields.get("settle"):
                 continue
             issue = e.get("issue") or rec.get("issue")
             if not isinstance(issue, int):
                 continue
-            for w in containing_windows(index, ts=e.get("ts"), roles=KIND_ROLES["brief.claimed"],
+            for w in containing_windows(index, ts=e.get("ts"), roles=KIND_ROLES[kind],
                                         author_login=login, owner_login=owner_login):
                 if login != owner_login and (w.role == "design-run") != bool(fields.get("design_name")):
                     continue
@@ -1131,7 +1143,8 @@ def ship_key_ok(event: dict[str, Any], w: StepWindow, record: dict[str, Any],
     claimed = claims.get(w.run_id)
     kind = event.get("kind", "")
     if kind.startswith("brief."):
-        if kind == "brief.claimed" and (event.get("fields") or {}).get("settle"):
+        fields = event.get("fields") or {}
+        if (kind == "brief.claimed" and fields.get("settle")) or (kind == "brief.withdrawn" and fields.get("death")):
             return False
         return claimed is not None and (event.get("issue") or record.get("issue")) == claimed
     if kind == "pr.opened" or kind.startswith("commit."):

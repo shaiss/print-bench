@@ -153,7 +153,8 @@ true for the settle job's constant stub, #864 — posted after every agent step,
 so the serving join never window-attributes it or counts it as a claim),
 ``shipped``→brief.shipped,
 ``declined``/``deferred``/``ship_lock_withdrawn``→brief.declined/deferred/
-withdrawn (each with its own ``lead_fields.design_name``), timeline
+withdrawn (each with its own ``lead_fields.design_name``; a withdrawal's
+``fields.death`` marks routine-lock-cleanup's dead-run notice), timeline
 ``closed`` → brief.closed (``closed_by_pr`` when a PR in ``ctx.merge_shas``
 closed it: the closed event's ``commit_id`` is that PR's merge sha, or a
 ``referenced`` timeline event whose ``commit_id`` is a frozen PR's merge sha
@@ -1120,6 +1121,8 @@ def extract_brief(raw_brief: dict[str, Any], ctx: ExtractContext) -> dict[str, A
         fields: dict[str, Any] = {"design_name": _slug(lead_fields.get("design_name"))}
         if kind == "brief.claimed":
             fields["settle"] = comment["body"].get("lead") == "ship_lock_settle"
+        if kind == "brief.withdrawn":
+            fields["death"] = lead_fields.get("death") is True
         pr = None
         if kind == "brief.shipped":
             shipped = lead_fields.get("shipped_pr")

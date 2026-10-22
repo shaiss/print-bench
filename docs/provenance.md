@@ -488,7 +488,7 @@ Lead rules (first match wins, anchored at the start of the stripped lead line):
 
 | Class | Pattern | Fields |
 |---|---|---|
-| `ship_lock_withdrawn` | `🚢 SHIP-LOCK WITHDRAWN` | `design_name` |
+| `ship_lock_withdrawn` | `🚢 SHIP-LOCK WITHDRAWN` | `design_name`, `death` (the line starts with `🚢 SHIP-LOCK WITHDRAWN — scheduled run died`, `scripts/routine-lock-cleanup.sh`'s `DEATH_PREFIX`, drift-pinned: a dead-run notice posted after the agent steps, not an agent releasing its own claim) |
 | `ship_lock_settle` | exactly `🚢 SHIP-LOCK — settle claim` — the settle job's constant stub since #864 (`STOP_LOCK_MARKER` + ` — settle claim` in `scripts/design-run-deliver.sh`, drift-pinned). Its own class because the burn's /ship-issue lock carries the same `design-run-ship-lock:v1` marker | — |
 | `ship_lock` | `🚢 SHIP-LOCK` | `design_name` |
 | `declined` | `🚢 DECLINED` | `design_name` |
@@ -807,6 +807,7 @@ Kinds (closed): `brief.filed|claimed|shipped|declined|deferred|withdrawn|closed`
 
 Per-kind fields (all required, closed): `brief.*` `design_name` (+
 `settle` for claimed — true for the settle job's `ship_lock_settle` stub;
+`death` for withdrawn — true for routine-lock-cleanup's dead-run notice;
 `shipped_pr` for shipped; `state_reason`, `closed_by_pr` for closed);
 `pr.opened` `draft`; `pr.merged` `merge_method`, `merged_by_login`,
 `main_subject` (main's squash subject, owner decision 5); `commit.design|fix|
@@ -1045,9 +1046,13 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    that routine's opt-in label (the selector claims one issue per run; a run
    whose windows hold SHIP-LOCKs on two or more distinct issues claims
    nothing; several locks on one issue, like #281's two in run 32026482297,
-   are one claim). The settle job's stub (`settle: true`) never counts — it
-   is posted after every agent step, so only other runs' windows can hold it
-   — and an Actions-bot lock counts toward one routine: toward design-run
+   are one claim). An Actions-bot `brief.withdrawn` that is the agent
+   releasing its own claim (§0.6 edits the lock's first line to WITHDRAWN,
+   keeping its time) counts as the lock it was. The settle job's stub
+   (`settle: true`) and routine-lock-cleanup's dead-run notice (`death:
+   true`) never count and are never window-attributed — both are posted
+   after every agent step, so only other runs' windows can hold them — and
+   an Actions-bot lock counts toward one routine: toward design-run
    when it names the design (the #860–#864 runs' agent posted its §2
    contract as the bot), toward backlog-burn when it does not (the
    /ship-issue contract names none), so the burn's lock on a brief carrying
@@ -1063,7 +1068,9 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    the deliverer opens the PR after the run ends, so the agent's own commits
    all predate it, while the design coach's iterations (the same login,
    pushed after the open) and the other routine's bundle commits do not
-   join. Anything else stays `login`: an owner PR on another branch inside a
+   join. (An owner-PAT-era agent that pushed after opening its own PR keeps
+   those commits through its owner claim; the claimless ones of that era —
+   #340, #586, #807 — touch no `designs/` file and are never records.) Anything else stays `login`: an owner PR on another branch inside a
    routine window, a run that declined without claiming, a design-run settle
    lock, stop or delivered comment that lands inside a backlog-burn window
    (before this key it became the burn's work at trust `window`). `claude[bot]` keeps the plain rule. Run 34661448637 claimed

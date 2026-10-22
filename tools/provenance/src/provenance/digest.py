@@ -65,7 +65,10 @@ for a settle stub) where ``@2`` would classify differently):
     full-line marker) under :data:`LEAD_RULES`, or ``null``.
 ``lead_fields``
     validated fields the lead's class carries (``design_name``,
-    ``shipped_pr``, ``round``, ``round_sub``); ``{}`` otherwise. A
+    ``shipped_pr``, ``death``, ``round``, ``round_sub``); ``{}`` otherwise. A
+    ``ship_lock_withdrawn`` lead's ``death`` is true when the line starts with
+    :data:`DEATH_PREFIX` — routine-lock-cleanup.sh's notice for a run that
+    died, as opposed to an agent releasing its own claim. A
     ``shipped`` lead takes ``shipped_pr`` from the lead line (``✅ **SHIPPED …
     #N``, ``📦 **Draft PR opened: #N**``) or, for the delivery step's
     ``🚢 <routine> delivered — …`` line, from the body's ``- pull request:
@@ -148,6 +151,10 @@ DELIVERED_LINES = (
 #: Its own class because both the settle stub and the burn's /ship-issue lock carry the
 #: ``design-run-ship-lock:v1`` marker, and only this line tells the stub apart.
 SETTLE_LOCK_LINE = "🚢 SHIP-LOCK — settle claim"
+#: scripts/routine-lock-cleanup.sh's ``DEATH_PREFIX`` (drift-pinned by tests/test_digest.py): the
+#: first line of the withdrawal it posts for a run that died, after the run's agent steps. Every
+#: other ``SHIP-LOCK WITHDRAWN`` is an agent releasing its own claim, edited or posted in its window.
+DEATH_PREFIX = "🚢 SHIP-LOCK WITHDRAWN — scheduled run died"
 #: The ``- pull request: <url>`` line ``post_success`` writes under the delivered lead.
 DELIVERED_PR_RE = re.compile(
     r"^- pull request: https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/pull/(?P<pr>[0-9]{1,7})$", re.M)
@@ -331,6 +338,8 @@ def classify_lead(body: str) -> tuple[Optional[str], dict[str, Any]]:
                 pr = pm.group("pr") if pm else None
             n = int(pr) if pr else 0
             fields["shipped_pr"] = n if n >= 1 else None
+        if name == "ship_lock_withdrawn":
+            fields["death"] = line.startswith(DEATH_PREFIX)
         if name == "coach_round":
             fields["round"] = int(m.group("round"))
             fields["round_sub"] = m.group("sub") or None

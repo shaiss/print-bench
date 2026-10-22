@@ -243,6 +243,33 @@ def test_actions_bot_ship_artifacts_need_the_key():
     assert one(opened_720, [settle]) == ("login", None)
     assert one(pr(801, [], "2026-09-12T06:36:00Z"), [settle]) == ("window", 34654859999)
 
+    # §0.6: the burn agent edits its lock to WITHDRAWN (keeping its created_at) and posts DECLINED, both
+    # in its window — the release is still its claim, so both join. routine-lock-cleanup's dead-run
+    # notice never claims and is never the window's, even on an issue that run did claim; an owner's
+    # release keeps the pre-#858 rule (no claim).
+    dual = ("autonomy-ok", "design-brief")
+    released = H.brief_record(740, [
+        H.event("issuecomment:9100003740", "brief.withdrawn", "2026-09-12T06:35:30Z", login=bot, issue=740,
+                fields={"design_name": None, "death": False}),
+        H.event("issuecomment:9100004740", "brief.declined", "2026-09-12T06:38:00Z", login=bot, issue=740,
+                fields={"design_name": None})], labels=dual)
+    assert run_claims([released], idx, owner_login=OWNER_LOGIN) == {34654859999: 740}
+    assert [(e["trust"], e["runtime"]["run_id"]) for e in annotate(released, idx=idx, briefs=[released])["events"]] \
+        == [("window", 34654859999)] * 2
+    died = H.brief_record(741, [
+        H.event("issuecomment:9100003741", "brief.claimed", "2026-09-12T06:35:00Z", login=bot, issue=741,
+                fields={"design_name": None, "settle": False}),
+        H.event("issuecomment:9100004741", "brief.withdrawn", "2026-09-12T06:39:00Z", login=bot, issue=741,
+                fields={"design_name": None, "death": True})], labels=dual)
+    assert run_claims([died], idx, owner_login=OWNER_LOGIN) == {34654859999: 741}
+    assert [(e["kind"], e["trust"]) for e in annotate(died, idx=idx, briefs=[died])["events"]] == \
+        [("brief.claimed", "window"), ("brief.withdrawn", "login")]
+    notice_only = H.brief_record(742, [died["events"][1] | {"issue": 742}], labels=dual)
+    assert run_claims([notice_only], idx, owner_login=OWNER_LOGIN) == {}
+    by_owner = H.brief_record(743, [released["events"][0] | {"issue": 743, "signals": H.signals(OWNER_LOGIN)}],
+                              labels=dual)
+    assert run_claims([by_owner], idx, owner_login=OWNER_LOGIN) == {}
+
     # Scenario C: the burn's bot lock on a dual-labelled brief inside BOTH the burn and design-run
     # windows (00:36) is the burn's claim only — the burn's lock names no design. The deliverer's
     # owner pr.opened on its branch (00:50, inside the design run only) stays login, and the design

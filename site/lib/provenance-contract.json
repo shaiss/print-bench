@@ -322,6 +322,9 @@
        "min": 1,
        "null": true
       },
+      "death": {
+       "t": "bool"
+      },
       "round": {
        "t": "int",
        "min": 0,
@@ -911,6 +914,10 @@
     "t": "ref",
     "to": "design",
     "null": true,
+    "tag": "D"
+   },
+   "death": {
+    "t": "bool",
     "tag": "D"
    }
   },

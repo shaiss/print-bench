@@ -167,6 +167,7 @@
    },
    "episode": "E0:brief:520",
    "fields": {
+    "death": false,
     "design_name": "b-hinge"
    },
    "head_sha": null,

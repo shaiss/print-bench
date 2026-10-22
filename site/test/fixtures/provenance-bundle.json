@@ -1,5 +1,5 @@
 {
- "content_sha256": "e4158bd80f6151a02f85458cb739743cb2c68ce70fc916b6ef96a13a7ebe890a",
+ "content_sha256": "c6ecb34f83a4c8eaf0f86fa78998c655bc69ecd7d12a533e9bf0bfabfbe56c0e",
  "contract": 1,
  "evidence_sha": "0000000000000000000000000000000000000000",
  "extractor": "provenance-extract 2",
@@ -2208,6 +2208,7 @@
      },
      "episode": "E0:brief:520",
      "fields": {
+      "death": false,
       "design_name": "b-hinge"
      },
      "head_sha": null,
@@ -2829,7 +2830,7 @@
  },
  "views_sha256": {
   "alpha-clip": "b0a028339d89973bf29aa2b9ee3bf4a1eae16ffd187e3327937ef6a64a42e3b8",
-  "beta-hinge": "03af3b41b12335f77dd4e7578d9aad1d4d824f524051230c6b54cced9e6fbabe",
+  "beta-hinge": "f2b5a4c92730ec3249a90ae6dec7c20093b6305b3414c1d6d08c6c6bd8ff81d6",
   "gamma-stand": "27c36645f78fcbea8e6f45faaa997fd4298f1a2fb34279de1de25579f7e17c82"
  }
 }

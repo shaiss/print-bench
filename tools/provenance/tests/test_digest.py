@@ -131,6 +131,23 @@ def test_contract_lead_carries_the_design_name():
     assert digest.classify_lead(_settle_body(drifted))[0] != "ship_lock_settle"
 
 
+def test_death_notice_is_told_from_a_release():
+    """routine-lock-cleanup.sh's dead-run withdrawal (DEATH_PREFIX, posted after the agent steps) sets
+    ``death``; an agent's own release of its claim does not. Drift-pinned to the script."""
+    text = (REPO / "scripts" / "routine-lock-cleanup.sh").read_text(encoding="utf-8")
+    prefix = re.search(r"^DEATH_PREFIX='([^']*)'$", text, re.M)
+    line = re.search(r'^WITHDRAW_LINE="([^"\n]*)', text, re.M)
+    assert prefix and line and prefix.group(1) == digest.DEATH_PREFIX
+    assert digest.classify_lead(line.group(1) + "\n\n<!-- design-run-ship-lock:v1 -->\n") == \
+        ("ship_lock_withdrawn", {"death": True, "design_name": None})
+    for own in ("🚢 SHIP-LOCK WITHDRAWN — this run is stopping without shipping",
+                "🚢 SHIP-LOCK WITHDRAWN — shipping this as one PR.\n\n**Design name:** vent-cap"):
+        assert digest.classify_lead(own)[1]["death"] is False, own
+    drifted = text.replace("DEATH_PREFIX='🚢 SHIP-LOCK WITHDRAWN — scheduled run died'",
+                           "DEATH_PREFIX='🚢 SHIP-LOCK WITHDRAWN — routine died'")
+    assert re.search(r"^DEATH_PREFIX='([^']*)'$", drifted, re.M).group(1) != digest.DEATH_PREFIX
+
+
 def _settle_body(text: str) -> str:
     """``SHIP_LOCK_SETTLE_BODY`` as bash expands it, from scripts/design-run-deliver.sh's own variables."""
     lock = re.search(r"^STOP_LOCK_MARKER='([^']*)'$", text, re.M)

@@ -218,6 +218,8 @@ def brief_from_raw(raw: dict) -> dict[str, Any]:
             fields["shipped_pr"] = lead.get("shipped_pr")
         if kind == "brief.claimed":
             fields["settle"] = c["body"]["lead"] == "ship_lock_settle"
+        if kind == "brief.withdrawn":
+            fields["death"] = lead.get("death") is True
         evs.append(event(f"issuecomment:{c['id']}", kind, c["created_at"], login=c["user"]["login"],
                          issue=n, url=f"{url}#issuecomment-{c['id']}", fields=fields))
     return brief_record(n, evs, labels=issue["labels"], created_at=issue["created_at"])
