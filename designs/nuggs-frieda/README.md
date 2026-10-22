@@ -49,7 +49,10 @@ as the bore wall itself — was considered and refused; the reasoning is in
   internals print as short anchored bridges
 - **Orientation:** upright, exactly as rendered — bore axis vertical,
   standing on one port's sector tips
-- **Brim:** recommended (180 mm tall part on three small sector tips)
+- **Brim:** the model includes three small removable first-layer pads
+  under the outer-sector tips (outboard of the coupling OD — they do not
+  change the port fit). Snip them off after printing. A slicer brim is
+  still fine if you prefer; set `brim_ear_r = 0` to omit the pads.
 
 ## Parameters
 
@@ -58,6 +61,7 @@ as the bore wall itself — was considered and refused; the reasoning is in
 | `name` | `"FRIEDA"` | The word. Capitals A–Z only (every glyph must anchor rail to rail; the file explains) |
 | `letter_size` | 80 | Font size in mm; cap height ≈ 0.69 × this |
 | `letter_kern` | `[8,0,0,8,0]` | Per-gap weld: mm removed after each glyph so free arm ends (F, E) fuse into the next stem instead of printing as cantilevers |
+| `brim_ear_r` | 3.0 mm | Radius of the removable first-layer pads under the sector tips; `0` omits them |
 | `port_tol` | 0.30 mm | The one fit knob of the whole port standard. Tune on the coupon in ±0.05 steps |
 | `straight_len` | 160 mm | Face-to-face tube length. 160 = drop-in for the nuggs straight |
 | `bore_d` | 80 mm | Internal bore. Asserted ≥ 70 mm (welfare floor) by the library — never lower that floor |
