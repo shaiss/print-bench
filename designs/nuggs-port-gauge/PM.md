@@ -51,10 +51,11 @@ tiers: none — a calibration tool.
 
 1. Field-test the ladder on a real printer and log the winner — first thing
    after merge; no further work on this design before the first FIELD-TEST
-   entry lands. On that first plate: note whether adjacent rungs felt
-   identical (if ties are common, add an expectation line); note whether
-   any rung needs a label re-wipe mid-session; if a glyph fuses into a lug
-   edge, raise `plate_margin` by +1 mm (centres unmoved).
+   entry lands. Acceptance question for that first plate: did adjacent
+   rungs feel identical? (If ties are common, add an expectation line.)
+   Also note whether any rung needs a label re-wipe mid-session; if a
+   glyph fuses into a lug edge, raise `plate_margin` by +1 mm (centres
+   unmoved).
 2. Optional physical 0.10 negative-control step if users ask.
 3. Seed a `printer.conf` recipe from a decisive field result.
 4. Fuller quarter-section cutaway shot (J7 + Drik r2): the committed cutaway reads as one shell rather than a mated pair; preview legibility only.

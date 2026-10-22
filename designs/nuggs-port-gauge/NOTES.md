@@ -135,8 +135,8 @@ Tuning steps after a real ladder print:
 - **Seam:** scarf on both ladder plates and the reference head — a stacked
   Back ridge is 0.1–0.2 mm and biases every reading the same way; adjacent
   rings kiss at ~0.2 mm (`step_pitch` 97), so scarf is required.
-- **Brim:** optional 5 mm; check the plate doesn't rock on a flat table
-  before gauging.
+- **Brim:** 5 mm recommended on both ladder plates, the coupon, and the
+  head; check the plate doesn't rock on a flat table before gauging.
 - **First use:** debur the head's port face (blade or fingernail) before
   the first session.
 
