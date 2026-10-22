@@ -348,7 +348,7 @@ jobs:
           # label-helper.sh refuses to write to any issue not in this set, so a
           # prompt-injected agent cannot touch an issue it was never handed.
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -373,7 +373,7 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -396,7 +396,7 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -427,7 +427,7 @@ jobs:
         env:
           # Same trusted selection bound as the Z.AI steps (see link 1).
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -451,7 +451,7 @@ jobs:
         continue-on-error: true
         env:
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -477,7 +477,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_token: ${{ github.token }}
@@ -503,7 +503,7 @@ jobs:
           ANTHROPIC_BASE_URL: https://openrouter.ai/api
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENROUTER_API_KEY }}
           LABELER_SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
-        uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_token: ${{ github.token }}

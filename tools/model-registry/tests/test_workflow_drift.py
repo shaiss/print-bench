@@ -743,13 +743,15 @@ class Routine(NamedTuple):
                 step sets none), the `--settings` deny backstop, the
                 `--mcp-config` server (None for a routine whose write is a
                 shell wrapper, or none) and the exact `--allowedTools` list
-                (None for the SHIP-LOCK routines, which run the whole skill
-                under bypassPermissions). The tail runs only on the
-                fall-through path where nobody is watching, so a tail step
-                that shed its backstop or widened its allow-list is exactly
-                the drift these fields pin — the same surface every
-                `scripts/*-perms-check.sh` holds over the FILES, none of
-                which reads a workflow.
+                (the two SHIP-LOCK routines are dontAsk over their own deny
+                backstops — design-run since #859, backlog-burn since #863,
+                whose backstop also denies the #862 label-steering verbs —
+                so neither agent job can push, open PRs, or hold the push
+                PAT). The tail runs only on the fall-through path where
+                nobody is watching, so a tail step that shed its backstop or
+                widened its allow-list is exactly the drift these fields pin
+                — the same surface every `scripts/*-perms-check.sh` holds
+                over the FILES, none of which reads a workflow.
     """
     workflow: str
     chain: str
@@ -764,6 +766,10 @@ class Routine(NamedTuple):
     backstop: str | None
     mcp_config: str | None
     allowed: str | None
+    # Job that holds the provider-triage step when it is not `job`. The
+    # exhaustion pin reads that job's `if:` and normalizes
+    # `needs.<job>.outputs.*` back onto the walk job's step outputs.
+    triage_job: str | None = None
 
 
 # The provider-triage step every routine carries (#347): its `if:` is an
@@ -783,18 +789,32 @@ ROUTINES = {
         resolve_id="chain", prefix="run",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
-        # The SHIP-LOCK routines run the whole skill: no backstop, no
-        # allow-list, bypassPermissions on every link.
-        permission_mode="bypassPermissions", backstop=None, mcp_config=None,
-        allowed=None),
+        # #859: dontAsk so the deny file is honored (bypassPermissions
+        # ignores denies). The allow-list is the toolchain; the backstop
+        # only refuses git push and gh pr create. The push PAT is not on
+        # these steps.
+        permission_mode="dontAsk",
+        backstop=".claude/design-run-settings.json",
+        mcp_config=None,
+        allowed="Bash,Read,Write,Edit,Glob,Grep,Skill",
+        triage_job="triage"),
     "backlog-burn": Routine(
         workflow="backlog-burn.yml", chain="backlog-burn",
         conf=".github/backlog-burn.conf", job="burn",
         resolve_id="chain", prefix="ship",
         layout=("zai", "zai", "zai", "anthropic", "anthropic"),
         gates=("Turn a dead agentic run red", TRIAGE_STEP), ship_lock=True,
-        permission_mode="bypassPermissions", backstop=None, mcp_config=None,
-        allowed=None),
+        # #863: the #859/#861 surface — dontAsk over a deny backstop (the
+        # backstop also refuses the #862 steering verbs: gh issue edit /
+        # gh api / curl naming autonomy-ok or design-brief), the
+        # toolchain allow-list, and no PAT anywhere in the workflow: the
+        # deliver workflow is the only PAT holder, and the burn job cannot
+        # push or open PRs.
+        permission_mode="dontAsk",
+        backstop=".claude/backlog-burn-settings.json",
+        mcp_config=None,
+        allowed="Bash,Read,Write,Edit,Glob,Grep,Skill",
+        triage_job="triage"),
     "chunker": Routine(
         workflow="chunker.yml", chain="chunker",
         conf=".github/chunker.conf", job="chunk",
@@ -1107,10 +1127,12 @@ ANDON_AI_JOBS = {
     ("auto-review.yml", "pm-triage"),
     ("auto-review.yml", "design-coach"),
     ("backlog-burn.yml", "burn"),
+    ("backlog-burn.yml", "triage"),
     ("backlog-groomer.yml", "groom"),
     ("chunker.yml", "chunk"),
     ("ci.yml", "regen"),
     ("design-run.yml", "run"),
+    ("design-run.yml", "triage"),
     ("growth-twitter.yml", "drain"),
     ("labeler.yml", "label"),
     ("lifestyle-clip.yml", "generate"),
@@ -1452,22 +1474,22 @@ def test_cord_conjunct_helper_rejects_a_non_governing_leg(cond):
 
 
 def test_andon_guard_rejects_a_leg_that_is_not_a_top_level_conjunct():
-    # NEGATIVE CONTROL E (in-memory): model-smoke's `leg && (A || B)` with its
-    # parentheses dropped reads `leg && A || B` — GitHub runs the job on B
-    # with the cord pulled. A substring pin would bless it; the guard must
-    # fail naming the job and the shape.
+    # NEGATIVE CONTROL E (in-memory): model-smoke's `leg && trust` with the
+    # leg buried in `(leg && trust) || dispatch` — GitHub runs the job on
+    # dispatch with the cord pulled. A substring pin would bless it; the
+    # guard must fail naming the job and the shape. (Issue #869 moved the
+    # second conjunct from the fork/dispatch OR to needs.trust.)
     texts = _all_workflow_texts()
     victim = "model-smoke.yml"
     folded = (
         f"      {ANDON_JOB_LEG} &&\n"
-        "      (github.event_name == 'workflow_dispatch' ||\n"
-        "       github.event.pull_request.head.repo.full_name == github.repository)\n")
-    flat = (
-        f"      {ANDON_JOB_LEG} &&\n"
-        "      github.event_name == 'workflow_dispatch' ||\n"
-        "      github.event.pull_request.head.repo.full_name == github.repository\n")
+        "      needs.trust.outputs.trusted == 'true'\n")
+    buried = (
+        f"      ({ANDON_JOB_LEG} &&\n"
+        "      needs.trust.outputs.trusted == 'true') ||\n"
+        "      github.event_name == 'workflow_dispatch'\n")
     assert texts[victim].count(folded) == 1, "tamper target not found — the fixture is stale"
-    texts[victim] = texts[victim].replace(folded, flat, 1)
+    texts[victim] = texts[victim].replace(folded, buried, 1)
     with pytest.raises(AssertionError,
                        match=r"model-smoke\.yml \[smoke\].*not a top-level conjunct"):
         _assert_every_ai_job_gates_on_the_cord(texts)
@@ -2484,7 +2506,7 @@ def _outcome_expressions(text: str) -> dict[str, list[str]]:
     # (the CodeQL ReDoS finding on the original pattern) — one `\n` per line,
     # matched explicitly, keeps each repetition deterministic.
     for m in re.finditer(
-            r"^([ \t]+)(AGENT_OUTCOME|RUN|SHIP):[ \t]*\$\{\{(.+?)\}\}[ \t]*$",
+            r"^([ \t]+)(AGENT_OUTCOME|RUN|SHIP|walk_outcome):[ \t]*\$\{\{(.+?)\}\}[ \t]*$",
             text, re.MULTILINE | re.DOTALL):
         exprs.setdefault(m.group(2), []).append(m.group(3))
     return exprs
@@ -2747,7 +2769,9 @@ def test_routine_agent_outcome_is_assigned_identically_everywhere():
     lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
     assert lock_rows, "no SHIP-LOCK routine in the ROUTINES table"
     for row in lock_rows:
-        exprs = _outcome_expressions(_routine_job_text(_routine_text(row.workflow), row))
+        # design-run's lock cleanup lives in the settle job, so the two
+        # AGENT_OUTCOME assignments are not in the walk job. Scan the file.
+        exprs = _outcome_expressions(_routine_text(row.workflow))
         found = [e.strip() for e in exprs.get("AGENT_OUTCOME", [])]
         assert len(found) == 2, (
             f"{row.workflow}: expected AGENT_OUTCOME assigned exactly twice (lock "
@@ -2915,8 +2939,9 @@ def _assert_ship_lock_gate_follows_disposition(
     workflow = row.workflow
     where = f"{row.workflow} [{row.job}]"
     job = _routine_job_text(text, row)
+    gate_job = _job_containing_step(text, step_name)
     walk_ids = _routine_walk_ids(reg, row, job)
-    cond = _gate_condition(job, step_name, where)
+    cond = _normalize_cross_job_outputs(_gate_condition(gate_job, step_name, where))
     # The legs the walk gates require for the same reasons: the keyless
     # degraded path (every link skipped, the pinned ::notice:: skip) must
     # not go red, and a paused-in-git routine must not fire its gates.
@@ -2950,11 +2975,79 @@ def _assert_ship_lock_gate_follows_disposition(
             "pushed nothing as healthy (#538)")
     # After stripping the legs the simulation fixes green, the surviving
     # clause is exactly the two disposition legs — nothing else sneaks in.
+    # design-run's run job also carries `steps.bundle.outputs.pending !=
+    # 'true'`: while a bundle is waiting on the deliver job the run job must
+    # not score the run dead. That leg is not a walk outcome and not a
+    # disposition, so it is removed before the exact-tail compare. A routine
+    # without the leg is unchanged.
     sim_cond = _strip_fixed_green_legs(cond)
+    sim_cond = re.sub(
+        r"\s*&&\s*steps\.bundle\.outputs\.pending\s*!=\s*'true'",
+        "",
+        sim_cond,
+    )
+    # design-run restores nothing inside the agent job (#859 follow-up).
+    # The fresh triage job checks the START_SHA checkout out before the
+    # probe. A failed check must not run that step. The leg is a
+    # prerequisite, not a disposition, so it is removed before the
+    # exact-tail compare. The in-job restore leg is still stripped so a
+    # regression that puts it back does not hide inside the tail.
+    sim_cond = re.sub(
+        r"\s*&&\s*steps\.restore_triage\.outcome\s*==\s*'success'",
+        "",
+        sim_cond,
+    )
+    sim_cond = re.sub(
+        r"\s*&&\s*steps\.verify_triage\.outcome\s*==\s*'success'",
+        "",
+        sim_cond,
+    )
     assert sim_cond.strip() == _DISPOSITION_TAIL, (
         f"{where}: the '{step_name}' condition does not reduce to the "
         f"disposition tail ({_DISPOSITION_TAIL!r}) after stripping the "
         f"fixed-green legs: {sim_cond!r}")
+
+
+def _normalize_cross_job_outputs(cond: str) -> str:
+    """Map a fresh job's `needs.<job>.outputs.*` back onto the walk job's steps.
+
+    design-run's and backlog-burn's provider-triage steps live in their own
+    jobs (design-run names its walk job `run`, backlog-burn `burn`), so the
+    disposition and arming legs are job outputs. The SHIP-LOCK pin still
+    compares them to the walk job's step outputs.
+    """
+    repls = (
+        ("needs.run.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
+        ("needs.run.outputs.declined", "steps.lock_cleanup.outputs.declined"),
+        ("needs.burn.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
+        ("needs.burn.outputs.declined", "steps.lock_cleanup.outputs.declined"),
+        ("needs.settle.outputs.delivered", "steps.lock_cleanup.outputs.delivered"),
+        ("needs.settle.outputs.declined", "steps.lock_cleanup.outputs.declined"),
+        ("needs.run.outputs.key_present", "steps.policy.outputs.key_present"),
+        ("needs.run.outputs.enabled", "steps.policy.outputs.enabled"),
+        ("needs.run.outputs.issue", "steps.select.outputs.issue"),
+        ("needs.burn.outputs.key_present", "steps.policy.outputs.key_present"),
+        ("needs.burn.outputs.enabled", "steps.policy.outputs.enabled"),
+        ("needs.burn.outputs.issue", "steps.select.outputs.issue"),
+        ("needs.run.outputs.bundle_pending", "steps.bundle.outputs.pending"),
+        ("needs.burn.outputs.bundle_pending", "steps.bundle.outputs.pending"),
+    )
+    for src, dst in repls:
+        cond = cond.replace(src, dst)
+    return cond
+
+
+def _job_containing_step(text: str, step_name: str) -> str:
+    """The job block whose steps include `name: <step_name>`."""
+    found = []
+    for block in _job_blocks(text).values():
+        if re.search(
+                r"name:[ \t]*" + re.escape(step_name) + r"(?:[ \t]*#.*)?\n",
+                block):
+            found.append(block)
+    assert len(found) == 1, (
+        f"expected one job containing step {step_name!r}, found {len(found)}")
+    return found[0]
 
 
 def _gate_chunk(job_text: str, step_name: str) -> str:
@@ -2966,12 +3059,39 @@ def _gate_chunk(job_text: str, step_name: str) -> str:
 
 def _gate_without_leg(row: Routine, step_name: str, leg: str) -> str:
     """A copy of the workflow with one `&& <leg>` line removed from the named
-    gate's `if:` — the leg is read off the live gate, never hand-copied."""
+    gate's `if:` — the leg is read off the live gate, never hand-copied.
+
+    The gate may live in a sibling job (design-run's triage job). A
+    cross-job `needs.run.outputs` spelling of the same leg is the tamper
+    target when the walk-job spelling is not in that step.
+    """
     text = _routine_text(row.workflow)
-    chunk = _gate_chunk(_routine_job_text(text, row), step_name)
-    m = re.search(r"^[ \t]*&& " + leg + r"\n", chunk, re.MULTILINE)
-    assert m, f"tamper target not found — the gate's `{leg}` leg moved shape"
-    tampered = text.replace(chunk, chunk.replace(m.group(0), "", 1), 1)
+    chunk = None
+    for block in _job_blocks(text).values():
+        chunks = [c for c in re.split(r"\n      - ", block) if f"name: {step_name}" in c]
+        if len(chunks) == 1:
+            chunk = chunks[0]
+            break
+    assert chunk is not None, f"expected one '{step_name}' step, found none"
+    patterns = [leg]
+    aliased = (leg
+               .replace(r"steps\.lock_cleanup\.outputs\.", r"needs\.run\.outputs\.")
+               .replace(r"steps\.policy\.outputs\.", r"needs\.run\.outputs\.")
+               .replace(r"steps\.select\.outputs\.", r"needs\.run\.outputs\.")
+               .replace(r"steps\.bundle\.outputs\.", r"needs\.run\.outputs\."))
+    if aliased != leg:
+        patterns.append(aliased)
+    settled = leg.replace(
+        r"steps\.lock_cleanup\.outputs\.", r"needs\.settle\.outputs\.")
+    if settled != leg:
+        patterns.append(settled)
+    matched = None
+    for pat in patterns:
+        matched = re.search(r"^[ \t]*&& " + pat + r"\n", chunk, re.MULTILINE)
+        if matched:
+            break
+    assert matched, f"tamper target not found — the gate's `{leg}` leg moved shape"
+    tampered = text.replace(chunk, chunk.replace(matched.group(0), "", 1), 1)
     assert tampered != text, "tamper did not land — the fixture is stale"
     return tampered
 
@@ -2999,63 +3119,58 @@ def test_gate_guard_rejects_a_red_step_without_its_arming_leg():
         _assert_gate_fires_on_whole_walk_failure(reg, row, tampered, EXHAUSTED_RED_STEP)
 
 
-def _assert_burn_checkless_notice_follows_delivery(
-        reg: Registry, row: Routine, text: str) -> None:
-    """The burn's checkless-PR notice must fire on the lock cleanup's
-    `delivered` output (#538) — the artifact-derived fact that a branch or
-    closing PR exists — never on the walk's success: an exit-0 ship link
-    that pushed nothing would otherwise produce a notice about a draft PR
-    that does not exist. Factored out for the negative control."""
-    workflow = row.workflow
-    where = f"{row.workflow} [{row.job}]"
-    job = _routine_job_text(text, row)
-    walk_ids = _routine_walk_ids(reg, row, job)
-    cond = _gate_condition(job, "Note a checkless draft PR (no CI-triggering PAT)", where)
-    assert re.search(
-        r"steps\.lock_cleanup\.outputs\.delivered\s*==\s*'true'", cond), (
-        f"{where}: the checkless-PR notice no longer fires on "
-        "steps.lock_cleanup.outputs.delivered == 'true' — it must key on the "
-        "artifact-derived disposition, not the walk")
-    assert re.search(r"steps\.policy\.outputs\.key_present\s*==\s*'1'", cond), (
-        f"{where}: the checkless-PR notice lost its key_present leg")
-    assert re.search(r"steps\.policy\.outputs\.enabled\s*==\s*'true'", cond), (
-        f"{where}: the checkless-PR notice lost its arming leg")
-    for sid in walk_ids:
-        assert f"steps.{sid}.outcome" not in cond, (
-            f"{where}: the checkless-PR notice reads steps.{sid}.outcome — "
-            "it must key on the delivered disposition, not the walk's "
-            "exit-code success (#538)")
+def _assert_ship_routine_holds_no_pat(text: str, workflow: str) -> None:
+    """#863 (the #859/#861 pattern): a workflow that runs a /ship-issue-style
+    agent must not reference the push PAT at all. Every agent wire runs on
+    the ephemeral `github.token` — an off-issue label (#862) could otherwise
+    steer which issue a PAT-holding agent works on, and a PR the agent
+    opened itself would carry no CI contexts. The PAT lives only in the
+    separate deliver workflow, which runs no agent code. Factored out for
+    the negative control."""
+    assert "secrets.GH_TOKEN" not in text, (
+        f"{workflow}: references secrets.GH_TOKEN — the push PAT belongs "
+        "only in the delivery workflow, never in the workflow that runs "
+        "the agent (issues #859/#863)")
+    assert "HAS_GH_TOKEN" not in text, (
+        f"{workflow}: gates a step on HAS_GH_TOKEN — a PAT-derived key "
+        "gate has no meaning once the workflow holds no PAT (issues "
+        "#859/#863)")
+    wires = re.findall(r"github_token:[ \t]*([^\n]+)", text)
+    assert wires, f"{workflow}: no claude-code-action step found"
+    for wire in wires:
+        assert wire.strip() == "${{ github.token }}", (
+            f"{workflow}: an agent step wires github_token: {wire.strip()!r} "
+            "— every agent step must run on the ephemeral github.token, "
+            "which cannot push or open PRs (issues #859/#863)")
 
 
-def test_burn_checkless_pr_notice_follows_the_delivered_disposition():
-    reg = Registry.load(str(REGISTRY))
+def test_ship_routine_workflows_hold_no_push_pat():
+    # Both SHIP-LOCK routines: the burn joins design-run on the isolated
+    # surface (#859 pinned design-run; #863 brings the burn, which runs
+    # hourly, to the same bar).
+    lock_rows = [r for r in ROUTINES.values() if r.ship_lock]
+    assert len(lock_rows) == 2, (
+        "expected exactly the two SHIP-LOCK routines on the isolated "
+        "PAT-free surface — a third needs its deliver workflow first"
+    )
+    for row in lock_rows:
+        _assert_ship_routine_holds_no_pat(
+            _routine_text(row.workflow), row.workflow)
+
+
+def test_ship_routine_pat_guard_fires_on_a_pat_wire():
+    # NEGATIVE CONTROL: re-introduce the pre-#863 exposure — one agent step
+    # wired to the PAT — and require the guard to FAIL. A guard that cannot
+    # fail proves nothing.
     row = ROUTINES["backlog-burn"]
-    _assert_burn_checkless_notice_follows_delivery(
-        reg, row, _routine_text(row.workflow))
-
-
-def test_burn_checkless_notice_guard_rejects_a_walk_clause():
-    # NEGATIVE CONTROL: swap the notice's delivered leg back to the pre-#538
-    # `(walk) == 'success'` clause — an exit-0 run that delivered nothing
-    # would then trigger a notice about a draft PR that does not exist. The
-    # no-walk-read rule must reject it.
-    reg = Registry.load(str(REGISTRY))
-    row = ROUTINES["backlog-burn"]
-    workflow = row.workflow
-    text = _routine_text(workflow)
-    job = _routine_job_text(text, row)
-    chunk = _gate_chunk(job, "Note a checkless draft PR (no CI-triggering PAT)")
-    live = _live_walk_expression(job, workflow)
-    tampered_chunk = re.sub(
-        r"&& steps\.lock_cleanup\.outputs\.delivered == 'true'",
-        f"&& ({live}) == 'success'", chunk, count=1)
-    assert tampered_chunk != chunk, (
-        "tamper did not land — the notice's delivered leg moved shape")
-    tampered = text.replace(chunk, tampered_chunk, 1)
-    # The delivered-leg presence rule fires first (the swap removed the
-    # leg); both it and the no-walk-read rule name the same cause.
-    with pytest.raises(AssertionError, match="artifact-derived disposition"):
-        _assert_burn_checkless_notice_follows_delivery(reg, row, tampered)
+    text = _routine_text(row.workflow)
+    tampered = text.replace(
+        "github_token: ${{ github.token }}",
+        "github_token: ${{ secrets.GH_TOKEN }}", 1)
+    assert tampered != text, (
+        "tamper did not land — the burn's agent token wire moved shape")
+    with pytest.raises(AssertionError, match="secrets.GH_TOKEN"):
+        _assert_ship_routine_holds_no_pat(tampered, row.workflow)
 
 
 def test_ship_lock_gate_guard_rejects_a_dropped_disposition_leg():
@@ -3092,7 +3207,8 @@ def test_ship_lock_gate_guard_rejects_a_walk_clause():
         workflow = row.workflow
         text = _routine_text(workflow)
         job = _routine_job_text(text, row)
-        chunk = _gate_chunk(job, step_name)
+        gate_job = _job_containing_step(text, step_name)
+        chunk = _gate_chunk(gate_job, step_name)
         live = _live_walk_expression(job, workflow)
         leg = "&& steps.lock_cleanup.outputs.declined != 'true'\n"
         assert leg in chunk, (
@@ -3114,7 +3230,8 @@ def _live_walk_expression(job_text: str, workflow: str) -> str:
     hand-copied literal that silently stops matching (or keeps matching a
     dead substring) when the expression grows."""
     exprs = _outcome_expressions(job_text)
-    body = (exprs.get("AGENT_OUTCOME") or exprs.get("RUN") or exprs.get("SHIP"))
+    body = (exprs.get("AGENT_OUTCOME") or exprs.get("walk_outcome")
+            or exprs.get("RUN") or exprs.get("SHIP"))
     assert body, f"{workflow}: no walk-outcome expression to derive the mutation from"
     return body[0].strip()
 
@@ -3130,9 +3247,10 @@ def _stale_link1_copy(row: Routine) -> str:
     first = _walk_step_ids(_routine_ship_steps(job, row.resolve_id))[0]
     # EVERY occurrence must go stale together: mutating only one would leave
     # a healthy copy for the extractor/simulation and the control would pass
-    # vacuously. The expression appears at least twice in every routine (the
-    # record step's RUN/SHIP plus each exhaustion gate).
-    assert text.count(live) >= 2, (
+    # vacuously. design-run publishes the expression once, as the walk job's
+    # walk_outcome output; the settle job reads that output. Other routines
+    # still repeat it on the lock cleanup and the red step.
+    assert text.count(live) >= 1, (
         f"{workflow}: the live walk expression appears {text.count(live)} "
         "time(s) — the negative-control mutation would not represent the "
         "regression; update the derivation")
@@ -3499,13 +3617,19 @@ def test_every_consumer_wires_provider_triage_to_its_own_chain():
             f"{workflow} triages chain {chain!r} but does not resolve it — the "
             "walk and the diagnosis have drifted apart")
     for row in ROUTINES.values():
-        job = _routine_job_text(_routine_text(row.workflow), row)
-        chains = _triage_chains(job)
+        text = _routine_text(row.workflow)
+        walk_job = _routine_job_text(text, row)
+        triage_name = row.triage_job or row.job
+        blocks = _job_blocks(text)
+        assert triage_name in blocks, (
+            f"{row.workflow}: triage job {triage_name!r} is missing "
+            f"(jobs: {sorted(blocks)})")
+        chains = _triage_chains(blocks[triage_name])
         assert chains == [row.chain], (
-            f"{row.workflow}: the `{row.job}` job wires provider-triage to "
+            f"{row.workflow}: the `{triage_name}` job wires provider-triage to "
             f"chain(s) {chains}, but it walks the {row.chain!r} chain — exactly "
             "one triage step, on the chain the job walks")
-        assert f"model_registry resolve {row.chain}" in job, (
+        assert f"model_registry resolve {row.chain}" in walk_job, (
             f"{row.workflow}: the `{row.job}` job triages chain {row.chain!r} "
             "but does not resolve it — the walk and the diagnosis have drifted apart")
 
@@ -3874,3 +3998,392 @@ def test_reeve_reporter_keyless_guard_fires_on_a_secret_reference():
         "the tamper landed outside the report job — the fixture is stale")
     with pytest.raises(AssertionError):
         _assert_reeve_report_job_is_keyless(tampered)
+
+# ── ci.yml / model-smoke.yml secret trust drift guard (issue #869) ───────────
+# Default-deny: REGEN_TOKEN and the LLM provider keys materialize ONLY when
+# `needs.trust.outputs.trusted == 'true'`. Trust is computed in a separate
+# `trust` job that checks out nothing (so head scripts cannot forge it via
+# $GITHUB_ENV). The trust expression must be main-push-only
+# (`github.event_name == 'push' && github.ref == 'refs/heads/main'`).
+# Every spend of the set below must either be a presence probe (`!= ''`) or
+# sit behind `needs.trust.outputs.trusted` (same line, or the enclosing
+# step's / job's `if:`). Also refuse `secrets['X']`, `toJSON(secrets)`, and
+# inverted guards (`!= 'true' && secrets…`). Marker: `agent-head-secret-gate`.
+
+CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+MODEL_SMOKE_YML = REPO_ROOT / ".github" / "workflows" / "model-smoke.yml"
+TRUST_OUTPUT_GUARD = "needs.trust.outputs.trusted"
+TRUST_MAIN_PUSH_EXPR = (
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+)
+CI_AUTONOMY_SECRETS = (
+    "REGEN_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ZAI_KEY",
+    "ZAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GH_TOKEN",
+)
+_SECRET_NAMES_ALT = "|".join(CI_AUTONOMY_SECRETS)
+_CI_PRESENCE_PROBE = re.compile(
+    r"secrets\.(" + _SECRET_NAMES_ALT + r")\s*!=\s*''"
+)
+_CI_SECRET_DOT = re.compile(
+    r"secrets\.(" + _SECRET_NAMES_ALT + r")\b"
+)
+_CI_SECRET_BRACKET = re.compile(
+    r"secrets\[\s*['\"](" + _SECRET_NAMES_ALT + r")['\"]\s*\]"
+)
+_TOJSON_SECRETS = re.compile(r"toJSON\s*\(\s*secrets\s*\)")
+# Inverted guard: trust is NOT true, yet a secret still appears on the line
+# (or would be evaluated). Fail closed — only `== 'true'` is a valid spend
+# gate.
+_INVERTED_TRUST = re.compile(
+    r"needs\.trust\.outputs\.trusted\s*!=\s*'true'"
+)
+
+
+def _ci_step_if_containing(lines: list[str], idx: int) -> str:
+    """Walk back from lines[idx] to the enclosing `- name:`/`- uses:` and
+    return any `if:` value found between that header and idx."""
+    header = idx
+    while header >= 0:
+        stripped = lines[header].lstrip()
+        if stripped.startswith("- name:") or stripped.startswith("- uses:"):
+            break
+        header -= 1
+    if header < 0:
+        return ""
+    chunk = "\n".join(lines[header:idx + 1])
+    # Folded `if: >-` first (the product-page gate). Do not use MULTILINE `$`
+    # in a non-greedy capture — `$` matches end-of-line and would stop at `>-`.
+    m = re.search(r"^[ \t]*if:\s*>-?\s*\n((?:[ \t]+.+\n)*)", chunk, re.MULTILINE)
+    if m:
+        return m.group(1)
+    m = re.search(
+        r"^[ \t]*if:\s*(.+?)(?=\n[ \t]*(?:name:|uses:|id:|env:|run:|with:))",
+        chunk, re.MULTILINE | re.DOTALL)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _job_if_for_line(text: str, line_idx: int) -> str:
+    """Return the job-level `if:` for the job that owns lines[line_idx]."""
+    lines = text.splitlines()
+    # Find the job key above this line (2-space indent, ends with ':').
+    job_start = line_idx
+    while job_start >= 0:
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", lines[job_start])
+        if m:
+            break
+        job_start -= 1
+    if job_start < 0:
+        return ""
+    # Job block until next job key or end.
+    job_end = job_start + 1
+    while job_end < len(lines):
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[job_end]):
+            break
+        job_end += 1
+    header = "\n".join(lines[job_start:job_end])
+    # Stop at `steps:` so a step-level if: is not mistaken for the job's.
+    header = re.split(r"\n    steps:\n", header, maxsplit=1)[0]
+    m = re.search(r"^[ ]{4}if:\s*>-?\s*\n((?:[ ]{6}.+\n)*)", header, re.MULTILINE)
+    if m:
+        return m.group(1)
+    m = re.search(r"^[ ]{4}if:\s*(.+)$", header, re.MULTILINE)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _assert_trust_job_is_main_push_only(text: str, label: str) -> None:
+    """The trust job must exist, check out nothing, and decide main-push only."""
+    assert "agent-head-secret-gate" in text, (
+        f"{label} is missing the agent-head-secret-gate marker — the #869 "
+        "secret trust gate was removed or renamed")
+    blocks = _job_blocks(text)
+    assert "trust" in blocks, (
+        f"{label} has no `trust` job — secret trust must be computed in a "
+        "separate job that checks out nothing (issue #869)")
+    trust = blocks["trust"]
+    assert "actions/checkout" not in trust, (
+        f"{label} [trust] checks out the tree — a head-controlled checkout "
+        "can forge trust via $GITHUB_ENV")
+    assert TRUST_MAIN_PUSH_EXPR in trust, (
+        f"{label} [trust] is not main-push-only "
+        f"(expected {TRUST_MAIN_PUSH_EXPR!r} in the trust job)")
+    # Must not resurrect a prefix denylist.
+    assert "startsWith(github.head_ref" not in text, (
+        f"{label} still lists agent branch prefixes — default-deny is "
+        "main-push-only; delete the prefix denylist (issue #869)")
+    # Job/step env key (not a mention in a comment about the old shape).
+    assert not re.search(r"^[ \t]*TRUSTED_FOR_SECRETS:", text, re.MULTILINE), (
+        f"{label} still defines TRUSTED_FOR_SECRETS job/step env — trust must "
+        "live in needs.trust.outputs.trusted, never job env ($GITHUB_ENV "
+        "forgery)")
+
+
+def _line_has_trust_spend_gate(line: str, step_if: str, job_if: str) -> bool:
+    """True when this secret spend is behind needs.trust.outputs.trusted == true."""
+    gate = f"{TRUST_OUTPUT_GUARD} == 'true'"
+    if gate in line:
+        return True
+    if gate in step_if:
+        return True
+    if gate in job_if:
+        return True
+    return False
+
+
+def _assert_secrets_behind_trust(text: str, label: str) -> None:
+    """Fail if any #869 secret spend is not behind needs.trust.outputs.trusted."""
+    _assert_trust_job_is_main_push_only(text, label)
+    lines = text.splitlines()
+    offenders: list[str] = []
+
+    if _TOJSON_SECRETS.search(text):
+        offenders.append("toJSON(secrets) dumps every secret — forbidden")
+
+    for i, line in enumerate(lines):
+        # Bracket form secrets['X'] / secrets["X"]
+        for m in _CI_SECRET_BRACKET.finditer(line):
+            name = m.group(1)
+            step_if = _ci_step_if_containing(lines, i)
+            job_if = _job_if_for_line(text, i)
+            if _line_has_trust_spend_gate(line, step_if, job_if):
+                # Still refuse inverted guards on the same line.
+                if _INVERTED_TRUST.search(line) and f"{TRUST_OUTPUT_GUARD} == 'true'" not in line:
+                    offenders.append(
+                        f"line {i + 1}: inverted trust gate with secrets['{name}']: "
+                        f"{line.strip()}")
+                continue
+            offenders.append(
+                f"line {i + 1}: secrets['{name}'] without "
+                f"{TRUST_OUTPUT_GUARD}: {line.strip()}")
+
+        for m in _CI_SECRET_DOT.finditer(line):
+            name = m.group(1)
+            # Presence probes (`!= ''`) are boolean checks, not spends.
+            if _CI_PRESENCE_PROBE.search(line):
+                continue
+            step_if = _ci_step_if_containing(lines, i)
+            job_if = _job_if_for_line(text, i)
+            if _INVERTED_TRUST.search(line) and f"{TRUST_OUTPUT_GUARD} == 'true'" not in line:
+                offenders.append(
+                    f"line {i + 1}: inverted trust gate with secrets.{name}: "
+                    f"{line.strip()}")
+                continue
+            if _line_has_trust_spend_gate(line, step_if, job_if):
+                continue
+            offenders.append(
+                f"line {i + 1}: secrets.{name} without "
+                f"{TRUST_OUTPUT_GUARD}: {line.strip()}")
+
+    assert not offenders, (
+        f"{label} exposes secrets without the #869 "
+        f"{TRUST_OUTPUT_GUARD} gate:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_ci_yml_autonomy_head_secret_gate():
+    _assert_secrets_behind_trust(
+        CI_YML.read_text(encoding="utf-8"), "ci.yml")
+
+
+def test_model_smoke_yml_secret_trust_gate():
+    _assert_secrets_behind_trust(
+        MODEL_SMOKE_YML.read_text(encoding="utf-8"), "model-smoke.yml")
+
+
+def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_regen_token():
+    # NEGATIVE CONTROL: drop the trust ternary from the checkout token.
+    text = CI_YML.read_text(encoding="utf-8")
+    needle = (
+        "needs.trust.outputs.trusted == 'true' && "
+        "(secrets.REGEN_TOKEN || github.token) || github.token"
+    )
+    assert needle in text, "tamper target not found — the checkout token gate moved"
+    tampered = text.replace(needle, "secrets.REGEN_TOKEN || github.token", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match="REGEN_TOKEN"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_ci_yml_autonomy_head_secret_gate_rejects_ungated_anthropic_step():
+    # NEGATIVE CONTROL: strip the trust conjunct from the product-page step.
+    text = CI_YML.read_text(encoding="utf-8")
+    needle = (
+        "&& vars.AI_ANDON_CORD != 'pulled'\n"
+        "          && needs.trust.outputs.trusted == 'true'"
+    )
+    assert needle in text, "tamper target not found — the product-page trust gate moved"
+    tampered = text.replace(
+        needle, "&& vars.AI_ANDON_CORD != 'pulled'", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match="ANTHROPIC_API_KEY"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_ci_yml_secret_gate_rejects_prefix_denylist():
+    # NEGATIVE CONTROL: resurrect a startsWith agent-prefix denylist.
+    text = CI_YML.read_text(encoding="utf-8")
+    tampered = text.replace(
+        TRUST_MAIN_PUSH_EXPR,
+        "github.event_name == 'push' || "
+        "(github.event_name == 'pull_request' && "
+        "!startsWith(github.head_ref, 'claude/'))",
+        1,
+    )
+    assert tampered != text
+    with pytest.raises(AssertionError, match="startsWith|prefix"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_ci_yml_secret_gate_rejects_tojson_secrets():
+    text = CI_YML.read_text(encoding="utf-8")
+    # Inject into the regen job's plan step env.
+    needle = "HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' && needs.trust.outputs.trusted == 'true' }}"
+    assert needle in text, "tamper target not found — HAVE_PAT line moved"
+    tampered = text.replace(
+        needle,
+        needle + "\n          DUMP: ${{ toJSON(secrets) }}",
+        1,
+    )
+    with pytest.raises(AssertionError, match="toJSON"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_ci_yml_secret_gate_rejects_bracket_secrets():
+    text = CI_YML.read_text(encoding="utf-8")
+    needle = "ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}"
+    assert needle in text, "tamper target not found — ANTHROPIC line moved"
+    tampered = text.replace(
+        needle,
+        "ANTHROPIC_API_KEY: ${{ secrets['ANTHROPIC_API_KEY'] }}",
+        1,
+    )
+    # The step's if: still has the trust gate, so bracket form behind the
+    # same if: would pass — strip the product-page if: conjunct too.
+    if_needle = (
+        "&& vars.AI_ANDON_CORD != 'pulled'\n"
+        "          && needs.trust.outputs.trusted == 'true'"
+    )
+    assert if_needle in tampered, "product-page if: gate moved"
+    tampered = tampered.replace(
+        if_needle, "&& vars.AI_ANDON_CORD != 'pulled'", 1)
+    with pytest.raises(AssertionError, match=r"secrets\['ANTHROPIC_API_KEY'\]"):
+        _assert_secrets_behind_trust(tampered, "ci.yml")
+
+
+def test_model_smoke_secret_gate_rejects_ungated_keys():
+    text = MODEL_SMOKE_YML.read_text(encoding="utf-8")
+    needle = "needs.trust.outputs.trusted == 'true'"
+    assert needle in text, "tamper target not found — model-smoke trust gate moved"
+    # Drop the trust conjunct from the smoke job if:, leaving only andon.
+    tampered = text.replace(
+        "vars.AI_ANDON_CORD != 'pulled' &&\n"
+        "      needs.trust.outputs.trusted == 'true'",
+        "vars.AI_ANDON_CORD != 'pulled'",
+        1,
+    )
+    assert tampered != text
+    with pytest.raises(AssertionError, match="ZAI_KEY|ANTHROPIC|OPENROUTER"):
+        _assert_secrets_behind_trust(tampered, "model-smoke.yml")
+
+
+# ── design-run-deliver agent-instruction path drift guard (issue #869/#879) ─
+# is_protected_path must refuse agent-instruction files at ANY depth after
+# case-folding normalization — not only at the repo root. Nested
+# `**/.claude/**` is the same class (issue #879). The marker
+# `agent-instruction-path-drift` pins the intent; each required case pattern
+# must appear inside the function body.
+
+DELIVER_SH = REPO_ROOT / "scripts" / "design-run-deliver.sh"
+AGENT_INSTRUCTION_PATH_MARKER = "agent-instruction-path-drift"
+# Patterns that must appear in is_protected_path (after normalize lowercases).
+# Root + nested (`*/…`) forms; `.claude` / `.cursor` at any depth.
+AGENT_INSTRUCTION_CASE_PATTERNS = (
+    ".claude|.claude/*|*/.claude|*/.claude/*",
+    "claude.md|*/claude.md",
+    "claude.local.md|*/claude.local.md",
+    "agents.md|*/agents.md",
+    ".mcp.json|*/.mcp.json",
+    ".cursorrules|*/.cursorrules",
+    ".cursor|.cursor/*|*/.cursor|*/.cursor/*",
+)
+
+
+def _is_protected_path_body(text: str) -> str:
+    """Return the body of is_protected_path() from design-run-deliver.sh."""
+    m = re.search(
+        r"^is_protected_path\(\)\s*\{\n(.*?)^\}\n",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert m, (
+        "scripts/design-run-deliver.sh has no is_protected_path() — the #869 "
+        "delivery path policy was removed")
+    return m.group(1)
+
+
+def _assert_agent_instruction_paths_are_any_depth(text: str) -> None:
+    """Fail if is_protected_path regresses to root-only agent-instruction matches."""
+    assert AGENT_INSTRUCTION_PATH_MARKER in text, (
+        "design-run-deliver.sh is missing the agent-instruction-path-drift "
+        "marker — the #869 any-depth instruction-file gate was removed")
+    body = _is_protected_path_body(text)
+    missing = [p for p in AGENT_INSTRUCTION_CASE_PATTERNS if p not in body]
+    assert not missing, (
+        "is_protected_path is missing any-depth agent-instruction pattern(s) "
+        f"{missing} — nested CLAUDE.md / AGENTS.md / .mcp.json / .claude / "
+        ".cursor / .cursorrules must be refused after normalization "
+        "(issues #869 / #879)")
+    # Root-only `claude.md|agents.md|.mcp.json` (the pre-MEDIUM shape) must
+    # not be the sole match — require the nested `*/` forms explicitly.
+    assert "*/claude.md" in body, (
+        "is_protected_path does not match nested **/CLAUDE.md")
+    assert "*/.cursor" in body or "*/.cursor/*" in body, (
+        "is_protected_path does not match nested **/.cursor/**")
+    assert "*/.claude" in body or "*/.claude/*" in body, (
+        "is_protected_path does not match nested **/.claude/**")
+
+
+def test_deliver_agent_instruction_paths_any_depth():
+    _assert_agent_instruction_paths_are_any_depth(
+        DELIVER_SH.read_text(encoding="utf-8"))
+
+
+def test_deliver_agent_instruction_paths_rejects_root_only_claude():
+    # NEGATIVE CONTROL: drop the nested */claude.md arm so only root
+    # claude.md would match — drift guard must FAIL.
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    needle = "claude.md|*/claude.md"
+    assert needle in text, "tamper target not found — is_protected_path moved"
+    tampered = text.replace(needle, "claude.md", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match=r"\*/claude\.md|nested"):
+        _assert_agent_instruction_paths_are_any_depth(tampered)
+
+
+def test_deliver_agent_instruction_paths_rejects_dropped_cursor():
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    needle = ".cursor|.cursor/*|*/.cursor|*/.cursor/*"
+    assert needle in text, "tamper target not found — .cursor pattern moved"
+    tampered = text.replace(needle, ".cursor|.cursor/*", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match=r"\.cursor|missing"):
+        _assert_agent_instruction_paths_are_any_depth(tampered)
+
+
+def test_deliver_agent_instruction_paths_rejects_root_only_dot_claude():
+    # NEGATIVE CONTROL (issue #879): root-only `.claude|.claude/*` must FAIL.
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    needle = ".claude|.claude/*|*/.claude|*/.claude/*"
+    assert needle in text, "tamper target not found — .claude pattern moved"
+    tampered = text.replace(needle, ".claude|.claude/*", 1)
+    assert tampered != text
+    with pytest.raises(AssertionError, match=r"\.claude|missing"):
+        _assert_agent_instruction_paths_are_any_depth(tampered)
