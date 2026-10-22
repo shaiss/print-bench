@@ -1,8 +1,8 @@
 {
- "content_sha256": "5ffd29028d0fed2b233f5328659391cfae146d1689736c661cc1c3dc38f2ae60",
+ "content_sha256": "6c71a0aeaf1d3245dd9ac9af7258d3c731381815d8a9feeb6a2a81b564eff4a1",
  "contract": 1,
  "evidence_sha": "0000000000000000000000000000000000000000",
- "extractor": "provenance-extract 1",
+ "extractor": "provenance-extract 2",
  "format": "bundle@1",
  "main_sha": "521d092813b78a88bd9a74b1052cfef1f230d86b",
  "producer_run": 1,
@@ -1885,7 +1885,7 @@
      "url": "https://github.com/shaiss/print-bench/blob/d63588d44d5248bae73e9487528a9387c269726b/designs/alpha-clip/NOTES.md#L55"
     }
    ],
-   "extractor": "provenance-extract 1",
+   "extractor": "provenance-extract 2",
    "format": "view@1",
    "maintenance": [
     {
@@ -2778,7 +2778,7 @@
      "url": "https://github.com/shaiss/print-bench/commit/d63588d44d5248bae73e9487528a9387c269726b"
     }
    ],
-   "extractor": "provenance-extract 1",
+   "extractor": "provenance-extract 2",
    "format": "view@1",
    "maintenance": [
     {
@@ -2817,7 +2817,7 @@
    "design": "gamma-stand",
    "episodes": [],
    "events": [],
-   "extractor": "provenance-extract 1",
+   "extractor": "provenance-extract 2",
    "format": "view@1",
    "maintenance": [],
    "prs": [],
@@ -2825,8 +2825,8 @@
   }
  },
  "views_sha256": {
-  "alpha-clip": "7c232464871e278ed958028c93cc3bf16e1811f37e13ce0aa29c01e138a5c822",
-  "beta-hinge": "4d9449f4d61034cc33b53e62ffaaf136bf47f153fb90ee491672733bc99bcf3c",
-  "gamma-stand": "675939e0f84f7bb395dc00aa73b94254f4d3b1a0acd20294e17271f03706d6b2"
+  "alpha-clip": "def22ccd1a8e206263569f7fb114026094cb17f5c5d76d58c1e089aa31d0e694",
+  "beta-hinge": "cbfc6a0ac6cf066eb3cfbada8da0aabc030d3115232ac64159a96ce814d52457",
+  "gamma-stand": "27c36645f78fcbea8e6f45faaa997fd4298f1a2fb34279de1de25579f7e17c82"
  }
 }

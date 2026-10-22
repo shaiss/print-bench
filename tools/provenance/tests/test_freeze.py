@@ -294,7 +294,7 @@ def test_pr_at_7h_freezes():
     assert str(N) not in p.pending["pr"]
     d = doc_of(p, path)
     assert (d["format"], d["pr"], d["revision"], d["incomplete"]) == ("raw-pr@1", N, 1, [])
-    assert d["captured"] == {"digest": "body-digest@1", "harvester": "provenance 0.1.0", "run_id": 0}
+    assert d["captured"] == {"digest": "body-digest@2", "harvester": "provenance 0.1.0", "run_id": 0}
     assert d["linked_issues"] == [BRIEF]
     assert [c["sha"] for c in d["commits"]] == [C1, C2]
     assert [r["id"] for r in d["ci_runs"]] == [101, 102]

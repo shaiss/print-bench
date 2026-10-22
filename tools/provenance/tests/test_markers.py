@@ -7,10 +7,11 @@ final plan P0/P1a–e).
 from __future__ import annotations
 
 import collections
+import re
 
 import pytest
 
-from conftest import OWNER_LOGIN, raw_pr
+from conftest import OWNER_LOGIN, REPO, raw_pr
 from provenance import digest, markers, trust
 
 #: One committed fixture comment per era: (pr, comment id, kind it would yield or None).
@@ -137,6 +138,12 @@ def test_unknown_family_counted_only_for_our_identities():
     assert markers.unknown_families("github-actions[bot]", OWNER_LOGIN, ["<!-- reeve-greenlight-x -->"]) == [
         "reeve-greenlight-x"]
     assert all(markers.is_known_family(f) for f in markers.KNOWN_FAMILIES)
+    # the settle SHIP-LOCK's marker (#864), pinned to scripts/design-run-deliver.sh's literal
+    deliver = (REPO / "scripts" / "design-run-deliver.sh").read_text(encoding="utf-8")
+    settle = re.search(r"^SHIP_LOCK_HTML_MARKER='([^']*)'$", deliver, re.M).group(1)
+    assert markers.unknown_families("github-actions[bot]", OWNER_LOGIN, [settle]) == []
+    assert markers.unknown_families("github-actions[bot]", OWNER_LOGIN, ["<!-- design-run-ship-lock:v1x -->"]) == [
+        "design-run-ship-lock:v1x"]
     # over the committed fixtures: CodeRabbit's and qodo's markers are never counted, ours are
     counts = collections.Counter()
     for n in (316, 343, 371, 397, 634, 636):

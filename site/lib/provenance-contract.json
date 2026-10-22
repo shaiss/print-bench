@@ -33,7 +33,7 @@
   "raw_snapshot_statuses": "raw-snapshot-statuses@1",
   "state": "state@1",
   "intent": "intent@1",
-  "body_digest": "body-digest@1",
+  "body_digest": "body-digest@2",
   "message_digest": "message-digest@1",
   "checkpoint": "checkpoint@1"
  },
@@ -143,7 +143,8 @@
    "coach_round",
    "bugbot_limit",
    "qodo_paused",
-   "clear_prs"
+   "clear_prs",
+   "contract"
   ],
   "conclusion": [
    "success",
@@ -240,7 +241,8 @@
     "digest": {
      "t": "enum",
      "of": [
-      "body-digest@1"
+      "body-digest@1",
+      "body-digest@2"
      ]
     },
     "sha256": {
@@ -299,7 +301,8 @@
       "coach_round",
       "bugbot_limit",
       "qodo_paused",
-      "clear_prs"
+      "clear_prs",
+      "contract"
      ],
      "null": true
     },
@@ -2311,7 +2314,8 @@
       "digest": {
        "t": "enum",
        "of": [
-        "body-digest@1"
+        "body-digest@1",
+        "body-digest@2"
        ]
       }
      }
@@ -2894,7 +2898,8 @@
       "digest": {
        "t": "enum",
        "of": [
-        "body-digest@1"
+        "body-digest@1",
+        "body-digest@2"
        ]
       }
      }
@@ -3107,7 +3112,8 @@
       "digest": {
        "t": "enum",
        "of": [
-        "body-digest@1"
+        "body-digest@1",
+        "body-digest@2"
        ]
       }
      }
@@ -3258,7 +3264,8 @@
       "digest": {
        "t": "enum",
        "of": [
-        "body-digest@1"
+        "body-digest@1",
+        "body-digest@2"
        ]
       },
       "step_grammar": {

@@ -193,6 +193,64 @@ def test_two_locks_on_one_issue_are_one_claim():
     assert 32026482297 not in run_claims([b, other], idx, owner_login=OWNER_LOGIN)
 
 
+def test_actions_bot_ship_artifacts_need_the_key():
+    """§2b since #858/#864/#868: the Actions bot writes for BOTH ship routines (the burn agent's SHIP-LOCK, design-run's post-agent settle job, the deliverers' delivered comment, claude-code-action's commits), so a bot artifact inside a ship window is keyed like an owner one. A design-run settle lock on a design-brief issue inside a backlog-burn window stays login (it used to become the burn's, trust window); the burn's own bot lock on an issue carrying autonomy-ok claims it; a delivered comment on an issue the run did not claim stays login; a bot commit joins a run with no claim only on a branch that routine can select."""
+    bot = "github-actions[bot]"
+    burn = H.shifted_receipt(receipt(BURN_RUN), run_id=34654859999, seconds=6 * 3600)
+    idx = index(burn)
+    t_burn = "2026-09-12T06:37:00Z"                      # inside the shifted burn link 1 only
+    assert [(w.role, w.run_id) for w in serving.containing_windows(
+        idx, ts=t_burn, roles=serving.SHIP_ROLES, author_login=bot, owner_login=OWNER_LOGIN)] == \
+        [("backlog-burn", 34654859999)]
+
+    def lock(n, labels):
+        return H.brief_record(n, [H.event(f"issuecomment:{9100000000 + n}", "brief.claimed", t_burn, login=bot,
+                                          issue=n, fields={"design_name": None})], labels=labels)
+
+    settle = lock(710, ("design-brief",))
+    assert run_claims([settle], idx, owner_login=OWNER_LOGIN) == {}
+    e = annotate(settle, idx=idx, briefs=[settle])["events"][0]
+    assert (e["trust"], e["runtime"]["run_id"], e["runtime"]["model_basis"]) == ("login", None, "none")
+    # Positive control: the burn's own bot lock on an issue carrying its opt-in label claims it.
+    own = lock(711, ("autonomy-ok", "design-brief"))
+    assert run_claims([own], idx, owner_login=OWNER_LOGIN) == {34654859999: 711}
+    e = annotate(own, idx=idx, briefs=[own])["events"][0]
+    assert (e["trust"], e["runtime"]["run_id"]) == ("window", 34654859999)
+
+    # A delivered comment (bot brief.shipped) inside design-run run 34661448637, which claimed #592.
+    t_dr = "2026-09-12T01:30:00Z"
+
+    def delivered(n):
+        return H.brief_record(n, [H.event(f"issuecomment:{9100001000 + n}", "brief.shipped", t_dr, login=bot, issue=n,
+                                          fields={"design_name": None, "shipped_pr": 950})])
+
+    assert annotate(delivered(712), idx=idx)["events"][0]["trust"] == "login"
+    on592 = annotate(delivered(592), idx=idx)["events"][0]
+    assert (on592["trust"], on592["runtime"]["run_id"]) == ("window", DESIGN_RUN)
+
+    # Bot commits: a run with a claim needs claude/issue-<claim>; a run with none needs a branch its
+    # routine can select (a captured brief for design-run, anything else for the burn).
+    def commit_pr(ts, n, briefs):
+        rec = H.pr_record(960 + n % 10, [H.event(f"commit:{n:040d}", "commit.design", ts, login=bot, sha=f"{n:040d}")],
+                          head_ref=f"claude/issue-{n}-x", created_at=ts, closed_at=None)
+        rec["briefs"] = list(briefs)
+        return rec
+
+    def joined(rec, *, claims_from):
+        out = annotate(rec, idx=idx, briefs=claims_from)["events"][0]
+        return out["trust"], out["runtime"]["run_id"]
+
+    assert joined(commit_pr(t_dr, 713, [713]), claims_from=None) == ("login", None)       # run claimed #592
+    assert joined(commit_pr(t_dr, 713, [713]), claims_from=[]) == ("window", DESIGN_RUN)  # no claim, a brief
+    assert joined(commit_pr(t_dr, 714, []), claims_from=[]) == ("login", None)            # no claim, not a brief
+    assert joined(commit_pr(t_burn, 715, [715]), claims_from=[]) == ("login", None)       # design brief in a burn window
+    assert joined(commit_pr(t_burn, 716, []), claims_from=[]) == ("window", 34654859999)  # the burn's own issue
+    # claude[bot] keeps plain containment.
+    plain = commit_pr(t_burn, 715, [715])
+    plain["events"][0]["signals"]["login"] = "claude[bot]"
+    assert joined(plain, claims_from=[]) == ("window", 34654859999)
+
+
 def test_nvc5_reviewers_glm53():
     """NVC-5: the 12 verified sign-offs on #636 resolve to glm-5.3 via chain review link 1 at the merge-tree basis."""
     so = H.signoffs_from_raw(raw_pr(636))

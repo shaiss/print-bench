@@ -12,7 +12,9 @@ markers and classifies them. Prose is never consulted.
 ``printcheck-gate-report``, ``argus-diff-report`` and the routine markers
 that never belong to a design thread (``provider-escalation:*``,
 ``reeve-greenlight``, ``andon-cord``, ``growth-twitter:*`` …) listed in
-:data:`IGNORED_OWN_FAMILIES`. A marker in a body authored by one of OUR
+:data:`IGNORED_OWN_FAMILIES`, plus the settle SHIP-LOCK's
+``design-run-ship-lock:v1`` (#864; the lock is read through its
+``ship_lock`` lead, not its marker). A marker in a body authored by one of OUR
 identities (``github-actions[bot]`` or the repo owner) whose family is in
 neither set is counted as ``unknown.marker`` (``record.unknown.markers``),
 never rendered. Third-party bots' markers (CodeRabbit ``*_start``/``*_end``,
@@ -69,7 +71,7 @@ KNOWN_FAMILIES = frozenset({
     "JANE_SIGNOFF", "DRIK_SIGNOFF", "PM_TRIAGE", "PM_TRIAGE_DONE", "COACH_LOCK", "COACH_DONE",
     "ORACLE_REVIEW", "AUTO_REVIEW_STAMP", "printcheck-gate-report", "argus-diff-report",
 })
-IGNORED_OWN_FAMILIES_RE = r"(provider-escalation:[a-z-]+|reeve-greenlight|andon-cord|growth-twitter:[a-z-]+|growth-queue|backlog-groomer|reeve-report|chunked|wright:[a-z-]+)"
+IGNORED_OWN_FAMILIES_RE = r"(provider-escalation:[a-z-]+|reeve-greenlight|andon-cord|growth-twitter:[a-z-]+|growth-queue|backlog-groomer|reeve-report|chunked|wright:[a-z-]+|design-run-ship-lock:v[0-9]+)"
 SIGNOFF_FAMILIES = ("JANE_SIGNOFF", "DRIK_SIGNOFF")
 STICKY_FAMILIES = {"AUTO_REVIEW_STAMP": "sticky.auto_review_stamp",
                    "printcheck-gate-report": "sticky.printcheck_gate_report",

@@ -296,10 +296,15 @@ evidence tip is foreign (§Tip continuity); a lease failure is foreign too.
 
 ## Tip continuity
 
-**The threat.** The design-run and backlog-burn ship steps run
-`bypassPermissions` agents holding the owner PAT with `contents: write`; a
-ruleset cannot restrict a branch to the Actions bot. So "single writer"
-cannot be enforced at push time — it is checked at the next run instead.
+**The threat.** The data refs are unprotected and several tokens can push
+them: `REGEN_TOKEN`, the `GITHUB_TOKEN` of every `contents: write` job,
+attended owner sessions, and the owner PAT on the push step of the
+`workflow_run` deliverers `design-run-deliver.yml` / `backlog-burn-deliver.yml`
+(no agent code; the script pushes only `claude/issue-<N>-*` — the scheduled
+ship agents themselves hold a contents-read `github.token` under `dontAsk`
+since #861/#863); a ruleset cannot restrict a branch to the Actions bot. So
+"single writer" cannot be enforced at push time — it is checked at the next
+run instead.
 The forms it must catch: a forged commit on top of the tip, a forced
 **rollback** to an older genuine sha, a deleted ref, and a forged derived tip.
 
@@ -459,7 +464,7 @@ shape cannot be applied to frozen units by re-extraction — it needs a
 `refreeze` (comments and issues are outside Actions retention and can be
 re-read), and every digest records its version.
 
-### Body digest (`body-digest@1`)
+### Body digest (`body-digest@2`)
 
 For every issue body, PR body, issue comment, review, review comment and
 release body:
@@ -477,7 +482,7 @@ release body:
 | `lead` | the class of the lead line — the first non-blank line that is not a full-line marker — under the lead rules below; else `null` |
 | `lead_fields` | validated fields the lead's class carries (below); `{}` otherwise |
 | `refs_closes` | sorted unique issue numbers after a GitHub closing keyword (`close[sd]`, `fix(e[sd])`, `resolve[sd]`, optional colon); only a PR body's are used |
-| `digest` | `body-digest@1` |
+| `digest` | `body-digest@2`. An `@1` digest (the contract still accepts it) predates the deliverers' `shipped` line and the `contract` class, so its `lead` is `null` where `@2` classifies — a `refreeze` re-reads it |
 
 Lead rules (first match wins, anchored at the start of the stripped lead line):
 
@@ -487,13 +492,14 @@ Lead rules (first match wins, anchored at the start of the stripped lead line):
 | `ship_lock` | `🚢 SHIP-LOCK` | `design_name` |
 | `declined` | `🚢 DECLINED` | `design_name` |
 | `deferred` | `🚢 DEFERRED` | `design_name` |
-| `shipped` | `✅ **SHIPPED … #N` or `📦 **Draft PR opened: #N**` | `shipped_pr`, `design_name` |
+| `shipped` | `✅ **SHIPPED … #N` or `📦 **Draft PR opened: #N**` (the agent's own line, before #858), or exactly `🚢 design-run delivered — branch and draft PR verified` / `🚢 backlog-burn delivered — branch and draft PR verified` (the deliverers' line since #858 — drift-pinned to `DELIVERED_LINE` in `scripts/design-run-deliver.sh`; the PR comes from the body's `- pull request: https://github.com/<o>/<r>/pull/<N>` line) | `shipped_pr`, `design_name` |
 | `decision_needed` | `🚦 DECISION NEEDED` | — |
 | `coach_lock` | `🎓 COACH-LOCK` | — |
 | `coach_round` | `Round <N><a-z?> — ` | `round`, `round_sub` |
 | `bugbot_limit` | `<hN>Bugbot couldn't run - usage limit reached</hN>` | — |
 | `qodo_paused` | `**ⓘ Qodo reviews are paused` | — |
 | `clear_prs` | `**/clear-prs sweep` | — |
+| `contract` | `**Design name:**` — an unattended design run's §2 scope contract, posted by the settle job as its own comment since #864 (settle's SHIP-LOCK is a constant stub naming nothing; drift-pinned to the design-run skill's §2 block) | `design_name` |
 
 `design_name` is the slug on a `**Design name:** <slug>` line anywhere in the
 body (backticks optional), validated `[a-z0-9][a-z0-9-]{0,63}`.
@@ -845,7 +851,7 @@ whether an owner-login event was a human click or an owner-token session
 | `release` | tag | `tag`, `published_at`, `designs`, `evidence` |
 
 Every record carries `format`, `kind`, `key`, `extractor`
-(`provenance-extract 1`), `incomplete` and `events` (sorted by the event sort
+(`provenance-extract 2`), `incomplete` and `events` (sorted by the event sort
 key). `evidence` = `{raw, raw_sha256, revision, receipts, source}`
 (`raw_sha256` over the decompressed document). No record or view carries
 main's sha: a main push that touches no `designs/` file must leave every
@@ -1004,8 +1010,8 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    product-scout/spike-converter, `brief.claimed`/`commit.design`/`pr.opened`
    … → design-run/backlog-burn) and the artifact's author is one of that
    role's posting identities (`ROLE_IDENTITIES`: reviewers and the scout post
-   as the Actions bot; the ship routines as the owner's PAT and commit as a
-   bot). One window → attributed; none → `none`; windows of two or more runs →
+   as the Actions bot; the ship routines post as the owner or the Actions bot
+   and commit as the Actions bot — see the key below). One window → attributed; none → `none`; windows of two or more runs →
    `ambiguous`. An owner-token sign-off inside a reviewer window is never
    attributed to it. A reviewer-role window (`jane`, `drik`, `pm`, `coach`,
    `oracle`) is a candidate only on a PR record whose run it is: the run's
@@ -1018,19 +1024,47 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    windows — so unscoped, 6 of #636's 12 verified sign-offs and all 5 of
    #634's come out ambiguous, and a PR whose own receipt is missing would be
    attributed to another PR's run.
-   **The owner's token needs a key.** An OWNER-authored artifact inside a
-   design-run or backlog-burn window may be the owner's own attended work, so
-   it is attributed only through the issue that run claimed: `run_claims`
-   maps a run to the one issue whose OWNER SHIP-LOCK (`brief.claimed`) lies in
-   its windows (the selector claims one issue per run; a run whose windows
-   hold SHIP-LOCKs on two or more distinct issues claims nothing; several
-   locks on one issue, like #281's two in run 32026482297, are one claim). The SHIP-LOCK itself, OWNER `brief.*` events on
-   that issue, and OWNER `pr.opened` / `commit.*` on a `claude/issue-<N>-…`
-   branch whose N is the claimed issue get `window`; anything else stays
-   `login` (an owner PR on another branch inside a routine window, a run that
-   declined without claiming). Bot-authored artifacts keep the plain rule.
-   Run 34661448637 claimed #592 and #636's head is
-   `claude/issue-592-nuggs-vent-cap`, so NVC-3 and NVC-4 hold.
+   **A ship-routine window needs a key.** Who writes for the ship routines
+   changed with #858/#864/#868. Their agents now hold `github.token` only:
+   the backlog-burn agent posts its SHIP-LOCK and stops as the Actions bot
+   inside its window; the design-run agent holds `issues: read`, and its
+   SHIP-LOCK (a constant stub), stops and §2 contract are posted by the run's
+   `settle` job as the Actions bot after every agent step; the draft PR is
+   opened as the owner (the owner PAT) and the `🚢 <routine> delivered — …`
+   comment posted as the Actions bot by `design-run-deliver.yml` /
+   `backlog-burn-deliver.yml`, `workflow_run` runs that start after the
+   routine run ends; claude-code-action's commits resolve to the Actions
+   bot's login. So an owner OR Actions-bot artifact inside a ship window may
+   be the owner's attended work, the other routine's settle, deliver or
+   bundle step, or a previous run's deliverer. Such an artifact is
+   attributed only through the issue that run claimed: `run_claims` maps a
+   run to the one issue whose owner- or Actions-bot-authored SHIP-LOCK
+   (`brief.claimed`) lies in its windows, counted only when the brief carries
+   that routine's opt-in label (the selector claims one issue per run; a run
+   whose windows hold SHIP-LOCKs on two or more distinct issues claims
+   nothing; several locks on one issue, like #281's two in run 32026482297,
+   are one claim). The SHIP-LOCK itself and owner/bot `brief.*` events on
+   that issue get `window`, as do owner/bot `pr.opened` / `commit.*` on a
+   `claude/issue-<N>-…` branch whose N is the claimed issue. An Actions-bot
+   `pr.opened` / `commit.*` in a run with NO claim (every unattended design
+   run since #864 — its lock is settle-posted, outside its windows) gets
+   `window` only when N is an issue that routine can select: a captured brief
+   (`briefs` — design briefs only) for design-run, any other issue for
+   backlog-burn; so the agent's own commits still join while the other
+   routine's bundle commits do not. Anything else stays `login`: an owner PR
+   on another branch inside a routine window, a run that declined without
+   claiming, a design-run settle lock or delivered comment that lands inside
+   a backlog-burn window (before this key it became the burn's work at trust
+   `window`). `claude[bot]` keeps the plain rule. Run 34661448637 claimed
+   #592 and #636's head is `claude/issue-592-nuggs-vent-cap`, so NVC-3 and
+   NVC-4 hold.
+   **Not joined yet.** Since #864 a design run's own claim, stops and
+   delivered comment, and since #858 every routine PR's owner `pr.opened`,
+   lie outside every agent window (settle and the deliverers run no agent
+   step), so they stay `login` — lost attribution, not wrong attribution;
+   the run link of those PRs comes from the agent's commits. Joining them
+   through the run's `settle` job and the delivered comment's `- run:` URL is
+   a separate change.
 3. **Code basis** — what each run checked out:
    - `schedule` / `workflow_dispatch` (design-run, backlog-burn and the other
      routines): `run.head_sha`, exact;
@@ -1376,7 +1410,7 @@ the refs exist — this build pushes nothing.
 
 | Failure | Detection | Effect | Recovery |
 |---|---|---|---|
-| A routine with the owner PAT pushes to `provenance` (forged commit or rollback) | tip continuity at the next run; Reeve `provenance-foreign-tip` | no evidence written; the derived ref is recomputed from the newest checkpoint and overwritten; the run goes red (exit 3) | inspect; `recover confirm_sha=<newest checkpoint>` |
+| Another `contents: write` holder (the deliverers' owner PAT, `REGEN_TOKEN`, a contents-write job, an attended session) pushes to `provenance` (forged commit or rollback) | tip continuity at the next run; Reeve `provenance-foreign-tip` | no evidence written; the derived ref is recomputed from the newest checkpoint and overwritten; the run goes red (exit 3) | inspect; `recover confirm_sha=<newest checkpoint>` |
 | A forged `provenance-site` tip | tip continuity / `same_content`; Reeve | overwritten at the next run with `::error::`, whatever the evidence ref's state; until then (and until the next dispatch while disarmed) it can show false attribution (escaped fields only; nothing reads it before P3) | automatic |
 | The `provenance` ref is deleted | continuity verdict `deleted` | run red; never re-bootstrapped; the derived ref is still rebuilt from `C`, fetched by sha | `recover` to the newest checkpoint, or push exactly that sha from any clone |
 | Artifact ids out of upload order (measured up to 64 min) | ordering by `(created_at, id)`; the scan reads on 6 h past the newest tips | none: a genuine newer tip stays ok, a rollback to an older higher-id checkpoint is foreign | none needed |

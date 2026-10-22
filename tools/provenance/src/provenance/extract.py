@@ -147,7 +147,7 @@ harvested sources only (NVC-12 is re-baselined on these keys —
 tests/fixtures/acceptance.json).
 
 **Brief events** (:func:`extract_brief`): ``issue:<n>:filed`` (brief.filed,
-``fields.design_name`` null — the SHIP-LOCK carries the name),
+``fields.design_name`` null — the claim or the contract carries the name),
 comment leads ``ship_lock``→brief.claimed, ``shipped``→brief.shipped,
 ``declined``/``deferred``/``ship_lock_withdrawn``→brief.declined/deferred/
 withdrawn (each with its own ``lead_fields.design_name``), timeline
@@ -157,9 +157,19 @@ closed it: the closed event's ``commit_id`` is that PR's merge sha, or a
 lies within the 60 s before the close — GitHub records the merge commit's
 reference, not the commit, on the close itself; its ``state_reason`` is the
 event's, else for the last close of a closed issue the issue's).
-``record.design_name`` = the design_name of the last SHIP-LOCK that carries
-one (validated slug), else the slug of a ``Design brief: <slug>`` title
-prefix — null otherwise. ``record.prs`` = every ``shipped_pr`` and
+``record.design_name`` = the design_name of the last ``ship_lock`` or
+``contract`` comment that carries one (validated slug) and whose author is
+in :data:`NAME_AUTHOR_LOGINS` or is the owner — main's lock/contract trust
+rule (``SHIP_LOCK_AUTHOR_LOGINS`` in scripts/design-run-deliver.sh,
+``CONTRACT_AUTHOR_LOGINS`` in scripts/oracle-ship-contract.sh), since anyone
+can paste ``**Design name:**`` on a public issue. An attended run names the
+design in its own SHIP-LOCK; since #864 an unattended run's lock is the
+settle job's constant stub and the §2 contract travels as a separate
+``**Design name:**``-led comment (lead ``contract``). Only a brief with no
+trusted ``ship_lock`` at all falls back to the slug of a ``Design brief:
+<slug>`` title prefix: a claimed brief whose name is unrecoverable stays
+null rather than minting a title word ("Design brief: wall-mounted spool
+holder" → ``wall-mounted``) as a view alias. ``record.prs`` = every ``shipped_pr`` and
 ``closed_by_pr``. Brief trust: ``brief.filed`` by the Actions bot is
 ``login`` until serving finds a unique scout window; an issue body with
 ``last_edited_at`` set is ``claimed``/``marker:edited``.
@@ -213,7 +223,7 @@ from typing import Any, Optional
 from . import canonical, episodes, markers, membership, trust
 from .protocols import GitReader
 
-EXTRACTOR_VERSION = "provenance-extract 1"
+EXTRACTOR_VERSION = "provenance-extract 2"
 RECORD_FORMAT = "record@1"
 BUILDER_BOTS = frozenset({"github-actions[bot]", "claude[bot]"})
 #: The Actions bot's REST and GraphQL spellings plus claude-code-action's ``claude[bot]``: the
@@ -289,6 +299,9 @@ SIGNOFF_FAMILIES = frozenset(markers.SIGNOFF_FAMILIES)
 COMPLETION_FAMILIES = SIGNOFF_FAMILIES | {"PM_TRIAGE_DONE", "COACH_DONE"}
 EVENT_FAMILIES = COMPLETION_FAMILIES | {"PM_TRIAGE", "COACH_LOCK", "ORACLE_REVIEW"}
 NOISE_LEADS = frozenset({"bugbot_limit", "qodo_paused", "decision_needed", "clear_prs"})
+#: The non-owner authors whose ``ship_lock`` / ``contract`` comment may name a brief's design
+#: (the Actions bot: the settle job and the burn agent post as it since #864/#868).
+NAME_AUTHOR_LOGINS = frozenset({"github-actions[bot]"})
 BRIEF_LEAD_KINDS = {"ship_lock": "brief.claimed", "shipped": "brief.shipped",
                     "declined": "brief.declined", "deferred": "brief.deferred",
                     "ship_lock_withdrawn": "brief.withdrawn"}
@@ -1077,10 +1090,12 @@ def extract_brief(raw_brief: dict[str, Any], ctx: ExtractContext) -> dict[str, A
     issue = raw_brief.get("issue") or {}
     comments = raw_brief.get("comments") or []
     timeline = raw_brief.get("timeline") or []
-    claims = [c for c in comments if c["body"].get("lead") == "ship_lock"]
-    design_name = next((_slug(c["body"]["lead_fields"].get("design_name")) for c in reversed(claims)
+    name_authors = NAME_AUTHOR_LOGINS | {ctx.owner_login}
+    trusted = [c for c in comments if c["body"].get("lead") in ("ship_lock", "contract")
+               and _login(c.get("user")) in name_authors]
+    design_name = next((_slug(c["body"]["lead_fields"].get("design_name")) for c in reversed(trusted)
                         if _slug((c["body"].get("lead_fields") or {}).get("design_name"))), None)
-    if design_name is None:
+    if design_name is None and not any(c["body"].get("lead") == "ship_lock" for c in trusted):
         m = _TITLE_SLUG_RE.match(issue.get("title") or "")
         design_name = m.group(1) if m else None
     events: list[dict[str, Any]] = []

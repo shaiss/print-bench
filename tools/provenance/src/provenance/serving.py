@@ -28,42 +28,70 @@ ts is strictly inside it; on the exact boundary → ``ambiguous``. Windows of
 two different jobs of one run are ``ambiguous`` too (nothing tells the jobs
 apart).
 
-**2b. The owner's token needs a correlating key** (critique item 15). The
-ship routines post and open PRs with the OWNER's PAT, so an OWNER-authored
-artifact inside a design-run/backlog-burn window may equally be the owner's
-own attended work. Such an artifact is attributed only through the issue the
-run CLAIMED: :func:`run_claims` maps each ship-routine run to the one issue
-``N`` whose OWNER-authored ``brief.claimed`` (SHIP-LOCK) lies in that run's
-windows — the selector claims one issue per run, so a run whose windows hold
-SHIP-LOCKs on two or more DISTINCT issues claims nothing, while several
-SHIP-LOCKs on the one issue are one claim (review round 2, issue 4: brief #281's
-locks 5315682248 at 11:54:09Z and 5316408268 at 13:02:28Z both lie in
-design-run run 32026482297, whose PR #316 open is then the run's). A ship routine's selector only
-claims an issue carrying its opt-in label (:data:`SHIP_ROUTINE_LABELS` —
-``.github/design-run.conf`` ``label: design-brief``,
-``.github/backlog-burn.conf`` ``label: autonomy-ok``), so a brief's SHIP-LOCK
-counts toward a run only when the brief record's ``labels`` hold that run's
-routine label. This is what keeps NVC-4: run 34661448637's attempt-2 link 1
-(00:34:31–00:38:50) and backlog-burn run 34654859877's attempt-2 link 1
-(00:34:36–00:40:48) BOTH contain the #592 SHIP-LOCK at 00:35:31 (the owner
-re-ran both at 00:34); #592 carries ``design-brief`` only, so only the
-design run claims it and the backlog-burn window fails the key. Then:
+**2b. A ship-routine window needs a correlating key** (critique item 15).
+A design-run/backlog-burn window is held by a routine that writes as several
+identities, and other writers of the same identities are active at the same
+time, so for the OWNER and the Actions bot (:data:`ACTIONS_BOT_LOGINS`) time +
+role + identity is not enough. Since #858/#864/#868 the ship agents hold
+``github.token`` only: the backlog-burn agent posts its SHIP-LOCK and stops as
+the Actions bot inside its window; the design-run agent holds ``issues:
+read`` and its SHIP-LOCK (a constant stub), stops and §2 contract are posted
+by the run's ``settle`` job as the Actions bot AFTER every agent step; the
+draft PR is opened as the OWNER (``secrets.GH_TOKEN``) and the ``🚢 <routine>
+delivered — …`` comment posted as the Actions bot by
+``design-run-deliver.yml`` / ``backlog-burn-deliver.yml``, ``workflow_run``
+runs that start after the routine run ends; and claude-code-action's commits
+resolve to the Actions bot's login. So an owner or Actions-bot artifact inside
+a ship window may be the owner's attended work, the OTHER routine's settle,
+deliver or bundle step, or a previous run's deliverer. Such an artifact is
+attributed only through the issue the run CLAIMED: :func:`run_claims` maps
+each ship-routine run to the one issue ``N`` whose owner- or Actions-bot-
+authored ``brief.claimed`` (SHIP-LOCK) lies in that run's windows — the
+selector claims one issue per run, so a run whose windows hold SHIP-LOCKs on
+two or more DISTINCT issues claims nothing, while several SHIP-LOCKs on the
+one issue are one claim (review round 2, issue 4: brief #281's locks
+5315682248 at 11:54:09Z and 5316408268 at 13:02:28Z both lie in design-run
+run 32026482297, whose PR #316 open is then the run's). A ship routine's
+selector only claims an issue carrying its opt-in label
+(:data:`SHIP_ROUTINE_LABELS` — ``.github/design-run.conf`` ``label:
+design-brief``, ``.github/backlog-burn.conf`` ``label: autonomy-ok``), so a
+brief's SHIP-LOCK counts toward a run only when the brief record's ``labels``
+hold that run's routine label. This is what keeps NVC-4: run 34661448637's
+attempt-2 link 1 (00:34:31–00:38:50) and backlog-burn run 34654859877's
+attempt-2 link 1 (00:34:36–00:40:48) BOTH contain the #592 SHIP-LOCK at
+00:35:31 (the owner re-ran both at 00:34); #592 carries ``design-brief``
+only, so only the design run claims it and the backlog-burn window fails the
+key. Then (:func:`ship_key_ok`), for an owner or Actions-bot author:
 
-* the ``brief.claimed`` itself is attributed iff it is that run's claim;
-* an OWNER ``brief.shipped|declined|deferred|withdrawn`` on issue ``N`` iff
-  the run claimed ``N``;
-* an OWNER ``pr.opened`` / ``commit.*`` iff the PR's ``head_ref`` is
-  ``claude/issue-<N>-…`` and the run claimed ``N``;
-* otherwise the trust stays ``login`` (an owner PR on any other branch inside
-  a design-run window, a run that declined without claiming).
+* a ``brief.*`` event on issue ``N`` (the claim itself included) iff the run
+  claimed ``N`` — so a design-run settle lock, stop or delivered comment that
+  lands inside a backlog-burn window stays ``login`` instead of becoming the
+  burn's work, and a previous run's delivered comment inside the next run's
+  window is not that run's;
+* a ``pr.opened`` / ``commit.*`` iff the PR's ``head_ref`` is
+  ``claude/issue-<N>-…`` and the run claimed ``N``; for an Actions-bot
+  author in a run with NO claim (every unattended design run since #864:
+  its lock is settle-posted, outside its windows) iff ``N`` is an issue that
+  routine can select — a captured brief (``record.briefs``: only
+  ``design-brief`` issues are captured) for design-run, any other issue for
+  backlog-burn — so the agent's own commits still join while the other
+  routine's bundle commits on its branch do not;
+* otherwise the trust stays ``login`` (an owner PR on any other branch
+  inside a design-run window, a run that declined without claiming, the
+  deliver workflow's owner ``pr.opened`` — no window contains it).
 
 The key filters the candidate windows BEFORE the one/none/ambiguous
 decision, so a key that holds for exactly one of two overlapping runs
-attributes to that run. Bot-authored artifacts (``github-actions[bot]``,
-``claude[bot]``) keep the plain containment rule. #636's head is
-``claude/issue-592-nuggs-vent-cap``, so NVC-3/NVC-4 hold under the key.
-Claims come from brief records only, so the owner-PAT events of a
-backlog-burn run on a non-brief issue stay ``login`` — honest, not guessed.
+attributes to that run. ``claude[bot]`` keeps the plain containment rule.
+#636's head is ``claude/issue-592-nuggs-vent-cap``, so NVC-3/NVC-4 hold
+under the key. Claims come from brief records only (only ``design-brief``
+issues are captured), so the issue-side events of a backlog-burn run on a
+non-brief issue stay ``login`` — honest, not guessed. Since #864 a design
+run's own claim, stops and delivered comment lie outside every window (they
+are posted by ``settle`` and the deliverer, which run no agent step) and
+stay ``login`` too; attributing them through the run's settle job and the
+delivered comment's ``- run:`` link is a separate join this module does not
+make.
 
 **2c. A reviewer window must be the record's PR's** (review round 2,
 issue 1). Every reviewer session posts as the Actions bot, and auto-review
@@ -226,9 +254,12 @@ OWNER = "<owner>"
 
 #: role -> logins that role's agent posts or commits as (window attribution
 #: requires the artifact's author to be one of them). Reviewer sessions hold
-#: only GITHUB_TOKEN (the reviewer MCP posts as the Actions bot); the ship
-#: routines run with the owner PAT (SHIP-LOCK and PR open as the owner) and
-#: commit through claude-code-action as a bot.
+#: only GITHUB_TOKEN (the reviewer MCP posts as the Actions bot). The ship
+#: routines' agents hold ``github.token`` since #858/#864/#868 (the burn posts
+#: as the Actions bot; design-run's issue writes moved to its post-agent
+#: ``settle`` job) and commit through claude-code-action, whose commits resolve
+#: to the Actions bot's login; ``OWNER`` stays for runs from the owner-PAT era
+#: and for attended work, which the §2b key separates.
 ROLE_IDENTITIES: dict[str, frozenset[str]] = {
     "jane": frozenset({"github-actions[bot]", "github-actions"}),
     "drik": frozenset({"github-actions[bot]", "github-actions"}),
@@ -1028,8 +1059,10 @@ def trailer_runtime(signals: dict[str, Any]) -> Optional[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Claims (§2b).
 
-#: The ship routines whose OWNER-authored artifacts need a claimed-issue key (§2b).
+#: The ship routines whose owner- and Actions-bot-authored artifacts need a claimed-issue key (§2b).
 SHIP_ROLES = frozenset({"design-run", "backlog-burn"})
+#: The Actions bot's REST and GraphQL logins — keyed like the owner in a ship window (§2b).
+ACTIONS_BOT_LOGINS = frozenset({"github-actions[bot]", "github-actions"})
 CLAIM_BRANCH_RE = re.compile(r"claude/issue-([0-9]{1,7})-")
 #: Each ship routine's selector opt-in label (its committed conf's ``label:``).
 SHIP_ROUTINE_LABELS = {"design-run": "design-brief", "backlog-burn": "autonomy-ok"}
@@ -1037,23 +1070,26 @@ SHIP_ROUTINE_LABELS = {"design-run": "design-brief", "backlog-burn": "autonomy-o
 
 def run_claims(brief_records: list[dict[str, Any]], index: ReceiptIndex, *,
                owner_login: str) -> dict[int, int]:
-    """``{ship-routine run id: claimed issue}`` (§2b): the one issue whose OWNER ``brief.claimed``
-    lies inside that run's windows; runs whose windows hold SHIP-LOCKs on zero or on two or more
-    DISTINCT issues are absent. Several SHIP-LOCKs on one issue are one claim (review round 2,
-    issue 4: design-run run 32026482297 holds #281's locks 5315682248 and 5316408268)."""
+    """``{ship-routine run id: claimed issue}`` (§2b): the one issue whose owner- or
+    Actions-bot-authored ``brief.claimed`` lies inside that run's windows; runs whose windows hold
+    SHIP-LOCKs on zero or on two or more DISTINCT issues are absent. Several SHIP-LOCKs on one issue
+    are one claim (review round 2, issue 4: design-run run 32026482297 holds #281's locks 5315682248
+    and 5316408268)."""
+    claimers = ACTIONS_BOT_LOGINS | {owner_login}
     per_run: dict[int, set[int]] = {}
     for rec in brief_records:
         if rec.get("kind") != "brief":
             continue
         labels = set(rec.get("labels") or [])
         for e in rec.get("events") or []:
-            if e.get("kind") != "brief.claimed" or (e.get("signals") or {}).get("login") != owner_login:
+            login = (e.get("signals") or {}).get("login")
+            if e.get("kind") != "brief.claimed" or login not in claimers:
                 continue
             issue = e.get("issue") or rec.get("issue")
             if not isinstance(issue, int):
                 continue
             for w in containing_windows(index, ts=e.get("ts"), roles=KIND_ROLES["brief.claimed"],
-                                        author_login=owner_login, owner_login=owner_login):
+                                        author_login=login, owner_login=owner_login):
                 if SHIP_ROUTINE_LABELS.get(w.role) in labels:
                     per_run.setdefault(w.run_id, set()).add(issue)
     return {rid: next(iter(c)) for rid, c in sorted(per_run.items()) if len(c) == 1}
@@ -1066,19 +1102,28 @@ def _kind_key(event: dict[str, Any]) -> str:
     return kind
 
 
-def _owner_key_ok(event: dict[str, Any], w: StepWindow, record: dict[str, Any],
-                  claims: dict[int, int], owner_login: str) -> bool:
-    if w.role not in SHIP_ROLES or (event.get("signals") or {}).get("login") != owner_login:
+def ship_key_ok(event: dict[str, Any], w: StepWindow, record: dict[str, Any],
+                claims: dict[int, int], owner_login: str) -> bool:
+    """§2b: may ship window ``w`` hold ``event`` of ``record``? Always for a non-ship role and for
+    an author other than the owner or the Actions bot; otherwise only through ``w``'s run's claim
+    (``claims``) — or, for an Actions-bot PR event of a run with no claim, the routine's issue kind."""
+    login = (event.get("signals") or {}).get("login")
+    is_owner = login == owner_login
+    if w.role not in SHIP_ROLES or not (is_owner or login in ACTIONS_BOT_LOGINS):
         return True
     claimed = claims.get(w.run_id)
-    if claimed is None:
-        return False
     kind = event.get("kind", "")
     if kind.startswith("brief."):
-        return (event.get("issue") or record.get("issue")) == claimed
+        return claimed is not None and (event.get("issue") or record.get("issue")) == claimed
     if kind == "pr.opened" or kind.startswith("commit."):
         m = CLAIM_BRANCH_RE.match(record.get("head_ref") or "")
-        return bool(m) and int(m.group(1)) == claimed
+        if not m:
+            return False
+        if claimed is not None:
+            return int(m.group(1)) == claimed
+        if is_owner:
+            return False
+        return (int(m.group(1)) in set(record.get("briefs") or [])) == (w.role == "design-run")
     return False
 
 
@@ -1139,7 +1184,7 @@ def annotate_record(record: dict[str, Any], index: ReceiptIndex, codebasis: Code
             cands = [c for c in containing_windows(index, ts=event.get("ts"), roles=roles,
                                                    author_login=signals.get("login"),
                                                    owner_login=owner_login)
-                     if window_belongs(c, rec) and _owner_key_ok(event, c, rec, claims, owner_login)]
+                     if window_belongs(c, rec) and ship_key_ok(event, c, rec, claims, owner_login)]
             verdict, w = pick_window(cands, event.get("ts"))
         runtime = dict(event.get("runtime") or {})
         if verdict == "one":

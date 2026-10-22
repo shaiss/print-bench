@@ -74,6 +74,60 @@ def test_lead_classes_and_fields():
     assert digest.classify_lead("Hi! Jane here 👋") == (None, {})
 
 
+DELIVER_SH = REPO / "scripts" / "design-run-deliver.sh"
+_DELIVERED_LINE_RE = re.compile(r"^\s*DELIVERED_LINE='([^']*)'$", re.M)
+
+
+def _post_success_body(line: str, pr_url: str) -> str:
+    """The comment ``post_success`` in scripts/design-run-deliver.sh posts, from its own printf format."""
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    m = re.search(r"^post_success\(\) \{.*?printf '([^']*)'", text, re.M | re.S)
+    assert m, "post_success printf format"
+    return m.group(1).replace("\\n", "\n") % (line, "claude/issue-900-x", "a" * 40, pr_url,
+                                               "https://github.com/shaiss/print-bench/actions/runs/1")
+
+
+def test_delivered_lead_is_shipped_and_drift_pinned():
+    """Since #858 the deliverers post ``🚢 <routine> delivered — …`` (not the agent's ``✅ **SHIPPED``):
+    a ``shipped`` lead whose PR comes from the ``- pull request:`` line. DELIVERED_LINES equals the
+    script's DELIVERED_LINE assignments and a body built from post_success's own format classifies."""
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    assert sorted(set(_DELIVERED_LINE_RE.findall(text))) == sorted(digest.DELIVERED_LINES)
+    for line in digest.DELIVERED_LINES:
+        body = _post_success_body(line, "https://github.com/shaiss/print-bench/pull/950")
+        assert digest.classify_lead(body) == ("shipped", {"shipped_pr": 950, "design_name": None})
+        assert digest.body_digest(body)["lead"] == "shipped"
+        assert digest.classify_lead(line) == ("shipped", {"shipped_pr": None, "design_name": None})
+    # Negative controls: a longer line, a PR link off github.com, and a drifted script literal.
+    assert digest.classify_lead(digest.DELIVERED_LINES[0] + " (again)") == (None, {})
+    off_site = _post_success_body(digest.DELIVERED_LINES[0], "https://example.com/o/r/pull/950")
+    assert digest.classify_lead(off_site)[1]["shipped_pr"] is None
+    drifted = text.replace("draft PR verified", "draft PR checked")
+    assert sorted(set(_DELIVERED_LINE_RE.findall(drifted))) != sorted(digest.DELIVERED_LINES)
+
+
+def test_contract_lead_carries_the_design_name():
+    """Since #864 an unattended run's §2 contract is its own comment (settle's SHIP-LOCK is a constant
+    stub): lead ``contract``. Pinned to the design-run skill's §2 block with the SHIP-LOCK line and the
+    marker removed — what the skill tells the agent to post — and to the settle stub carrying no name."""
+    skill = (REPO / ".claude" / "skills" / "design-run" / "SKILL.md").read_text(encoding="utf-8")
+    block = re.search(r"^## 2\. Freeze the scope contract.*?^```markdown\n(.*?)^```", skill, re.M | re.S)
+    assert block, "design-run SKILL.md §2 contract block"
+    lines = block.group(1).split("\n")
+    assert lines[0].startswith("🚢 SHIP-LOCK")
+    intent = "\n".join(ln for ln in lines[1:] if not digest.is_marker_line(ln)).replace("<kebab-case>", "widget")
+    assert digest.classify_lead(intent) == ("contract", {"design_name": "widget"})
+    assert digest.classify_lead("**Design name:** Not A Slug\n") == ("contract", {"design_name": None})
+    assert digest.classify_lead("Contract below.\n**Design name:** widget") == (None, {})
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    stub = re.search(r'^SHIP_LOCK_SETTLE_BODY="\$\{STOP_LOCK_MARKER\}([^"]*)"$', text, re.M | re.S)
+    marker = re.search(r"^SHIP_LOCK_HTML_MARKER='([^']*)'$", text, re.M)
+    assert stub and marker
+    body = "🚢 SHIP-LOCK" + stub.group(1).replace("${SHIP_LOCK_HTML_MARKER}", marker.group(1))
+    assert digest.classify_lead(body) == ("ship_lock", {"design_name": None})
+    assert digest.body_digest(body)["marker_lines"] == [marker.group(1)]
+
+
 def test_refs_closes_drops_issue_zero():
     """``#0`` names no issue (contract body-digest@1.refs_closes is ``min 1``): it is dropped, while
     every positive number — leading zeros included, the pre-integration behaviour — is kept."""

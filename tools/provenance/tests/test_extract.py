@@ -20,7 +20,7 @@ from _extract_helpers import (CONTRACT_DELTA, FIXTURE_BRIEFS, FIXTURE_PRS, SOURC
                               contract_with_delta, delta_state, events_of, fixture_ctx, fixture_git, pr_record,
                               release_record, standins)  # noqa: F401  (standins is a fixture)
 
-from provenance import canonical, contract, episodes, extract, markers, membership, trust
+from provenance import canonical, contract, digest, episodes, extract, markers, membership, trust
 
 #: The contract's url pattern WITH H3's requested review delta (a no-op once the integrator applies it).
 DELTA_CONTRACT = contract_with_delta()
@@ -266,6 +266,51 @@ def test_brief_records(standins):
     assert extract.extract_brief(raw, fixture_ctx())["design_name"] == "nuggs-vent-cap"     # title prefix
     raw["issue"]["title"] = "Design brief: NUGGS vent cap"
     assert extract.extract_brief(raw, fixture_ctx())["design_name"] is None
+
+
+def test_brief_after_settle_and_delivery(standins):
+    """Since #858/#864 an unattended design run claims with settle's constant stub (no name), posts its
+    §2 contract as a separate Actions-bot comment (lead ``contract``), and the deliverer announces the
+    PR with ``🚢 design-run delivered — …``. The name comes from the trusted contract, never from the
+    title once a trusted claim exists; an outsider's lock or contract names nothing; the delivered
+    comment is a brief.shipped carrying the PR."""
+    bot = {"login": "github-actions[bot]", "type": "Bot"}
+    settle = "🚢 SHIP-LOCK — settle claim\n\n<!-- design-run-ship-lock:v1 -->\n"
+    contract = "**Design name:** nuggs-vent-cap\n**Brief parts:** cap\n**Style:** none\n\n**Gate contract**\n- [ ] G1\n"
+    delivered = ("🚢 design-run delivered — branch and draft PR verified\n\n- branch: `claude/issue-592-x` (`"
+                 + "a" * 40 + "`)\n- pull request: https://github.com/shaiss/print-bench/pull/950\n"
+                 "- run: https://github.com/shaiss/print-bench/actions/runs/1\n")
+
+    def comment(cid, body, user, at):
+        return {"app": None, "body": digest.body_digest(body), "created_at": at, "id": cid, "updated_at": at,
+                "user": user}
+
+    def build(*comments, title="Design brief: wall-mounted spool holder"):
+        raw = raw_brief(592)
+        raw["issue"]["title"] = title
+        raw["comments"] = list(comments)
+        return extract.extract_brief(raw, fixture_ctx())
+
+    lock = comment(1, settle, bot, "2026-09-12T00:40:00Z")
+    named = comment(2, contract, bot, "2026-09-12T00:40:05Z")
+    shipped = comment(3, delivered, bot, "2026-09-12T02:10:00Z")
+    rec = build(lock, named, shipped)
+    assert rec["design_name"] == "nuggs-vent-cap" and 950 in rec["prs"]
+    ship = events_of(rec, "brief.shipped")[0]
+    assert (ship["pr"], ship["fields"]["shipped_pr"], ship["signals"]["login"]) == (950, 950, "github-actions[bot]")
+    assert events_of(rec, "brief.claimed")[0]["fields"] == {"design_name": None}
+    # A claimed brief with no trusted contract stays null — never the title's first word.
+    assert build(lock)["design_name"] is None
+    # An outsider's contract is ignored; so is an outsider's named lock.
+    outsider = {"login": "mallory", "type": "User"}
+    assert build(lock, comment(4, contract, outsider, "2026-09-12T00:41:00Z"))["design_name"] is None
+    forged = comment(5, "🚢 SHIP-LOCK\n\n**Design name:** evil-name\n", outsider, "2026-09-12T00:41:00Z")
+    assert build(forged, title="Design brief: NUGGS vent cap")["design_name"] is None
+    # The owner's attended SHIP-LOCK still names the design; an unclaimed brief keeps the title slug.
+    owner = {"login": OWNER_LOGIN, "type": "User"}
+    attended = comment(6, "🚢 SHIP-LOCK — running\n\n**Design name:** `spool-arm`\n", owner, "2026-09-12T00:41:00Z")
+    assert build(attended)["design_name"] == "spool-arm"
+    assert build()["design_name"] == "wall-mounted"
 
 
 def test_release_record(standins):

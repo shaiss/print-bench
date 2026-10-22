@@ -291,7 +291,9 @@ classify() {
         # workflow and conf it pins, the data-branch guard both refs carry,
         # the site contract and fixture bundle, the reviewer-posted.sh /
         # coach-lock-check.sh / reviewer-signoff.sh / reviewer_mcp.py
-        # constants its trust port is drift-pinned to, the model-registry
+        # constants its trust port is drift-pinned to, the design-run-deliver.sh
+        # literals (delivered line, settle lock, its marker) and the design-run
+        # skill's §2 contract block its lead rules are drift-pinned to, the model-registry
         # parser the serving join reuses, the audit's golden timelines, the
         # pinned #843 snapshot it ingests (a byte change there must fail the
         # pin test, not ship silently) and site/lib/timeline.mjs (the row
@@ -306,6 +308,7 @@ classify() {
         site/lib/provenance-contract*|site/test/fixtures/provenance-bundle.json|\
         scripts/provenance.sh|scripts/reviewer-posted.sh|scripts/coach-lock-check.sh|\
         scripts/reviewer-signoff.sh|.claude/reviewer-post/reviewer_mcp.py|\
+        scripts/design-run-deliver.sh|.claude/skills/design-run/SKILL.md|\
         tools/model-registry/*|audits/provenance-2026-10/fixtures/*|\
         audits/provenance-2026-10/rescue/*|site/lib/timeline.mjs|\
         .github/workflows/ci.yml) prtests=true ;;
@@ -883,6 +886,10 @@ selftest() {
   check "provenance-trust-port-drift" "$out" "provenance_tests=true"
   out="$(run ".claude/reviewer-post/reviewer_mcp.py")"
   check "provenance-footer-drift" "$out" "provenance_tests=true"
+  out="$(run "scripts/design-run-deliver.sh")"
+  check "provenance-delivered-line-drift" "$out" "provenance_tests=true"
+  out="$(run ".claude/skills/design-run/SKILL.md")"
+  check "provenance-contract-lead-drift" "$out" "provenance_tests=true"
   out="$(run "site/lib/timeline.mjs")"
   check "provenance-row-parser-drift" "$out" \
     "provenance_tests=true" "gate=true" "gate_designs="

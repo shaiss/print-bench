@@ -16,7 +16,10 @@ shape cannot be applied to frozen units by re-extraction; it needs a
 ``refreeze`` (comments and issues are not under Actions retention, so their
 bodies can be re-read). Every digest therefore records :data:`DIGEST_VERSION`.
 
-Body digest fields (contract ``body-digest@1``):
+Body digest fields (contract ``body-digest@2``; an ``@1`` digest was computed
+before the ``delivered`` alternative of ``shipped`` and the ``contract`` class
+existed, so its ``lead`` is ``null`` where ``@2`` would classify — a refreeze
+re-reads it):
 
 ``sha256``
     lower-hex SHA-256 of the body's UTF-8 bytes, exactly as the API returned
@@ -62,7 +65,11 @@ Body digest fields (contract ``body-digest@1``):
     full-line marker) under :data:`LEAD_RULES`, or ``null``.
 ``lead_fields``
     validated fields the lead's class carries (``design_name``,
-    ``shipped_pr``, ``round``, ``round_sub``); ``{}`` otherwise.
+    ``shipped_pr``, ``round``, ``round_sub``); ``{}`` otherwise. A
+    ``shipped`` lead takes ``shipped_pr`` from the lead line (``✅ **SHIPPED …
+    #N``, ``📦 **Draft PR opened: #N**``) or, for the delivery step's
+    ``🚢 <routine> delivered — …`` line, from the body's ``- pull request:
+    …/pull/<N>`` line (:data:`DELIVERED_PR_RE`).
 ``refs_closes``
     sorted unique issue numbers named by a GitHub closing keyword
     (``Closes #N`` …) anywhere in the body — only a PR body's are used.
@@ -89,7 +96,7 @@ import re
 from typing import Any, Optional
 
 #: Recorded in every digest; bump on ANY change to the rules below.
-DIGEST_VERSION = "body-digest@1"
+DIGEST_VERSION = "body-digest@2"
 MESSAGE_DIGEST_VERSION = "message-digest@1"
 
 #: Byte-identical to ``.claude/reviewer-post/reviewer_mcp.py`` FOOTER and to
@@ -126,26 +133,43 @@ MCP_COMPLETION_RE = re.compile(
 
 _DESIGN_NAME_RE = re.compile(r"^\*\*Design name:\*\*\s*`?([a-z0-9][a-z0-9-]{0,63})`?\s*$", re.M)
 
+#: The delivery step's success lead, byte-identical to the two ``DELIVERED_LINE``
+#: assignments in scripts/design-run-deliver.sh (drift-pinned by tests/test_digest.py).
+#: Posted by ``design-run-deliver.yml`` / ``backlog-burn-deliver.yml`` since #858; the
+#: line carries no number, so the PR comes from the body's ``- pull request:`` line.
+DELIVERED_LINES = (
+    "🚢 design-run delivered — branch and draft PR verified",
+    "🚢 backlog-burn delivered — branch and draft PR verified",
+)
+#: The ``- pull request: <url>`` line ``post_success`` writes under the delivered lead.
+DELIVERED_PR_RE = re.compile(
+    r"^- pull request: https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/pull/(?P<pr>[0-9]{1,7})$", re.M)
+
 #: (class, compiled regex) — the first rule matching the stripped lead line
 #: wins. Anchored at the start of the line. Extending this list is a
-#: DIGEST_VERSION bump.
+#: DIGEST_VERSION bump. ``contract`` is the unattended design run's §2 scope
+#: contract, posted by the settle job as its own comment since #864 (the
+#: settle SHIP-LOCK is a constant stub with no ``**Design name:**``).
 LEAD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ship_lock_withdrawn", re.compile(r"^🚢 SHIP-LOCK WITHDRAWN\b")),
     ("ship_lock", re.compile(r"^🚢 SHIP-LOCK\b")),
     ("declined", re.compile(r"^🚢 DECLINED\b")),
     ("deferred", re.compile(r"^🚢 DEFERRED\b")),
-    ("shipped", re.compile(r"^(?:✅ \*\*SHIPPED\b.*?#(?P<pr1>[0-9]{1,7})\b|📦 \*\*Draft PR opened: #(?P<pr2>[0-9]{1,7})\*\*)")),
+    ("shipped", re.compile(r"^(?:✅ \*\*SHIPPED\b.*?#(?P<pr1>[0-9]{1,7})\b|📦 \*\*Draft PR opened: #(?P<pr2>[0-9]{1,7})\*\*"
+                           r"|(?P<delivered>" + "|".join(map(re.escape, DELIVERED_LINES)) + r")$)")),
     ("decision_needed", re.compile(r"^🚦 DECISION NEEDED\b")),
     ("coach_lock", re.compile(r"^🎓 COACH-LOCK\b")),
     ("coach_round", re.compile(r"^Round (?P<round>[0-9]{1,3})(?P<sub>[a-z]?) — ")),
     ("bugbot_limit", re.compile(r"^<h[1-6]>Bugbot couldn't run - usage limit reached</h[1-6]>$")),
     ("qodo_paused", re.compile(r"^\*\*ⓘ Qodo reviews are paused\b")),
     ("clear_prs", re.compile(r"^\*\*/clear-prs sweep\b")),
+    ("contract", re.compile(r"^\*\*Design name:\*\*")),
 )
 LEAD_CLASSES = tuple(name for name, _ in LEAD_RULES)
 
 #: Lead classes that carry a ``design_name`` field when the body has one.
-_DESIGN_NAME_LEADS = frozenset({"ship_lock", "ship_lock_withdrawn", "declined", "deferred", "shipped"})
+_DESIGN_NAME_LEADS = frozenset({"ship_lock", "ship_lock_withdrawn", "declined", "deferred", "shipped",
+                                "contract"})
 
 _CLOSES_RE = re.compile(
     r"(?i)\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?\s+#([0-9]{1,7})\b"
@@ -294,6 +318,9 @@ def classify_lead(body: str) -> tuple[Optional[str], dict[str, Any]]:
         fields: dict[str, Any] = {}
         if name == "shipped":
             pr = m.group("pr1") or m.group("pr2")
+            if pr is None and m.group("delivered"):
+                pm = DELIVERED_PR_RE.search(body)
+                pr = pm.group("pr") if pm else None
             fields["shipped_pr"] = int(pr) if pr else None
         if name == "coach_round":
             fields["round"] = int(m.group("round"))
@@ -311,7 +338,7 @@ def refs_closes(body: str) -> list[int]:
 
 
 def body_digest(body: Optional[str]) -> dict[str, Any]:
-    """The ``body-digest@1`` object for ``body`` (``None`` digests as ``""``)."""
+    """The ``body-digest@2`` object for ``body`` (``None`` digests as ``""``)."""
     text = body if isinstance(body, str) else ""
     lines = text.split("\n")
     first = lines[0].strip() if lines else ""
