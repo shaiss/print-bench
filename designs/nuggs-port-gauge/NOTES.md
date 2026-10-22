@@ -97,7 +97,7 @@ catastrophe check; the tightest rung the head actually seats on the ladder
 is the number. Then print `reference-head` + both plates from the
 multi-object 3MF (`./scripts/plate.sh nuggs-port-gauge`).
 
-CI print-time / filament estimates (sticky on PR #841 for `38648e8`; PLA
+CI print-time / filament estimates (printcheck sticky on PR #841; PLA
 est.): coupon ~4 h 36 m / ~60 g; reference-head ~2 h 28 m / ~32 g;
 `ladder-3` ~14 h 52 m / ~180 g; `ladder-2` ~9 h 27 m / ~113 g; **all four
 ~31 h / ~386 g**.
