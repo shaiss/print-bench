@@ -17,6 +17,8 @@ one calibration replaces N single-value coupon reprints.
 
 ![3-step ladder plate (0.20 / 0.25 / 0.30)](previews/ladder-3.png)
 
+![3-step ladder plate — all three embossed values](previews/ladder-3-labels.png)
+
 ![2-step ladder plate (0.35 / 0.40)](previews/ladder-2.png)
 
 ## What you get
@@ -44,8 +46,9 @@ reference head first; `ladder-3` alone is a ~15 h plate.
 
 **Deliverable.** `./scripts/plate.sh nuggs-port-gauge` builds
 `build/nuggs-port-gauge-plate.3mf` with three distinct objects. Import that
-(or the three gated per-part STLs) and keep them as separate objects in the
-slicer.
+(or the three gated per-part STLs), keep them as separate objects in the
+slicer, and print them as separate plates — the trio (and any pair) will not
+co-fit a 256 mm bed.
 
 ## Print settings
 
@@ -53,25 +56,37 @@ slicer.
   all four pieces — head, coupon, and both plates — in the **same filament**.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Infill:** 15–20 % gyroid.
-- **Supports:** none.
+- **Supports:** none. The ~53 mm tube-face bridge prints with a visible sag
+  (three arcs per port) on every part — that is expected; do not add supports
+  (they would have to come out through the 20° slots and scar the fit walls).
 - **Seam:** scarf on both ladder plates and the reference head — a stacked
   Back ridge is 0.1–0.2 mm and biases every reading the same way. Adjacent
   rings print kissing by design (`step_pitch` 97 vs Ø96.8 envelope, ~0.2 mm),
-  so scarf seam is required.
+  so scarf seam is required. Expect small webs where adjacent rings kiss —
+  the designed 0.2 mm gap mostly closes in plastic; that is the slot welding,
+  not a defect (`step_pitch` stays 97).
 - **Orientation:** as modeled — standing on sector tips (plates on the
   backplate; reference head on tips + grip tab).
-- **Brim:** 5 mm recommended on both ladder plates and the coupon (optional
-  on the head); remove with a blade and re-check flatness before gauging.
+- **Brim:** 5 mm recommended on both ladder plates, the coupon, and the head
+  (on the head, de-bridge the sector feet with a blade before gauging);
+  remove with a blade and re-check flatness before gauging.
 - **Bed:** each plate needs a 256×256 mm bed (ladder-3 ≈ 200×198; with brim
-  ~210×208) — too large for 180-class machines such as an A1 mini.
+  ~210×208) — too large for 180-class machines such as an A1 mini. Print the
+  three plate objects as separate plates; they will not co-fit one 256 bed.
 - **Labels:** if the ~1 mm decimal point prints faint, the digits alone still
   identify the rung.
 - **Handling:** the grip tab is a press-ledge, not a handle — press and
   twist; don't lift by the tab.
+- **First layer:** the locking rib starts at Z=0 on the head and coupon, so
+  first-layer squish is part of the gauge calibration — dial in the first
+  layer and avoid elephant foot before trusting readings (ladder rings bury
+  the same tips in the backplate and print clean).
 - **First use:** debur the head's port face (blade or fingernail) before the
   first session — tip chamfer absorbs most first-layer flare, but a quick
   wipe still helps. Wipe a contrasting crayon or water-based marker across
   the embossed numbers before the first session to read them.
+- **Storage:** bag the coupon rings between sessions — scratches become
+  readings on this instrument.
 
 ## Parameters
 
@@ -98,14 +113,16 @@ command line with `-D 'ref_port_tol=0.30'`.
 3. Start at **0.40** (widest seats easiest first). Flip the reference head
    port-face down onto a ring, line the lugs up with the gaps, quarter-turn
    to seat, and hold the plate flat with the other hand so the plate does
-   not spin with you. Unseat and step down through 0.20. Run the round
-   twice (0.40 down to 0.20, then back) — or have someone else call rungs
-   out of order — so the known 0.30 default does not bias the call.
-4. Score each rung in plain words: won't seat or won't turn / seats and
-   clicks home / seats but wobbles. **Decision rule:** choose the tightest
-   rung that seats and clicks home without binding; if that rung is within
-   one step of 0.30, keep 0.30. Use that value on the next NUGGS coupon, and
-   log a FIELD-TEST entry in that design's NOTES.md.
+   not spin with you. Unseat and step down through 0.20. Score each rung in
+   plain words as you go (won't seat or won't turn / seats and clicks home /
+   seats but wobbles), and write the three words/scores down before running
+   the second pass — or have someone else call rungs out of order — so pass
+   2 does not anchor on pass 1 and the known 0.30 default does not bias the
+   call. Run the round twice (0.40 down to 0.20, then back).
+4. **Decision rule:** choose the tightest rung that seats and clicks home
+   without binding; if that rung is within one step of 0.30, keep 0.30. Use
+   that value on the next NUGGS coupon, and log a FIELD-TEST entry in that
+   design's NOTES.md.
 5. **Session-level outs:** if all five rungs bind, fix the first layer
    before blaming `port_tol`. If even 0.40 wobbles, the printer needs
    attention before the port does — this gauge cannot help upstream
