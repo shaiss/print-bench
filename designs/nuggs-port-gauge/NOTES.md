@@ -99,8 +99,8 @@ multi-object 3MF (`./scripts/plate.sh nuggs-port-gauge`).
 
 CI print-time / filament estimates (printcheck sticky on PR #841; PLA
 est.): coupon ~4 h 36 m / ~60 g; reference-head ~2 h 28 m / ~32 g;
-`ladder-3` ~14 h 52 m / ~180 g; `ladder-2` ~9 h 27 m / ~113 g; **all four
-~31 h / ~386 g**.
+`ladder-3` ~14 h 49 m / ~179 g; `ladder-2` ~9 h 14 m / ~111 g; **all four
+~31 h / ~383 g**.
 
 Tuning steps after a real ladder print:
 

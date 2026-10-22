@@ -54,13 +54,20 @@ slicer.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Infill:** 15–20 % gyroid.
 - **Supports:** none.
-- **Seam:** Back (or scarf) — the gauge reads finer than a stock seam ridge.
+- **Seam:** scarf on both ladder plates and the reference head — a stacked
+  Back ridge is 0.1–0.2 mm and biases every reading the same way. Adjacent
+  rings print kissing by design (`step_pitch` 97 vs Ø96.8 envelope, ~0.2 mm),
+  so scarf seam is required.
 - **Orientation:** as modeled — standing on sector tips (plates on the
   backplate; reference head on tips + grip tab).
-- **Brim:** 5 mm recommended on both ladder plates (optional on head/coupon);
-  remove with a blade and re-check flatness before gauging.
+- **Brim:** 5 mm recommended on both ladder plates and the coupon (optional
+  on the head); remove with a blade and re-check flatness before gauging.
+- **Bed:** each plate needs a 256×256 mm bed (ladder-3 ≈ 200×198; with brim
+  ~210×208) — too large for 180-class machines such as an A1 mini.
 - **Labels:** if the ~1 mm decimal point prints faint, the digits alone still
   identify the rung.
+- **Handling:** the grip tab is a press-ledge, not a handle — press and
+  twist; don't lift by the tab.
 - **First use:** debur the head's port face (blade or fingernail) before the
   first session — tip chamfer absorbs most first-layer flare, but a quick
   wipe still helps. Wipe a contrasting crayon or water-based marker across
