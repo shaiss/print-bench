@@ -208,10 +208,20 @@ test("fetchLatestReleaseManifests never sends Authorization off api.github.com (
   assert.equal(got.status, SEAM.OK);
   assert.equal(got.items.get("calibration-cube").version, "v0.1");
 
-  const hosts = seen.map((s) => s.host);
-  assert.ok(hosts.includes("api.github.com"), "hit the API");
-  assert.ok(hosts.includes("github.com"), "hit browser_download_url host");
-  assert.ok(hosts.includes("objects.githubusercontent.com"), "followed CDN redirect");
+  // Exact hostname equality (not substring) — CodeQL flags hostname.includes("…")
+  // as incomplete URL sanitization even on a host list.
+  assert.ok(
+    seen.some((s) => s.host === "api.github.com"),
+    "hit the API"
+  );
+  assert.ok(
+    seen.some((s) => s.host === "github.com"),
+    "hit browser_download_url host"
+  );
+  assert.ok(
+    seen.some((s) => s.host === "objects.githubusercontent.com"),
+    "followed CDN redirect"
+  );
   assert.equal(
     seen.filter((s) => s.auth).length,
     1,
