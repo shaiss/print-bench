@@ -91,11 +91,16 @@ clocking, twist either way.
   `lib/nuggs-coupling-mates.conf`, never yet tuned in plastic).
 - Caliper the bore: under 79.0 mm means your printer is shrinking.
 
-`nuggs-frieda-wordpair-coupon.scad` prints one F→R junction of the
-production cage (`part = "wordpair"` — include-and-override, no copied
-geometry). Hold it up to the light: the middle arm of F must fuse into R's
-stem (same check `previews/weld-fr.png` watches). Minutes of print against
-the ~16 h bridge.
+`nuggs-frieda-wordpair-coupon.scad` prints junction 0–1 of whatever `name`
+is set (`part = "wordpair"` — include-and-override, no copied geometry).
+For FRIEDA that is F→R at the production kern; a rename prints *that*
+name's glyphs 0–1. Hold it up to the light along the whole junction height
+(the mid-arm rib covers only ~0.46–0.70 of cap height): the free arm must
+fuse into the next stem (same check `previews/weld-fr.png` watches for
+F→R). On the finished bridge, give every other junction — including
+FRIEDA's E→D — the same light check. CI's printcheck sticky prices the
+coupon at **2 h 25 m / 26.16 g** against the ~16 h / ~206 g bridge; brim
+the coupon too (one curved wall-arc under a ~65 mm part).
 
 ## Print settings
 
@@ -109,22 +114,30 @@ the ~16 h bridge.
   band land in the 1.6 mm sleeve gap and cannot be removed.
 - **Material:** PETG preferred (N7 thermal reasoning); PLA prints the letter
   cage cleaner. In PETG expect slight underside droop on the letter bridges
-  — cosmetic, not a failed print; slow bridge speed on the letter band.
+  and weld ribs — cosmetic, not a failed print; slow bridge speed on the
+  letter band and weld ribs.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle; tube wall 2.4 mm = 6 perimeters,
-  cage shell 2.4 mm.
+  cage shell 2.4 mm. Almost all walls — no infill to hide under-extrusion;
+  calibrate flow before the ~16 h bridge.
 - **Seam:** Back or scarfed — avoids a full-height ridge on the word or a
   port sector.
-- **Brim:** a slicer brim is recommended on the bridge — it stands 180 mm
-  tall on three small sector tips. After the print: snap the brim, then
-  deburr each sector tip until a fingernail drags across without catching.
+- **Brim:** a slicer brim is recommended on the bridge (180 mm tall on three
+  small sector tips) and on the wordpair coupon (one curved wall-arc under
+  a ~65 mm part). After the print: snap the brim, then deburr each sector
+  tip until a fingernail drags across without catching.
+- **Orientation:** upright as rendered. Bridge on sector tips; wordpair on
+  its wall-arc.
 
 ## Open items
 
+*(Numbered **O1–O3** — the charter's F1–F3 are this module's added
+non-negotiables in `PM.md`; do not reuse those letters here.)*
+
 | # | Item | Why |
 |---|---|---|
-| F1 | Print the coupon and tune `port_tol` | Inherited standing item from the standard: the fit is proven in geometry, not yet in plastic |
-| F2 | Print the wordpair coupon, then the bridge; inspect the F→R / E→D weld bridges at 0.2 mm layers | The weld turns cantilevers into bridges; bridge quality over ~8-15 mm spans at 2.4 mm thickness is printer-dependent. Wordpair coupon rehearses F→R in minutes |
-| F3 | Other names | `name` + the A–Z advance table make any capital name renderable; the wrap assert bounds length (~7-8 caps at `letter_size = 80`, more at smaller sizes). A per-name kern review is manual: any glyph with free-ended horizontal arms (E, F, and to a lesser degree L, T) wants a weld to its right neighbour. Names *ending* on E/F/L/T have no right-hand weld target — check junctions against `previews/weld-fr.png` |
+| O1 | Print the coupon and tune `port_tol` | Inherited standing item from the standard: the fit is proven in geometry, not yet in plastic |
+| O2 | Print the wordpair coupon, then the bridge; inspect weld bridges at 0.2 mm layers along the whole junction height (incl. E→D on the bridge) | The weld turns cantilevers into bridges; bridge quality over ~8-15 mm spans at 2.4 mm thickness is printer-dependent. Wordpair coupon rehearses junction 0–1 of `name` (~2 h 25 m / 26 g per CI sticky) |
+| O3 | Other names | `name` + the A–Z advance table make any capital name renderable; the wrap assert bounds length (~7-8 caps at `letter_size = 80`, more at smaller sizes). A per-name kern review is manual: any glyph with free-ended horizontal arms (E, F, and to a lesser degree L, T) wants a weld to its right neighbour. Names *ending* on E/F/L/T have no right-hand weld target — check junctions against `previews/weld-fr.png`. The wordpair coupon follows `name` (glyphs 0–1); hold the printed bridge to the light for the other junctions |
 
 ## Product-shot provenance
 

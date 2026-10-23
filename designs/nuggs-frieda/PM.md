@@ -31,6 +31,9 @@ one interlock standard, open-module arc floor). This module adds:
 | F2 | Free-arm letter welds close (F→R, E→D on FRIEDA; per-name for renames) | mid-arm rib + letter_kern; `weld-fr` camera | Printability: one-ended shelves sag in PETG | A rename whose junctions pass the weld check |
 | F3 | No modelled brim ears on sector tips | 0 ears | 2026-10-22 PM ruling — snipped nubs are an N6 chew risk at mouth height | Never; slicer brim + deburr is the substitute |
 
+*(Charter F1–F3 are this module's added non-negotiables. NOTES.md's open-item
+series is numbered **O1–O3** so the two F-series never collide.)*
+
 ## Out of scope
 
 **Deferred** — see backlog (elephant-foot OD lead-in; drain-claim wash check).
@@ -86,17 +89,17 @@ repurpose one. `weld-fr` is load-bearing for renames.
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
 | B1 | Print port coupon; tune `port_tol` | System-wide; gates every coupling | ~2 h / coupon |
-| B2 | Print wordpair coupon; confirm F→R weld in plastic | Unique risk of this module | minutes |
-| B3 | 45° elephant-foot lead-in on the sector OD at Z=0 | Jane: bore has `bore_lead`, OD is bare; coupon absorbs it today — next rev once fit is tuned in plastic (F1) | small chamfer |
-| B4 | Verify "water drains out through letter openings" at first wash | Drik [hunch]: bedding fibre / brush access / scent in the moat — FIELD-TEST entry; soften the claim if it fails | 1 wash cycle |
-| B5 | Rename cookbook (kern recipes for common free-arm endings) | Rename path is the product; F3 is still manual | docs |
+| B2 | Print wordpair coupon; confirm F→R weld in plastic | Unique risk of this module; CI prices the coupon at 2 h 25 m / ~26 g | ~2.4 h |
+| B4 | First-wash FIELD-TEST for drain + twist-grip feel | Page now hedges ("designed to drain"); restore or reword from evidence once the entry lands; also note grip feel on the letter cage after wash cycles | 1 wash cycle |
+| B5 | Rename cookbook (kern recipes for common free-arm endings) | Rename path is the product; NOTES O3 is still manual. Cookbook must say the wordpair coupon follows `name` (junction 0–1 at the caller's kern), include a per-name recipe for rehearsing a *different* risky junction, and Jane's tip: photograph the coupon against a window | docs |
+| B3 | 45° elephant-foot lead-in on the sector OD at Z=0 | Jane: bore has `bore_lead`, OD is bare; tips are both bed feet *and* mating lugs, so first-layer squish lands on a coupling surface — still gated on B1 plastic tune | small chamfer |
 
 ## Open decisions
 
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
 | PETG vs PLA as the page default? | No | PETG (N7 / habitat toughness); page already says PLA prints the cage cleaner |
-| Add an E→D freeze-window camera this round? | No | Declined for this round — `weld-fr` + wordpair coupon cover F→R; E→D shares the same rib mechanism |
+| Add an E→D freeze-window camera / second coupon sector? | No | Closed 2026-10-23 — see decision log |
 
 ## Decision log
 
@@ -106,4 +109,6 @@ repurpose one. `weld-fr` is load-bearing for renames.
 | 2026-08-11 | All-caps only; `letter_kern` welds free arms | Rail-to-rail anchor; cantilevers become bridges |
 | 2026-10-22 | **No modelled brim ears; slicer brim + deburr** | Removable ears cleared printcheck bed-contact but left chewable nubs on sector tips (N6). Page must say *why* the brim and *how* to deburr (fingernail test) |
 | 2026-10-23 | `letter_kern` 8→12 + mid-arm `weld_rib`; `mark_h` 5→8 | Jane: E comb / F mid-arm short on outer face; welfare marks under 0.8 mm stroke. Rib stays in the cage annulus (N6: no bore protrusion) |
-| 2026-10-23 | Wordpair weld coupon ships | Drik: port coupon cannot rehearse the letter-bridge risk |
+| 2026-10-23 | Wordpair weld coupon ships | Drik: port coupon cannot rehearse the letter-bridge risk; CI sticky prices it 2 h 25 m / 26.16 g |
+| 2026-10-23 | E→D: no second camera, no second coupon sector | Render covered by the shared rib mechanism (`weld-fr`, word-front/word-back); plastic by the hold-to-light check on the printed bridge; second sector deliberately not added this round (optional B2 ride-along if ever wanted) |
+| 2026-10-23 | Drain claim hedged to "designed to" | No FIELD-TEST entry yet; B4 owns the evidence pass and any restore/reword |

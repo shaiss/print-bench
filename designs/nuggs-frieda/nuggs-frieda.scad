@@ -213,7 +213,7 @@ assert(len(letter_kern) == len(name) - 1, str(
     "CAGE KERN: letter_kern has ", len(letter_kern), " entries for a ",
     len(name), "-glyph name; it needs exactly ", len(name) - 1,
     " (one per gap). Any glyph with free-ended arms (E, F, L, T) wants a",
-    " weld into its right-hand neighbour — see NOTES.md F3."));
+    " weld into its right-hand neighbour — see NOTES.md O3."));
 advs   = [for (i = [0 : len(name) - 1]) _adv_mm(name[i])];
 kerns  = letter_kern;
 word_w = _vsum(advs, len(advs)) - _vsum(kerns, len(kerns));
