@@ -37,7 +37,10 @@ run. One printed part, no supports, no hardware.
   the mouth rim** (flat file or one pass of a blade held flat against the
   skirt / rim) before judging the fit — brim scar lands exactly on the bayonet
   engagement surfaces, and the raked mouth rim prints knife-edged
-- **Seam:** Back (or scarf) — an Aligned seam stacks a ridge the full 197 mm
+- **Seam:** Back (or scarf) — an Aligned seam stacks a ridge the full 197 mm.
+  Before slicing the body, check the seam view in the slicer preview and make
+  sure the seam is not parked in the fill-line groove band; if it is, paint
+  the seam onto the outside wall at that height.
 - **Print the coupon first** (see below) — the port tolerance is untested on
   any printer
 - Roughly 9 h / 130 g for the body

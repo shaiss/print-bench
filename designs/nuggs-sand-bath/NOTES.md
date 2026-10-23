@@ -287,8 +287,9 @@ Last pre-freeze camera nudge landed in `cameras.conf` (~25–30° off wall
 normal; `hero` frozen untouched). Local verification: OpenSCAD preview still
 does not resolve the 1.2 mm recess as a stranger-readable line under that
 framing (face-on views show no pixel delta for the groove; edge-on only the
-stippled edge patch Jane declined). **Next step if CI regen agrees: concede
-to honest caption** — do not iterate cameras again; rim-relative 15 mm below
-the low rim stays the primary fill instruction; B5's groove-witness coupon
-patch is the plastic proof. Do not embed `fill-line.png` until a regenerated
-shot verifiably shows the nick.
+stippled edge patch Jane declined). **Conceded 2026-10-23 (Jane r5):** regen
+still unread; `CAMERAS.md` now describes an interior wall/floor-junction
+close-up that does not show the nick — no further camera iteration; camera
+id + parameters kept; rim-relative 15 mm below the low rim stays primary;
+B5's groove-witness coupon patch is the plastic proof; `fill-line.png` embed
+stays declined.
