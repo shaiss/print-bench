@@ -200,8 +200,8 @@ segments, not rectangles.
    after the cavity difference; sand_body still ends on that plane (mesh
    capacity unchanged at 245.5 mL). **Hollow-tail follow-up (Bugbot Medium):**
    the through `out_2d`/`in_2d` extrusion still ran to `z_far_out`, so floor
-   and side walls continued past the slab as an open U-channel ~`ramp_run`
-   long under the ramp (Z sections past the ramp start showed the floor band
+   and side walls continued past the slab as about one `ramp_run` of open
+   U-channel under the ramp (Z sections past the ramp start showed the floor band
    still material; YZ x=0 showed the horizontal floor past the ramp toe).
    Trimmed with `far_tail_cut()` (half-space beyond the slab's outer face);
    sand mesh still 245.5 mL.
