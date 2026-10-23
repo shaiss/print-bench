@@ -39,9 +39,11 @@ Syrian-scale Ø280 mm wheel exceeds the gate's 200 mm test-slice ceiling (#673).
   wins over the brief's "on its base" orientation note. In use the foot
   is on the floor and the port is the anti-slide anchor.
 - **Stand AABB ~178 mm vs 180 mm bound is intentional** (2 mm mesh headroom
-  under #673). Do not shrink geometry for brim/XY headroom — a slicer brim
-  or XY compensation can still push the printed envelope over; the product
-  page names that risk so keepers check their bed. (Drik R2 finding 8.)
+  under #673). Measured on the print-pose export: **178 mm is Z (height)** —
+  port-down, foot vertical — so a slicer brim never affects it; bed XY is
+  about 153 × 166 mm (room for a normal brim on a 200 mm bed). The 180 mm
+  bound is the CI/printcheck envelope, not the keeper's bed. Do not shrink
+  geometry for that margin. (Drik R2 finding 8; R3 finding 4 axis clarify.)
 - **Style: none.** Port geometry is the look.
 - **ci.cog adopted** for the stand + wheel point-mass at the axle (advisory).
 

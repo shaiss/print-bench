@@ -44,10 +44,13 @@ Separately printed parts — the deliverable is the multi-object 3MF plate
   - stand — port-down on the coupling sector tips (family pose; foot is
     vertical during print, on the floor in use)
   - axle — on its side
-- **Brim:** optional on the sector tips if adhesion is weak. Stand mesh AABB
-  is **~178 mm** against the **180 mm** part bound on purpose (2 mm headroom);
-  a brim or XY compensation can push the printed envelope over — check your
-  bed before adding either; do not expect a geometry shrink for that margin
+- **Brim:** optional on the sector tips if adhesion is weak. In the print
+  pose (port-down, foot vertical) the stand's longest mesh AABB is
+  **~178 mm on Z** (height) against the **180 mm** CI/printcheck part
+  bound on purpose (2 mm headroom) — a brim never changes that axis. Bed
+  footprint is about 153 × 166 mm, so a normal ~5 mm brim fits on a
+  200 mm bed; the 180 mm bound is the gate envelope, not your bed size.
+  Do not expect a geometry shrink for the Z headroom
 
 ## Parameters
 
