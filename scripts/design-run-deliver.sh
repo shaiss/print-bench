@@ -1059,8 +1059,12 @@ body_is_stop_comment() {
 # Posts the settle SHIP-LOCK claim (constant body with HTML marker)
 # first, then applies intents — except when intents indicate a hard stop,
 # in which case the lock is deferred and skipped only after a validated
-# stop comment actually posts (Cipher L2, #884). One intent posts only when:
-# it targets THIS issue, its action is comment or label, its label is in
+# stop comment actually posts (Cipher L2, #884). Stop comment intents are
+# applied last (Cipher, #894): skip-lock settle leaves the thread claimless,
+# and lock-cleanup's claimless_stop requires the latest comment to be the
+# stop — array order stop-then-other would otherwise post the other comment
+# with a higher id and score the run dead. One intent posts only when: it
+# targets THIS issue, its action is comment or label, its label is in
 # INTENTS_ALLOWLIST, and the per-run caps hold. Comment bodies are
 # NFKC-normalized (Cf stripped, whitespace collapsed) before the ship-lock
 # regex; HTML comment markers and oversize bodies are rejected (Cipher, #864).
@@ -1070,8 +1074,8 @@ body_is_stop_comment() {
 # failure, or broken arguments — an applier that cannot read its input
 # must not look like "no intents".
 apply_intents() {
-  local path="$1" n i applied=0 rejected=0 comments=0 labels=0
-  local intent_issue action body label size normalized
+  local path="$1" i applied=0 rejected=0 comments=0 labels=0
+  local intent_issue action body label size normalized order
   local defer_settle_lock=0 stop_posted=0
   if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
     echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
@@ -1116,20 +1120,36 @@ apply_intents() {
   else
     post_settle_ship_lock
   fi
-  n="$(jq '.intents | length' "$path")"
-  i=0
-  while [ "$i" -lt "$n" ]; do
+  # Cipher (#894): non-stop intents (comments + labels) keep relative order,
+  # then stop comments keep theirs. Same first-line markers as
+  # intents_stop_indicated / body_is_stop_comment.
+  if ! order="$(jq -r --arg d1 "$STOP_MARKER_DECLINED" \
+      --arg d2 "$STOP_MARKER_DECISION" --arg d3 "$STOP_MARKER_DEFERRED" '
+    def fl($b): ($b // "") | split("\n")
+      | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+      | map(select(length > 0)) | (.[0] // "");
+    def is_stop_comment:
+      ((.action // "") == "comment")
+      and (fl(.body) | startswith($d1) or startswith($d2) or startswith($d3));
+    [.intents | to_entries[] | select(.value | is_stop_comment | not) | .key]
+    + [.intents | to_entries[] | select(.value | is_stop_comment) | .key]
+    | .[]
+  ' "$path")"; then
+    echo "design-run-deliver: could not order intents — refusing to apply" >&2
+    exit 1
+  fi
+  # Word-split of newline-separated indices is intentional.
+  # shellcheck disable=SC2086
+  for i in $order; do
     if ! intent_issue="$(jq -r --argjson i "$i" '.intents[$i].issue // "" | if type == "number" then tostring else . end' "$path")" \
       || ! action="$(jq -r --argjson i "$i" '.intents[$i].action // ""' "$path")"; then
       echo "::warning::intents entry ${i} is unreadable — skipped" >&2
       rejected=$((rejected + 1))
-      i=$((i + 1))
       continue
     fi
     if ! [[ "$intent_issue" =~ ^[0-9]+$ ]] || [ "$intent_issue" != "$ISSUE" ]; then
       echo "::warning::intent ${i} targets issue '${intent_issue}', not the selected #${ISSUE} — rejected (off-issue writes are the attack #862 closes)" >&2
       rejected=$((rejected + 1))
-      i=$((i + 1))
       continue
     fi
     case "$action" in
@@ -1137,7 +1157,6 @@ apply_intents() {
         if ! body="$(jq -r --argjson i "$i" '.intents[$i].body // ""' "$path")"; then
           echo "::warning::comment intent ${i} is unreadable — skipped" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         local blen
@@ -1145,14 +1164,12 @@ apply_intents() {
         if [ -z "$body" ] || [ "${blen:-0}" -gt "$INTENTS_BODY_MAX" ]; then
           echo "::warning::comment intent ${i} has an empty or over-length body (cap ${INTENTS_BODY_MAX} bytes) — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         case "$body" in
           *'<!--'*|*'-->'*)
             echo "::warning::comment intent ${i} contains an HTML comment marker — rejected" >&2
             rejected=$((rejected + 1))
-            i=$((i + 1))
             continue
             ;;
         esac
@@ -1163,20 +1180,17 @@ apply_intents() {
         if printf '%s' "$normalized" | normalized_body_has_ship_lock; then
           echo "::warning::comment intent ${i} matches ship-lock after normalization — rejected (intents cannot author a lock; see #872 for burn residual)" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         if [ "$comments" -ge "$INTENTS_MAX_COMMENTS" ]; then
           echo "::warning::comment intent ${i} exceeds the ${INTENTS_MAX_COMMENTS}-comment cap — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         if ! gh api --method POST "repos/${REPO}/issues/${ISSUE}/comments" \
           -f body="$body" >/dev/null; then
           echo "::warning::comment intent ${i} failed to post on #${ISSUE}" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         if body_is_stop_comment "$body"; then
@@ -1189,7 +1203,6 @@ apply_intents() {
         if ! label="$(jq -r --argjson i "$i" '.intents[$i].label // ""' "$path")"; then
           echo "::warning::label intent ${i} is unreadable — skipped" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         local allowed=0 wl
@@ -1199,13 +1212,11 @@ apply_intents() {
         if [ "$allowed" -ne 1 ]; then
           echo "::warning::label intent ${i} names '${label}', which is not in the allowlist (${INTENTS_ALLOWLIST}) — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         if [ "$labels" -ge "$INTENTS_MAX_LABELS" ]; then
           echo "::warning::label intent ${i} exceeds the ${INTENTS_MAX_LABELS}-label cap — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         # Ensure-then-add (the §9 idiom): create the label if this repo has
@@ -1214,14 +1225,12 @@ apply_intents() {
           if ! gh api --method POST "repos/${REPO}/labels" -f name="$label" -f color=d876e3 >/dev/null; then
             echo "::warning::label intent ${i}: '${label}' is absent and could not be created — skipped" >&2
             rejected=$((rejected + 1))
-            i=$((i + 1))
             continue
           fi
         fi
         if ! gh api --method POST "repos/${REPO}/issues/${ISSUE}/labels" -f "labels[]=${label}" >/dev/null; then
           echo "::warning::label intent ${i} failed to add '${label}' on #${ISSUE}" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         labels=$((labels + 1))
@@ -1232,7 +1241,6 @@ apply_intents() {
         rejected=$((rejected + 1))
         ;;
     esac
-    i=$((i + 1))
   done
   # Cipher L2 (#884): lock skip is earned by a posted stop, not by
   # indication alone. Rejected / failed stops fall back to the lock.
@@ -2505,6 +2513,38 @@ EOF
   }
   printf '%s\n' "$stderr" | grep -q 'stop indicated but none posted — posting settle SHIP-LOCK' || {
     echo "selftest: failed-stop-post path did not note the lock fallback" >&2
+    exit 1
+  }
+
+  # Cipher (#894): stop-then-other in the intents array must still leave the
+  # stop as the latest posted comment. Skip-lock settle is claimless;
+  # claimless_stop scores dead when a non-stop follows the stop. Apply
+  # stops last so post order is other then stop regardless of array order.
+  ifile="${tmp}/intents-stop-then-other.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"},
+ {"issue":853,"action":"comment","body":"**Design name:** widget\n\n**Gate contract**\n- [ ] G1"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 2 ] || {
+    echo "selftest: stop-then-other expected 2 comments, no lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: stop-then-other still posted the settle SHIP-LOCK" >&2
+    exit 1
+  }
+  other_line="$(grep -n -- 'Gate contract' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  stop_line="$(grep -n -- 'DECLINED — needs a decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  [ -n "$other_line" ] && [ -n "$stop_line" ] && [ "$other_line" -lt "$stop_line" ] || {
+    echo "selftest: stop-then-other did not post the non-stop before the stop (other=${other_line:-?} stop=${stop_line:-?})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+    echo "selftest: stop-then-other path did not skip the settle lock after posting the stop" >&2
     exit 1
   }
 
