@@ -979,26 +979,69 @@ refuse_if_hard_stop() {
   fi
 }
 
+# Indices of intents entries the stop/order jq filters must skip: a
+# non-object element, or a comment whose body is not a string. Either
+# shape makes an unguarded `.action` / `split(.body)` abort jq (Bugbot /
+# CodeRabbit on #909), so both paths skip these with a warning and keep
+# going. Prints one index per line; empty when the file is unreadable.
+intents_malformed_indices() {
+  local f="$1"
+  jq -r '
+    (.intents // []) | to_entries[]
+    | select(
+        (.value | type) != "object"
+        or (
+          ((.value.action // "") == "comment")
+          and ((.value.body | type) != "string")
+        )
+      )
+    | .key
+  ' "$f" 2>/dev/null || true
+}
+
+# ::warning:: each malformed intents entry (see intents_malformed_indices).
+# Prints the warned indices on stdout so a caller can count rejections.
+warn_malformed_intents() {
+  local f="$1" idx
+  while IFS= read -r idx; do
+    [ -n "$idx" ] || continue
+    echo "::warning::intents entry ${idx} is malformed (want an object; comment body must be a string) — skipped" >&2
+    printf '%s\n' "$idx"
+  done < <(intents_malformed_indices "$f")
+}
+
 # A stop can no longer arrive as a comment from the agent (issues: read),
 # so the bundle step also reads the agent's intents file: a comment intent
 # on the selected issue whose first non-empty body line leads with a stop
 # marker is the same hard stop refuse_if_hard_stop reads on the thread.
 # A malformed or missing file indicates nothing (the applier warns on it
-# separately); this predicate never fails the run.
+# separately); this predicate never fails the run. Non-object entries and
+# non-string comment bodies are skipped with a warning so a valid sibling
+# stop still indicates (Bugbot / CodeRabbit on #909).
 # $1 optional path (default INTENTS_FILENAME). True when a selected-issue
 # comment intent leads with a stop marker.
 intents_stop_indicated() {
   local f="${1:-${INTENTS_FILENAME}}"
   [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  # Skip+warn malformed entries so a bad sibling cannot hide a real stop.
+  # apply_intents sets INTENTS_STOP_QUIET=1 and warns once on the apply path.
+  if [ "${INTENTS_STOP_QUIET:-}" != 1 ]; then
+    warn_malformed_intents "$f" >/dev/null
+  fi
   jq -e --arg issue "$ISSUE" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" '
-    def fl($b): ($b // "") | split("\n")
-      | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
-      | map(select(length > 0)) | (.[0] // "");
+    def fl($b):
+      if ($b | type) != "string" then ""
+      else ($b | split("\n")
+        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+        | map(select(length > 0)) | (.[0] // ""))
+      end;
     [ (.intents // [])[]
+      | select(type == "object")
       | select(((.issue // 0) | tostring) == $issue)
       | select((.action // "") == "comment")
+      | select((.body | type) == "string")
       | fl(.body)
       | select(startswith($d1) or startswith($d2) or startswith($d3)) ]
     | length > 0
@@ -1115,24 +1158,42 @@ apply_intents() {
   # an active claim cleanup treats as declined-after-claim and does not
   # withdraw (Bugbot MED, #864); deferring avoids that without the silent
   # skip-on-indication hole.
-  if intents_stop_indicated "$path"; then
+  # Warn-skip malformed entries once for this apply (stop detection is
+  # quieted below so the same indices are not double-warned).
+  local mal_idx
+  while IFS= read -r mal_idx; do
+    [ -n "$mal_idx" ] || continue
+    rejected=$((rejected + 1))
+  done < <(warn_malformed_intents "$path")
+  if INTENTS_STOP_QUIET=1 intents_stop_indicated "$path"; then
     defer_settle_lock=1
   else
     post_settle_ship_lock
   fi
   # Cipher (#894): non-stop intents (comments + labels) keep relative order,
   # then stop comments keep theirs. Same first-line markers as
-  # intents_stop_indicated / body_is_stop_comment.
+  # intents_stop_indicated / body_is_stop_comment. Type-guard objects and
+  # string bodies so a bad sibling cannot abort the whole batch (#909).
   if ! order="$(jq -r --arg d1 "$STOP_MARKER_DECLINED" \
       --arg d2 "$STOP_MARKER_DECISION" --arg d3 "$STOP_MARKER_DEFERRED" '
-    def fl($b): ($b // "") | split("\n")
-      | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
-      | map(select(length > 0)) | (.[0] // "");
+    def fl($b):
+      if ($b | type) != "string" then ""
+      else ($b | split("\n")
+        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+        | map(select(length > 0)) | (.[0] // ""))
+      end;
+    def usable:
+      (type == "object")
+      and (
+        ((.action // "") != "comment")
+        or ((.body | type) == "string")
+      );
     def is_stop_comment:
-      ((.action // "") == "comment")
+      usable
+      and ((.action // "") == "comment")
       and (fl(.body) | startswith($d1) or startswith($d2) or startswith($d3));
-    [.intents | to_entries[] | select(.value | is_stop_comment | not) | .key]
-    + [.intents | to_entries[] | select(.value | is_stop_comment) | .key]
+    [.intents | to_entries[] | select(.value | usable) | select(.value | is_stop_comment | not) | .key]
+    + [.intents | to_entries[] | select(.value | usable) | select(.value | is_stop_comment) | .key]
     | .[]
   ' "$path")"; then
     echo "design-run-deliver: could not order intents — refusing to apply" >&2
@@ -2545,6 +2606,73 @@ EOF
   }
   printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
     echo "selftest: stop-then-other path did not skip the settle lock after posting the stop" >&2
+    exit 1
+  }
+
+  # Bugbot / CodeRabbit (#909): non-object entries and non-string comment
+  # bodies must not abort the order jq or hide stop detection. Mixed with
+  # valid intents, the bad ones warn-skip; valid non-stops then stop still
+  # post in that order, and the settle lock stays deferred.
+  ifile="${tmp}/intents-malformed-entries.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ null,
+ "not-an-object",
+ {"issue":853,"action":"comment","body":42},
+ {"issue":853,"action":"comment","body":"**Design name:** widget\n\n**Gate contract**\n- [ ] G1"},
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"},
+ {"issue":853,"action":"label","label":"needs-decision"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 2 ] || {
+    echo "selftest: malformed-entries expected non-stop + stop, no lock (posted $(comment_posts))" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  [ "$(label_posts)" -eq 1 ] || {
+    echo "selftest: malformed-entries did not post the valid label sibling" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: malformed-entries still posted the settle SHIP-LOCK (stop detection missed)" >&2
+    exit 1
+  }
+  other_line="$(grep -n -- 'Gate contract' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  stop_line="$(grep -n -- 'DECLINED — needs a decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  label_line="$(grep -n -- 'labels\[\]=needs-decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  [ -n "$other_line" ] && [ -n "$label_line" ] && [ -n "$stop_line" ] \
+    && [ "$other_line" -lt "$label_line" ] && [ "$label_line" -lt "$stop_line" ] || {
+    echo "selftest: malformed-entries did not keep non-stop then stop order (other=${other_line:-?} label=${label_line:-?} stop=${stop_line:-?})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'intents entry 0 is malformed' || {
+    echo "selftest: malformed-entries did not warn about the null entry" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'intents entry 2 is malformed' || {
+    echo "selftest: malformed-entries did not warn about the non-string body" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+    echo "selftest: malformed-entries path did not skip the settle lock after posting the stop" >&2
+    exit 1
+  }
+  # Standalone stop detection (write-bundle path) must also warn-skip and
+  # still see the valid stop among malformed siblings.
+  ISSUE=853
+  stderr_stop="$(intents_stop_indicated "$ifile" 2>&1)" && stop_rc=0 || stop_rc=$?
+  [ "$stop_rc" -eq 0 ] || {
+    echo "selftest: intents_stop_indicated missed the valid stop among malformed entries" >&2
+    printf '%s\n' "$stderr_stop" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr_stop" | grep -q 'intents entry 1 is malformed' || {
+    echo "selftest: intents_stop_indicated did not warn about a malformed entry" >&2
+    printf '%s\n' "$stderr_stop" >&2
     exit 1
   }
 
