@@ -230,9 +230,9 @@ function letter_ang(i) =
 run_len   = straight_len + 2 * port_proj;
 run_limit = 2 * body_len_mm;
 
-assert(straight_len + 2 * port_proj <= 240,
-       "BED: the bridge plus both port projections must fit a 256 mm bed \
-printed upright (240 mm, leaving margin).");
+assert(straight_len + 2 * port_proj <= 240, str(
+    "BED: the bridge plus both port projections must fit a 256 mm bed ",
+    "printed upright (240 mm, leaving margin)."));
 
 // PM.md N2 (designs/nuggs/PM.md), condensed to what a person changing
 // straight_len needs; the full rule and its sources are the nuggs straight's
@@ -288,9 +288,9 @@ assert(max(advs) / 2 / r_lm * 180 / PI <= 50, str(
     max(advs) / r_lm * 180 / PI, " deg; above 100 deg its edges fall outside",
     " the conformal prism. Shrink letter_size."));
 
-assert(mark_d <= wall - 3 * nozzle,
-       "MARK DEPTH: the revision engraving must leave >= 3 perimeters of tube \
-shell behind it. Reduce mark_d or thicken wall.");
+assert(mark_d <= wall - 3 * nozzle, str(
+    "MARK DEPTH: the revision engraving must leave >= 3 perimeters of tube ",
+    "shell behind it. Reduce mark_d or thicken wall."));
 
 echo(str("nuggs-frieda: port standard R", NUGGS_PORT_REV, " at bore ", bore_d,
          " mm, port_tol ", port_tol, " mm (lib defaults; the exact config",
