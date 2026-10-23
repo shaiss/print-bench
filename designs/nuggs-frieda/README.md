@@ -38,19 +38,31 @@ as the bore wall itself — was considered and refused; the reasoning is in
   end including both port projections; 160 mm face to face)
 - `coupon` — two bore-clean port stubs (≈ Ø 97 × 35 mm each) to tune
   `port_tol` before committing to the full print. **Print this first.**
+- `wordpair` — one F→R letter-junction coupon (the production cage clipped
+  to glyphs F and R). Print this second to rehearse the weld bridges the
+  port coupon cannot check — minutes against a ~16 h bridge.
 
 ## Print settings
 
 - **Material:** PETG preferred (hand-wash-only rule of the NUGGS system);
-  PLA works
+  PLA works. Expect the letter undersides to droop slightly in PETG — that
+  is the cage shell, not the tube; PLA prints the letter cage cleaner. For
+  PETG, slow the bridge speed on the letter band.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle
 - **Infill:** any — the part is almost all 2.4 mm walls
 - **Supports:** none needed. Both cage skirts are 50° cones; letter
-  internals print as short anchored bridges
+  internals print as short anchored bridges. Keep auto-supports OFF —
+  anything the slicer plants under the letter band lands inside the 1.6 mm
+  sleeve gap and can never come out.
 - **Orientation:** upright, exactly as rendered — bore axis vertical,
   standing on one port's sector tips
-- **Brim:** a slicer brim is recommended on the bridge plate; if it leaves
-  edges, deburr them
+- **Seam:** Back (or scarfed) — a default Aligned seam stacks a ridge the
+  full 180 mm height and can land on the word or a port sector
+- **Brim:** a slicer brim is recommended on the bridge — it stands 180 mm
+  tall on three small sector tips
+- **After the print:** snap the brim, then deburr each sector tip until a
+  fingernail drags across without catching. The animal passes those tips
+  most often; leave no sharp remnant at mouth height.
 
 ## Parameters
 
@@ -58,7 +70,7 @@ as the bore wall itself — was considered and refused; the reasoning is in
 |---|---|---|
 | `name` | `"FRIEDA"` | The word. Capitals A–Z only (every glyph must anchor rail to rail; the file explains) |
 | `letter_size` | 80 | Font size in mm; cap height ≈ 0.69 × this |
-| `letter_kern` | `[8,0,0,8,0]` | Per-gap weld: mm removed after each glyph so free arm ends (F, E) fuse into the next stem instead of printing as cantilevers |
+| `letter_kern` | `[12,0,0,12,0]` | Per-gap weld: mm removed after each glyph so free arm ends (F, E) fuse into the next stem; mid-arm ribs close what kern alone can leave open on the outer face |
 | `port_tol` | 0.30 mm | The one fit knob of the whole port standard. Tune on the coupon in ±0.05 steps |
 | `straight_len` | 160 mm | Face-to-face tube length. 160 = drop-in for the nuggs straight |
 | `bore_d` | 80 mm | Internal bore. Asserted ≥ 70 mm (welfare floor) by the library — never lower that floor |
@@ -81,4 +93,8 @@ the tube and the cage drains back out through the letter openings.
 
 Want a different name? Set `name` (capitals only) and review the kern: any
 letter with free-ended arms (E, F, L, T) wants a weld into its right-hand
-neighbour — see F3 in [NOTES.md](NOTES.md).
+neighbour — see F3 in [NOTES.md](NOTES.md). Names that *end* on a free-arm
+letter (E, F, L, T — e.g. KATE, RALF) have no right-hand neighbour to weld
+into: either add a trailing stem letter or accept that last arm as a short
+shelf. Check every junction against [`previews/weld-fr.png`](previews/weld-fr.png)
+(or a new close-up of your own junctions) before committing filament.
