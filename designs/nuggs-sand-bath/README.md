@@ -12,7 +12,7 @@ run. One printed part, no supports, no hardware.
 
 ## What you get
 
-- `body` — the sand bath module (approx. 115 × 109 × 197 mm printed; 110 mm
+- `body` — the sand bath module (approx. 115 × 109 × 199 mm printed; 110 mm
   inside width, ~245 mL of bathing sand, 18 mm deep)
 - `coupon` — two port stubs to tune the coupling fit *before* the long print
 
@@ -37,13 +37,13 @@ run. One printed part, no supports, no hardware.
   the mouth rim** (flat file or one pass of a blade held flat against the
   skirt / rim) before judging the fit — brim scar lands exactly on the bayonet
   engagement surfaces, and the raked mouth rim prints knife-edged
-- **Seam:** Back (or scarf) — an Aligned seam stacks a ridge the full 197 mm.
+- **Seam:** Back (or scarf) — an Aligned seam stacks a ridge the full ~199 mm.
   Before slicing the body, check the seam view in the slicer preview and make
   sure the seam is not parked in the fill-line groove band; if it is, paint
   the seam onto the outside wall at that height.
 - **Print the coupon first** (see below) — the port tolerance is untested on
   any printer
-- Roughly 9 h / 130 g for the body
+- Roughly 12 h / 160 g for the body
 
 ## Print this first
 
@@ -52,10 +52,12 @@ brim as the body). **Print the coupon in the same material you will print the
 bath in** — what the coupon's first 2 mm says about elephant foot is what the
 body will do. The two stubs are deliberate: mate them
 to each other so you can tune the pair without touching the habitat. (If you
-already own a NUGGS module, mating one stub to that works too.) If the stubs'
-first layers mate stiff, dress the tips or enable elephant-foot compensation
-0.1–0.2 mm rather than raising `port_tol` for the whole joint; otherwise tune
-`port_tol` in ±0.05 mm steps until the quarter-turn locks without rock.
+already own a NUGGS module, mating one stub to that works too.) The two brims
+knit into one island — that's expected; flex it and the stubs part. If the
+stubs' first layers mate stiff, dress the tips or enable elephant-foot
+compensation 0.1–0.2 mm rather than raising `port_tol` for the whole joint;
+otherwise tune `port_tol` in ±0.05 mm steps until the quarter-turn locks
+without rock.
 
 ## Parameters
 
@@ -93,7 +95,8 @@ line at the port, by the design's own `lip_h − sand_depth ≥ 2` assert); the
 15 mm freeboard catches dig-kick on the trough. **Sift weekly; replace when the
 sand clumps or soils** — the groove is not a dipstick for tired sand. After the
 first few weeks, rock-check the mount (a filled bath is ~0.65–0.7 kg a hand-span
-out on one port); re-seating is a quarter-turn. To clean, hand-wash the dish
+out on one port — ~245 mL sand × 1.4–1.6 g/mL ≈ 350–400 g, so the mount carries
+~½ kg); re-seating is a quarter-turn. To clean, hand-wash the dish
 (NUGGS family **N7**): ≤ 50 °C only, mild unscented dish soap is fine, rinse
 and dry fully — **never a dishwasher** (the heated dry cycle exceeds even PETG,
 and a warped port is a narrowed bore). No glued seams; everything is printed.

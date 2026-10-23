@@ -113,7 +113,9 @@ lines 0 → 1 → 0):
    height budget the single hull spent on flare went to **floor run** instead.
 
 The capacity trade that lands under the ceiling: `dish_w = 110` (brief-exact) ×
-`sand_depth = 18` × `floor_run = 96` → print height **197.155 mm**, measured
+`sand_depth = 18` × `floor_run = 96` → print height **198.827 mm** (was
+197.155 before the far-wall close; the `dish_wall` outer tip adds ~1.7 mm),
+measured
 capacity 245.5 mL. **The escape hatch on a taller printer is `-D floor_run=…`,
 never `dish_w`**: width is brief-pinned and buys less capacity per millimetre
 than run does; run is pure length. `-D floor_run=140 -D max_build_height=250`
@@ -190,7 +192,13 @@ segments, not rectangles.
    census-driven decision, see above.
 4. **Far wall as a ramp**, not a flat ceiling: the dish cannot end in a wall
    perpendicular to the run (a 110 × 31 mm bridge in the print pose); the ramp
-   also *adds* a sand wedge instead of costing floor.
+   also *adds* a sand wedge instead of costing floor. **Closed after Bugbot
+   (PR #674):** the first revision subtracted `far_ramp_cut()` from a
+   through-going trough void, so the ramp was an opening — sand could run out
+   the far end (+Z ray from the sand cavity hit nothing). Fixed by unioning a
+   `dish_wall`-thick plate (`far_wall()`) on the beyond side of the same plane
+   after the cavity difference; sand_body still ends on that plane (mesh
+   capacity unchanged at 245.5 mL).
 5. **Raked rim as the entry vault**: one plane from the tube crown down to the
    low rim; no flat ceiling ever crosses the bore (the brief's
    self-supporting-substitution requirement, satisfied by geometry).
@@ -229,14 +237,15 @@ segments, not rectangles.
   Jane + Drik co-sign on the inverted-pendulum tips). Trim brim flush and
   deburr the sector tips **and the mouth rim** before judging fit (Jane 3 /
   carried knife-edge note).
-- **Seam:** Back (or scarf) — Aligned stacks a 197 mm ridge (Jane 5).
+- **Seam:** Back (or scarf) — Aligned stacks a ~199 mm ridge (Jane 5).
 - **Material:** PLA or PETG. PETG if the bath will be washed often. Print the
   coupon in the same material as the bath (Drik D12 / Jane first-2 mm logic).
 - **Walls / layer:** 0.4 mm nozzle, ≥ 3 perimeters (`dish_wall = 2.4`), 0.2 mm
   layers.
-- **Test-slice reference (local, post fill_mark_d 1.2):** body 84/100 —
-  9 h 44 m / 129.0 g; coupon 92/100 — 4 h 36 m / 60.4 g (same caveats:
-  bed-contact brim advisory on the body; coupling zero-area facets).
+- **Test-slice reference (local, post far-wall close / Bugbot fix):** body
+  84/100 — 11 h 51 m / 158.5 g; coupon 92/100 — 4 h 35 m / 60.4 g (same
+  caveats: bed-contact brim advisory on the body; coupling zero-area facets).
+  No >45° overhang warning — the closed ramp wall prints as a slope.
 - **Expected slicer notices:** print-stability warning (the brim answers it);
   2 zero-area facets from the port tessellation — the pure-library coupon
   carries 4 of its own, i.e. they come from the coupling, not this junction.
@@ -276,8 +285,9 @@ does PETG's rounder bead flatten the nick after wash cycles? Drik D12;
 and whether the knife-edge raked rim needs a geometry land after real wear
 (Jane r3/r4: deburr instruction stands until field says otherwise);
 (4) turn-around observation — does the animal reverse down the beach
-tail-first? Drik D4; (5) lug-grit after N weeks — does kicked sand bed into the
-bayonet lug faces and make the quarter-turn feel gritty? Drik 00:36 hunch.)*
+tail-first? Drik D4; (5) lug-grit after N weeks — record the *feel* of the
+quarter-turn (mushy click? wants a rinse before re-seat?), not only whether
+grit is present in the lug channels. Drik [hunch] on PR #674 / PM triage.)*
 
 ## Fill-line preview — one-nudge then concede
 

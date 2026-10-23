@@ -191,15 +191,25 @@ z_wide = z_flare + widen_run;
 // Far wall as a raked ramp — the beach's mirror. The dish cannot end in a
 // wall perpendicular to the run: in the print pose that wall is a flat
 // ceiling spanning the trough (measured: a 110 x 31 mm bridge, NOTES.md).
-// The ramp rises from the floor to the low rim over ramp_run at <=45deg,
-// and like the beach it ADDS a sand wedge instead of costing floor.
+// The ramp face CONTAINS the floor→rim vector (rise, run) so its tilt from
+// vertical is atan(rise/run) ≤45deg (ramp_run ≥ ramp_rise) — the wall prints
+// as a slope, never a bridge; like the beach it ADDS a sand wedge.
+// dish_wall of shell along the outward normal closes the end (Bugbot PR #674:
+// subtracting the beyond-plane cut from a through cavity left an opening).
 ramp_rise = y_rim - y_floor_in;               // floor -> rim
 ramp_run  = ramp_rise + 1;                    // 1 mm of margin under 45deg
-z_far_out = z_wide + floor_run + ramp_run;    // top of the print
+// Angle of the floor→rim vector from +Z; local +Z runs along that vector
+// (length ramp_len), local -Y is the outward normal.
+ramp_ang  = atan2(ramp_rise, ramp_run);
+ramp_len  = norm([ramp_rise, ramp_run]);      // travel along the face, floor→rim
+z_far_in  = z_wide + floor_run + ramp_run;    // rim meet at far apex
+// Outer tip: dish_wall along outward normal (0, -cos, sin) adds
+// dish_wall·sin(ramp_ang) of Z past the inner face at the rim.
+z_far_out = z_far_in + dish_wall * sin(ramp_ang);
 
 // The raked rim: a single plane from the tube crown (z_top, +ro) down to the
-// low rim (z_far_out, y_rim). Everything above it is the open mouth.
-rake_dz = z_far_out - z_top;
+// low rim (z_far_in, y_rim). Everything above it is the open mouth.
+rake_dz = z_far_in - z_top;
 rake_dy = ro - y_rim;
 rake_ang = atan2(rake_dy, rake_dz);     // from vertical; asserted <= 45 below
 
@@ -359,45 +369,51 @@ module stage1_in_2d() {
 // tube proud by 9.36 mm at the walk-band edge (lib/nuggs-coupling-mates.conf,
 // the open-module case). The flat floor belongs wholly beyond the port zone.
 module nuggs_sand_bath() {
-    difference() {
-        union() {
-            cylinder(r = ro, h = z_top + 1);   // full-round neck past the port zone
-            nuggs_port(cfg);                   // sectors on -z (bed); collar to z_top
-            hull() {                           // stage 1: tube -> spanning circle
-                translate([0, 0, z_top])
-                    linear_extrude(eps) circle(r = ro);
-                translate([0, 0, z_flare])
-                    linear_extrude(eps) stage1_2d();
+    // Bugbot on PR #674: subtracting far_ramp_cut from the solid made the
+    // ramp an opening (through cavity + beyond-plane cut = no end wall).
+    // Keep the through trough (so the ramp plane cannot shelf-fill the mid
+    // dish), and UNION a dish_wall slab on afterwards to close the end.
+    union() {
+        difference() {
+            union() {
+                cylinder(r = ro, h = z_top + 1);   // full-round neck past the port zone
+                nuggs_port(cfg);                   // sectors on -z (bed); collar to z_top
+                hull() {                           // stage 1: tube -> spanning circle
+                    translate([0, 0, z_top])
+                        linear_extrude(eps) circle(r = ro);
+                    translate([0, 0, z_flare])
+                        linear_extrude(eps) stage1_2d();
+                }
+                hull() {                           // stage 2: circle -> dish section
+                    translate([0, 0, z_flare])
+                        linear_extrude(eps) stage1_2d();
+                    translate([0, 0, z_wide])
+                        linear_extrude(eps) out_2d();
+                }
+                translate([0, 0, z_wide - 1])      // trough walls
+                    linear_extrude(z_far_out - z_wide + 1) out_2d();
             }
-            hull() {                           // stage 2: circle -> dish section
-                translate([0, 0, z_flare])
-                    linear_extrude(eps) stage1_2d();
-                translate([0, 0, z_wide])
-                    linear_extrude(eps) out_2d();
+            union() {
+                nuggs_bore_cut(cfg, z_tip - 1, z_top + 1);
+                hull() {                           // the beach: bore -> spanning void
+                    translate([0, 0, z_top])
+                        linear_extrude(eps) circle(r = ri);
+                    translate([0, 0, z_flare])
+                        linear_extrude(eps) stage1_in_2d();
+                }
+                hull() {                           // widening void: circle -> trough
+                    translate([0, 0, z_flare])
+                        linear_extrude(eps) stage1_in_2d();
+                    translate([0, 0, z_wide])
+                        linear_extrude(eps) in_2d();
+                }
+                translate([0, 0, z_wide - 1])      // through trough; far_wall closes it
+                    linear_extrude(z_far_out - z_wide + 2) in_2d();
+                fill_line_groove();
+                mouth_open();
             }
-            translate([0, 0, z_wide - 1])      // trough walls: vertical from here
-                linear_extrude(z_far_out - z_wide + 1) out_2d();
         }
-        union() {
-            nuggs_bore_cut(cfg, z_tip - 1, z_top + 1);
-            hull() {                           // the beach: bore -> spanning void
-                translate([0, 0, z_top])
-                    linear_extrude(eps) circle(r = ri);
-                translate([0, 0, z_flare])
-                    linear_extrude(eps) stage1_in_2d();
-            }
-            hull() {                           // widening void: circle -> trough
-                translate([0, 0, z_flare])
-                    linear_extrude(eps) stage1_in_2d();
-                translate([0, 0, z_wide])
-                    linear_extrude(eps) in_2d();
-            }
-            translate([0, 0, z_wide - 1])      // trough void; no flat far cap —
-                linear_extrude(z_far_out - z_wide + 2) in_2d();  // ramp ends it
-            fill_line_groove();
-            mouth_open();
-            far_ramp_cut();
-        }
+        far_wall();                                // dish_wall slab, mouth-trimmed
     }
 }
 
@@ -434,24 +450,39 @@ module mouth_open() {
                 cube([200, 150, norm([0, rake_dy, rake_dz]) + 1]);
 }
 
-// The far end raked: everything beyond the ramp plane, gone. The plane runs
-// from the floor at z_far_out - ramp_run up to the low rim point
-// (y_rim, z_far_out), where it meets the mouth's rake — full freeboard at
-// the far end, and the wall prints as a slope, never a bridge.
+// Beyond-the-inner-ramp half-space, for sand_body. Origin at the floor /
+// ramp-start. rotate([-ramp_ang]) sends local +Z along the floor→rim
+// vector (0, rise, run); local -Y is the outward normal (toward +Z past
+// the ramp). Never subtracted alone from the body solid.
 module far_ramp_cut() {
-    translate([0, y_floor_in, z_far_out - ramp_run])
-        rotate([atan2(ramp_run, ramp_rise), 0, 0])
-            translate([-100, 0, 0])
-                cube([200, 100, 260]);
+    translate([0, y_floor_in, z_far_in - ramp_run])
+        rotate([-ramp_ang, 0, 0])
+            translate([-x_half_out - 20, -200, -5])
+                cube([2 * (x_half_out + 20), 200, ramp_len + 20]);
 }
 
-// The sand fill as a solid: the bath's void primitives with the same far-ramp
-// cut the cavity takes, clipped at the fill surface (y <= y_sand). NOT a
-// printable part — a measurement aid, exported so the capacity audit measures
-// the mesh (G4), never the parameter (issue #37's lesson). Volume in mm^3 /
-// 1000 = mL of sand. (The ramp enters as a DIFFERENCE: the sand lies on the
-// near side of the ramp plane; far_ramp_cut() itself is the beyond-the-ramp
-// half-space — the far wall's material side.)
+// Far end wall: dish_wall plate on the outward side of the ramp plane
+// (local y = -dish_wall..0), spanning floor→rim (local z = 0..ramp_len),
+// clipped to the dish outer section and trimmed by the mouth rake.
+module far_wall() {
+    difference() {
+        intersection() {
+            translate([0, 0, z_wide - 1])
+                linear_extrude(z_far_out - z_wide + 2) out_2d();
+            translate([0, y_floor_in, z_far_in - ramp_run])
+                rotate([-ramp_ang, 0, 0])
+                    translate([-x_half_out - 10, -dish_wall, 0])
+                        cube([2 * (x_half_out + 10), dish_wall, ramp_len]);
+        }
+        mouth_open();
+    }
+}
+
+// The sand fill as a solid: the bath's void primitives cut by the same
+// far-ramp plane the body's far_wall sits on, clipped at the fill surface
+// (y <= y_sand). NOT a printable part — a measurement aid, exported so the
+// capacity audit measures the mesh (G4), never the parameter (issue #37's
+// lesson). Volume in mm^3 / 1000 = mL of sand.
 module sand_body() {
     difference() {
         intersection() {
