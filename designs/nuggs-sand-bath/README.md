@@ -43,7 +43,7 @@ run. One printed part, no supports, no hardware.
   the seam onto the outside wall at that height.
 - **Print the coupon first** (see below) — the port tolerance is untested on
   any printer
-- Roughly 12 h / 160 g for the body
+- Roughly 11 h / 146 g for the body
 
 ## Print this first
 

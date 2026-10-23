@@ -372,7 +372,10 @@ module nuggs_sand_bath() {
     // Bugbot on PR #674: subtracting far_ramp_cut from the solid made the
     // ramp an opening (through cavity + beyond-plane cut = no end wall).
     // Keep the through trough (so the ramp plane cannot shelf-fill the mid
-    // dish), and UNION a dish_wall slab on afterwards to close the end.
+    // dish), UNION a dish_wall slab to close the sand end, and trim the
+    // through out_2d/in_2d shell past that slab's outer face so the floor
+    // and side walls do not leave an open U-channel ~ramp_run long under
+    // the ramp (Bugbot Medium, hollow tail).
     union() {
         difference() {
             union() {
@@ -411,6 +414,7 @@ module nuggs_sand_bath() {
                     linear_extrude(z_far_out - z_wide + 2) in_2d();
                 fill_line_groove();
                 mouth_open();
+                far_tail_cut();                    // drop U-shell past outer far face
             }
         }
         far_wall();                                // dish_wall slab, mouth-trimmed
@@ -453,11 +457,22 @@ module mouth_open() {
 // Beyond-the-inner-ramp half-space, for sand_body. Origin at the floor /
 // ramp-start. rotate([-ramp_ang]) sends local +Z along the floor→rim
 // vector (0, rise, run); local -Y is the outward normal (toward +Z past
-// the ramp). Never subtracted alone from the body solid.
+// the ramp). Never subtracted alone from the body solid — that opens the
+// sand end (Bugbot High). Body use is far_tail_cut (outer face) + far_wall.
 module far_ramp_cut() {
     translate([0, y_floor_in, z_far_in - ramp_run])
         rotate([-ramp_ang, 0, 0])
             translate([-x_half_out - 20, -200, -5])
+                cube([2 * (x_half_out + 20), 200, ramp_len + 20]);
+}
+
+// Beyond-the-OUTER-ramp half-space (local y <= -dish_wall). Subtracted from
+// the body so the through out_2d/in_2d shell ends at far_wall's outer face
+// instead of leaving a hollow U-channel under the ramp to z_far_out.
+module far_tail_cut() {
+    translate([0, y_floor_in, z_far_in - ramp_run])
+        rotate([-ramp_ang, 0, 0])
+            translate([-x_half_out - 20, -200 - dish_wall, -5])
                 cube([2 * (x_half_out + 20), 200, ramp_len + 20]);
 }
 

@@ -198,7 +198,13 @@ segments, not rectangles.
    the far end (+Z ray from the sand cavity hit nothing). Fixed by unioning a
    `dish_wall`-thick plate (`far_wall()`) on the beyond side of the same plane
    after the cavity difference; sand_body still ends on that plane (mesh
-   capacity unchanged at 245.5 mL).
+   capacity unchanged at 245.5 mL). **Hollow-tail follow-up (Bugbot Medium):**
+   the through `out_2d`/`in_2d` extrusion still ran to `z_far_out`, so floor
+   and side walls continued past the slab as an open U-channel ~`ramp_run`
+   long under the ramp (Z sections past the ramp start showed the floor band
+   still material; YZ x=0 showed the horizontal floor past the ramp toe).
+   Trimmed with `far_tail_cut()` (half-space beyond the slab's outer face);
+   sand mesh still 245.5 mL.
 5. **Raked rim as the entry vault**: one plane from the tube crown down to the
    low rim; no flat ceiling ever crosses the bore (the brief's
    self-supporting-substitution requirement, satisfied by geometry).
@@ -242,8 +248,8 @@ segments, not rectangles.
   coupon in the same material as the bath (Drik D12 / Jane first-2 mm logic).
 - **Walls / layer:** 0.4 mm nozzle, ≥ 3 perimeters (`dish_wall = 2.4`), 0.2 mm
   layers.
-- **Test-slice reference (local, post far-wall close / Bugbot fix):** body
-  84/100 — 11 h 51 m / 158.5 g; coupon 92/100 — 4 h 35 m / 60.4 g (same
+- **Test-slice reference (local, post hollow-tail trim / Bugbot Medium):** body
+  84/100 — 10 h 54 m / 145.7 g; coupon 92/100 — 4 h 36 m / 60.4 g (same
   caveats: bed-contact brim advisory on the body; coupling zero-area facets).
   No >45° overhang warning — the closed ramp wall prints as a slope.
 - **Expected slicer notices:** print-stability warning (the brim answers it);
