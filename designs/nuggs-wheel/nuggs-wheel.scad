@@ -71,7 +71,13 @@ max_part_bound = 180;
 // Circumferential lap of the shingle joint (mm). Along the run direction so
 // there is never a butt gap a toe can drop into
 joint_lap = 8.0;
-// Radial step at the running-surface seam (mm). Asserted ≤ joint_step_max
+// Printable female lip land at the tread (mm). Decoupled from the felt step
+// — 0.20 mm was under half an extrusion and either fattened or dropped in
+// the slicer (Jane R1). ~1.0 mm = two-plus lines on a 0.4 nozzle.
+joint_lip = 1.0;
+// Radial step the paw feels at the running-surface seam (mm). Asserted ≤
+// joint_step_max. Male tongue is set back by joint_lip + joint_step so the
+// lip stays a real wall while this step stays ≤ 0.25.
 joint_step = 0.20;
 joint_step_max = 0.25;
 // Locating peg diameter at each lap (mm)
@@ -106,8 +112,13 @@ stand_w = 100;
 stand_base_t = 3.6;
 // Upright / axle-arm wall (mm)
 stand_wall = 2.8;
-// Clearance under the rim at bottom dead centre (mm)
-wheel_floor_clear = 4.0;
+// Clearance under the RUNNING surface at bottom dead centre (mm). The outer
+// lip sits at r_outer + lip_h (= 145.4 at defaults), so the lip-to-footplate
+// gap is axle_z − (r_outer + lip_h) − stand_base_t. 4 mm put the lip 5 mm
+// UNDER the footplate top (Drik F2); 15 mm yields ~6 mm above it. Use 15,
+// not 14: 14 lands exactly on the 5 mm floor and can trip the assert on
+// floating-point error. Do not lower wheel_d to buy clearance (N2).
+wheel_floor_clear = 15.0;
 // Axle arm thickness (mm)
 arm_t = 8.0;
 // Bearing boss OD on the stand arm (mm)
@@ -135,7 +146,9 @@ r_out       = nuggs_r_out(cfg_d());
 z_top       = nuggs_z_top(cfg_d());
 
 r_run       = wheel_d / 2;                 // running-surface radius
-r_outer     = r_run + rim_t;               // rim OD
+r_outer     = r_run + rim_t;               // rim OD (wall outer)
+// Outer lip crest — lowest point of the spinning drum at BDC
+r_lip       = r_outer + lip_h;
 r_hub       = hub_od / 2;
 seg_ang     = 360 / n_seg;                 // nominal sector
 // Each segment spans a little past nominal so the shingles overlap
@@ -144,6 +157,14 @@ axle_bore_d = axle_d + 2 * axle_clear;
 axle_len    = wheel_w + 2 * stand_boss_l + 2 * axle_overhang;
 stand_depth = stand_depth_mult * wheel_d;
 axle_z      = r_run + wheel_floor_clear;   // axle height above floor
+// Male tongue setback from the running surface (Jane lip fix)
+tongue_setback = joint_lip + joint_step;
+// Lip underside above the footplate top (must be ≥ rim_foot_clear_min)
+lip_foot_clear = axle_z - r_lip - stand_base_t;
+rim_foot_clear_min = 5.0;
+// Blind lightening pocket depth in the back pie (mm). Must leave a floor —
+// through-slots violated N3 (Drik F1).
+back_pocket_d = 1.0;
 // Post circle — inset from the flange OD so posts fully union into the hub
 r_post      = r_hub - hub_post_d;
 // Inner radius of the back pie — reaches inside the post circle so the
@@ -176,6 +197,12 @@ assert(_seg_diag <= max_part_bound, str(
 assert(joint_step > 0 && joint_step <= joint_step_max, str(
     "JOINT STEP: joint_step = ", joint_step, " mm must be in (0, ",
     joint_step_max, "] — a seam over 0.25 mm is a toe-pinch risk."));
+assert(joint_lip >= 0.8, str(
+    "JOINT LIP: joint_lip = ", joint_lip, " mm is under 0.8 mm — the female",
+    " lip land must be ≥ two extrusion widths to print as a real wall."));
+assert(tongue_setback + 0.8 <= rim_t, str(
+    "JOINT TONGUE: tongue_setback = ", tongue_setback, " mm leaves under",
+    " 0.8 mm of male tongue in rim_t = ", rim_t, " mm."));
 assert(joint_lap >= 4, str(
     "JOINT LAP: joint_lap = ", joint_lap, " mm is under 4 mm — the shingle",
     " needs enough overlap that a butt gap cannot open under flex."));
@@ -196,11 +223,23 @@ assert(hub_od < 0.4 * wheel_d, str(
 assert(stand_depth <= max_part_bound || stand_w <= max_part_bound, str(
     "STAND BOUND: both stand_depth and stand_w exceed max_part_bound — at",
     " least one footprint axis must clear ", max_part_bound, " mm."));
-// Stand height (axle_z + boss) and foot depth are the two long axes.
-// Measured export AABB of stand() is ~178 mm vs max_part_bound 180 — intentional
-// 2 mm mesh headroom; brim / XY expansion is a slicer-side risk, not a shrink.
+// Stand USE height (axle_z + boss) ≈ 164 mm at defaults. As-printed Z is
+// driven by stand_depth + port connector (~178), not axle height — keep both
+// ≤ max_part_bound. Do not shrink for the 2 mm mesh headroom.
 assert(axle_z + stand_boss_od / 2 <= max_part_bound, str(
     "STAND H: axle height + boss exceeds max_part_bound = ", max_part_bound));
+// F2 — lip underside must clear the footplate top by ≥ 5 mm (a minimum, not
+// a target). Keyed to rim OD (via r_lip) and axle_z so a future wheel_d /
+// clear / lip_h edit cannot silently re-bury the drum.
+assert(lip_foot_clear >= rim_foot_clear_min, str(
+    "RIM FLOOR CLEAR: lip underside is ", lip_foot_clear,
+    " mm above the footplate top (axle_z = ", axle_z, ", r_lip = ", r_lip,
+    ", stand_base_t = ", stand_base_t, ") — need ≥ ", rim_foot_clear_min,
+    " mm. Raise wheel_floor_clear (not lower wheel_d)."));
+// F1 — blind pockets only; a through cut would reopen N3.
+assert(back_pocket_d > 0 && back_pocket_d < back_t - 0.8, str(
+    "BACK POCKET: back_pocket_d = ", back_pocket_d, " mm must leave ≥ 0.8 mm",
+    " of closed floor in back_t = ", back_t, " mm (N3 — no through-openings)."));
 
 // ---------------------------------------------------------------------------
 // Rim segment — back flat on the bed, running surface extruded in +Z
@@ -265,15 +304,17 @@ module rim_segment() {
                             cylinder(d = hub_post_d + 2.4,
                                      h = back_t + hub_post_h);
             }
-            // Female pocket: slightly oversize vs the tongue
+            // Female pocket: starts behind the printable lip land (joint_lip).
+            // Slightly oversize vs the tongue for assembly clearance.
             translate([0, 0, cut_z0])
                 linear_extrude(height = cut_h)
-                    annular_sector_2d(r_run + joint_step - 0.05, r_outer - 0.3,
+                    annular_sector_2d(r_run + joint_lip - 0.05, r_outer - 0.3,
                                       a0 - 0.15, a0 + lap_ang + 0.15);
-            // Male recess: raise the running surface by joint_step in tongue zone
+            // Male recess: tongue set back by joint_lip + joint_step so the
+            // female lip is a ~1 mm wall while the paw feels only joint_step.
             translate([0, 0, cut_z0])
                 linear_extrude(height = cut_h)
-                    annular_sector_2d(r_run - 0.01, r_run + joint_step,
+                    annular_sector_2d(r_run - 0.01, r_run + tongue_setback,
                                       a_tongue0, a_tongue1 + 0.01);
             // Male OD trim (clearance vs neighbour lip / pocket)
             translate([0, 0, cut_z0])
@@ -294,12 +335,14 @@ module rim_segment() {
                     translate([r_post, 0, -0.1])
                         cylinder(d = hub_post_d + 2 * hub_post_clear,
                                  h = back_t + hub_post_h + 0.2);
-            // Lightening slots in the back pie
+            // Blind lightening pockets in the back pie (N3 — no through-openings).
+            // Cut from the inside face only; floor of back_t − back_pocket_d remains.
             for (k = [-1, 0, 1])
                 rotate([0, 0, k * seg_ang * 0.22])
-                    translate([(r_pie_in + r_run) / 2, 0, -0.1])
+                    translate([(r_pie_in + r_run) / 2, 0,
+                               back_t - back_pocket_d])
                         cylinder(d = min(14, (r_run - r_pie_in) * 0.35),
-                                 h = back_t + 0.2, $fn = 32);
+                                 h = back_pocket_d + 0.01, $fn = 32);
         }
         // Locating pegs — short, rooted in the finished tongue
         for (z = [back_t + wheel_w * 0.30, back_t + wheel_w * 0.70])
@@ -444,10 +487,10 @@ module coupon_joint_pair() {
     tw = 18;   // tread sample width
     th = 12;   // tread sample "along-run" length each half
     male_h = th + joint_lap;
-    // Female half
+    // Female half — lip land = joint_lip; pocket behind it
     difference() {
         cube([rim_t, th + joint_lap, tw]);
-        translate([joint_step, -0.01, -0.01])
+        translate([joint_lip, -0.01, -0.01])
             cube([rim_t, joint_lap + 0.02, tw + 0.02]);
         for (z = [tw * 0.30, tw * 0.70])
             translate([rim_t / 2, joint_lap / 2, z])
@@ -455,11 +498,11 @@ module coupon_joint_pair() {
                     cylinder(d = joint_peg_d + 2 * joint_peg_clear,
                              h = rim_t + 2, center = true, $fn = 24);
     }
-    // Male half (beside it)
+    // Male half — tongue set back by joint_lip + joint_step (felt step ≤ 0.25)
     translate([rim_t + 6, 0, 0]) {
         cube([rim_t, th, tw]);
-        translate([joint_step, th, 0])
-            cube([rim_t - joint_step - 0.4, joint_lap, tw]);
+        translate([tongue_setback, th, 0])
+            cube([rim_t - tongue_setback - 0.4, joint_lap, tw]);
         for (z = [tw * 0.30, tw * 0.70])
             translate([rim_t / 2, th + joint_lap / 2, z])
                 rotate([0, 90, 0])

@@ -24,13 +24,19 @@ Separately printed parts — the deliverable is the multi-object 3MF plate
 (`build/nuggs-wheel-plate.3mf`), not a single assembled STL (that would fuse).
 
 - `rim-segment` × **8** (identical) — arc of running surface + closed back pie +
-  shingle joint (≈ 155 mm XY diagonal at defaults)
-- `hub` — axle carrier with posts into the segment pads (Ø48 × 22 mm)
-- `stand` — footplate + axle arm + NUGGS port anchor (≈ 168 × 110 mm footprint)
-- `axle` — Ø8 plain shaft, loose / repairable
-- `coupon` — port stub + joint pair + axle-in-bore sample. CI estimates
-  **~3h 10m / ~36 g** — not a 20-minute stub: one plate carries the port,
+  shingle joint (≈ 155 mm XY diagonal at defaults). About **3h 28m / 44 g**
+  each (Manifold nightly slice)
+- `hub` — axle carrier with posts into the segment pads (Ø48 × 22 mm);
+  about **1h 4m / 12 g**
+- `stand` — footplate + axle arm + NUGGS port anchor (168 × 100 mm footprint;
+  use height about **164 mm**). About **8h 51m / 120 g**
+- `axle` — Ø8 plain shaft, loose / repairable; about **22m / 5 g**
+- `coupon` — port stub + joint pair + axle-in-bore sample. About
+  **3h 9m / 36 g** — not a 20-minute stub: one plate carries the port,
   joint, and axle trio so you dry-fit all three fits before the rim farm
+
+Whole set (8× rim + hub + stand + axle) is roughly **38h / 490 g** before the
+coupon — plan a weekend, not one evening.
 
 ## Print settings
 
@@ -56,10 +62,12 @@ Separately printed parts — the deliverable is the multi-object 3MF plate
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `wheel_d` | 280 mm | Running-surface diameter — set to your animal; ≥ 200 asserted |
+| `wheel_d` | 280 mm | Running-surface diameter — set to your animal; ≥ 200 asserted (Syrian welfare floor; do not lower to buy clearance) |
 | `wheel_w` | 90 mm | Tread width |
 | `n_seg` | 8 | Identical rim segments (derived from the 180 mm bound at Ø280) |
-| `joint_step` | 0.20 mm | Radial seam step; asserted ≤ 0.25 mm |
+| `joint_lip` | 1.0 mm | Printable female shingle lip land (two-plus extrusion lines) |
+| `joint_step` | 0.20 mm | Radial seam step the paw feels; asserted ≤ 0.25 mm |
+| `wheel_floor_clear` | 15 mm | Under-tread clearance; sets axle height (155 mm) and about 6 mm lip-to-footplate gap |
 | `axle_clear` | 0.35 mm | Diametral bearing clearance — **quiet running lives here** |
 | `port_tol` | 0.30 mm | NUGGS fit knob — **unmeasured**; tune on the coupon |
 | `stand_depth_mult` | 0.60 | Foot depth as a fraction of `wheel_d` |
@@ -77,6 +85,10 @@ grouped in Customizer sections; override with `-D 'wheel_d=300'`.
    filament rivet or a printed collar if you want (v1 ships loose).
 5. Quarter-turn the stand's port into any NUGGS face to anti-slide anchor it;
    the foot stands free on a flat floor either way.
+
+**Use height** at defaults is about **164 mm** (axle at 155 mm). Keep the stand
+on a firm level surface — the CoG tip check assumes a flat floor, not deep
+bedding.
 
 **Layout:** a destination at an enclosure, not a bore-through mid-run module
 (see NOTES — run-break ruling). Open front toward the enclosure; closed back

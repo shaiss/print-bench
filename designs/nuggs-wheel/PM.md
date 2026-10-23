@@ -59,3 +59,11 @@ assembled hero is labeled as assembly preview. Plate is the deliverable.
 2. Contact sheet — default printable / assembled per cameras.conf
 
 **Lifestyle / motion.** None for v1.
+
+## Decision log
+
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-10-23 | **F1** — back-pie lightening is blind pockets (`back_pocket_d = 1.0`), not through-slots | N3: 0 openings in the back disc. 24× Ø14 through-holes (3 per segment) were a charter violation; wash ergonomics prefer closed, so pockets keep mass relief without a path behind the wheel |
+| 2026-10-23 | **F2** — `wheel_floor_clear = 15` (was 4); lip-to-footplate assert ≥ 5 mm | Drum lip OD is `r_outer + lip_h` (145.4 at defaults), not `r_run`. Clearance 4 buried the lip 5 mm under the footplate top. 15 → `axle_z = 155`, lip underside ~9.6, ~6 mm above the 3.6 mm footplate; use height ~164 mm; as-printed stand Z stays 178 (stand_depth + port). Do not lower `wheel_d` (N2) or split the stand |
+| 2026-10-23 | **Jane lip** — `joint_lip = 1.0`; male tongue set back by `joint_lip + joint_step`; felt step stays `joint_step = 0.20` ≤ 0.25 | Decouple printable lip land from paw-felt step (N4). A 0.20 mm lip was under half an extrusion and either fattened or dropped in the slicer, turning the shingle into a butt seam |
