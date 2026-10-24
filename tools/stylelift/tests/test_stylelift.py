@@ -226,6 +226,23 @@ def test_a_barrel_is_form_not_a_corner_radius(tmp_path):
     assert r["edges"]["form"]["convex"][0]["sweep_deg"] == pytest.approx(360, abs=1)
 
 
+def test_a_sphere_on_a_taller_body_is_form_not_a_corner_radius(tmp_path):
+    # A Ø20 ball fused to a stem/thread is still form curvature. Whole-mesh
+    # scale (r / longest extent) drops below the 0.35 form bar once anything
+    # taller than ~29 mm is attached, and a face-union of every usable fold
+    # glued the ball to the boss so the region no longer closed. Filing the
+    # 10 mm as the part's corner radius fails a family whose corners are 4 mm
+    # because the brief asked for a ball. The region's own extent is the bar.
+    ball = trimesh.creation.uv_sphere(radius=10.0, count=[32, 32])
+    stem = trimesh.creation.cylinder(radius=4.0, height=40.0, sections=32)
+    stem.apply_translation([0, 0, 28.0])
+    r = measure(save(tmp_path, trimesh.util.concatenate([ball, stem]),
+                     "sphere-stem.stl"))
+    assert r["edges"]["form"]["dominant_r_mm"] == pytest.approx(10.0, abs=0.4)
+    round_r = r["edges"]["rounding"]["dominant_r_mm"]
+    assert round_r is None or round_r != pytest.approx(10.0, abs=0.5)
+
+
 def test_tessellation_style_is_reported(tmp_path):
     # The radius identity is exact on quad strips (what CAD and OpenSCAD
     # export) and reads high on a freely triangulated mesh (what sculpting and

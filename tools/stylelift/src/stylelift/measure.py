@@ -418,6 +418,18 @@ def _edge_treatment(mesh: trimesh.Trimesh, cfg: Config) -> dict:
                     mode["sweep_deg"] = round(float(np.median(arcs)), 1)
         return out
 
+    def rounding_modes(selection: np.ndarray) -> list[dict]:
+        # A 1° "sweep" is a tessellated cone/dome fragment, not a corner.
+        # Left in the rounding vocabulary it becomes a fake 8–13 mm fillet
+        # (implied $fn hundreds) and drowns the family's real 4 mm edges.
+        kept = []
+        for mode in modes_for(selection, sweeps):
+            sw = mode.get("sweep_deg")
+            if sw is not None and sw < 20.0:
+                continue
+            kept.append(mode)
+        return kept
+
     # --- pass 3: edge rounding vs form curvature --------------------------
     # A 15 mm radius can be a generous fillet or it can be the barrel of a
     # capsule, and a style spec that confuses the two hands the next design a
@@ -443,6 +455,7 @@ def _edge_treatment(mesh: trimesh.Trimesh, cfg: Config) -> dict:
             usable &= scale <= cfg.noise_radius_multiple
             form &= usable
     sweeps = np.zeros(len(angles))
+    pairs = mesh.face_adjacency
     for root, folds in regions.items():
         idx = np.array(folds)
         # Only a band that stops somewhere has an arc worth quoting. A region
@@ -453,9 +466,35 @@ def _edge_treatment(mesh: trimesh.Trimesh, cfg: Config) -> dict:
         sweeps[idx] = turn if turn <= 400.0 else 0.0
         if closed.get(root):
             form[idx] = True
+            continue
+        # A finite arc (a 90° fillet, a 180° slot end) is edge treatment —
+        # its own AABB is ~2r, so the 0.35 bar would call every fillet form.
+        # Apply the local bar only to a same-radius surface that *keeps
+        # turning* (turn > 400): a sphere, or a 12-edge rounded box. The
+        # box's region spans the part and still scores small; the sphere's
+        # region is the ball and scores ~0.5 even when welded to a stem.
+        if turn <= 400.0:
+            continue
+        # A sphere (or other same-radius body) fused onto a larger assembly
+        # fails the whole-mesh 0.35 bar: r=10 on a 46 mm head is 0.22, so the
+        # ball — pure form curvature — lands in the corner-radius token. Judge
+        # that bar against the REGION's own extent, which is the ball, not the
+        # wings. A 4 mm family fillet whose region spans the part still scores
+        # small and stays edge treatment (the thin-plate longest-not-shortest
+        # reason above is unchanged).
+        faces = np.unique(pairs[idx].ravel())
+        verts = mesh.vertices[mesh.faces[faces].ravel()]
+        if len(verts) < 2:
+            continue
+        local = float(np.ptp(verts, axis=0).max())
+        if local <= 0:
+            continue
+        r_med = _weighted_median(radii[idx], lengths[idx])
+        if r_med / local >= 0.35:
+            form[idx] = True
 
-    outer = modes_for(usable & convex & ~form, sweeps)
-    inner = modes_for(usable & ~convex & ~form, sweeps)
+    outer = rounding_modes(usable & convex & ~form)
+    inner = rounding_modes(usable & ~convex & ~form)
     form_outer = modes_for(usable & convex & form, sweeps)
     form_inner = modes_for(usable & ~convex & form, sweeps)
 
@@ -539,14 +578,19 @@ def _regions(mesh: trimesh.Trimesh, usable: np.ndarray, angles: np.ndarray,
              cfg: Config) -> tuple[dict, dict]:
     """Group folds into continuous curved surfaces, and say which ones close.
 
-    Union-find over the folds that carry a usable radius. A region is *closed*
-    when its folds sum to one full turn and its radius holds steady across
-    them: that is a barrel or a bore. Summing past a full turn means several
-    features grew together — the unbroken shell of a box rounded on all twelve
-    edges, say — which is not one cylinder and must not be reported as one.
+    Union-find over the folds that carry a usable radius. Two folds join only
+    when they share a face *and* their radii agree: a Ø20 sphere meeting a
+    threaded boss is two surfaces, not one region whose turn blows past a
+    full circle and dumps the ball into the corner-radius token. A region is
+    *closed* when its folds sum to one full turn and its radius holds steady
+    across them: that is a barrel or a bore. Summing past a full turn means
+    several features grew together — the unbroken shell of a box rounded on
+    all twelve edges, say — which is not one cylinder and must not be
+    reported as one.
     """
     pairs = mesh.face_adjacency
-    parent = np.arange(len(mesh.faces))
+    n = len(angles)
+    parent = np.arange(n)
 
     def find(a: int) -> int:
         while parent[a] != a:
@@ -560,18 +604,41 @@ def _regions(mesh: trimesh.Trimesh, usable: np.ndarray, angles: np.ndarray,
             parent[rb] = ra
 
     # Coplanar faces first: a tessellated strip is two triangles sharing a
-    # diagonal, and without joining them the chain of strips around a hole
-    # breaks at every strip and no band ever closes.
+    # diagonal. Adjacent longitude folds of a cylinder sit on those two
+    # triangles, so without collapsing the strip they never share a face and
+    # the barrel fragments into ~5° pieces (and a 6 mm plate fillet, judged
+    # against each fragment's tiny AABB, looks like form).
+    facet_of = np.arange(len(mesh.faces))
     for group in mesh.facets:
         group = np.asarray(group)
+        root_f = int(group[0])
         for face in group[1:]:
-            union(int(group[0]), int(face))
+            facet_of[int(face)] = root_f
+
+    # Folds that share a facet and a radius are one surface. Connecting any
+    # two usable folds that merely touch (the old face-union) glued a sphere
+    # to its boss/thread and the combined turn exceeded the closed-form cap.
+    face_folds: dict[int, list[int]] = {}
+    for k in np.where(usable)[0]:
+        k = int(k)
+        face_folds.setdefault(int(facet_of[pairs[k, 0]]), []).append(k)
+        face_folds.setdefault(int(facet_of[pairs[k, 1]]), []).append(k)
+    rel_tol = 0.15          # same wander bound the closed-cylinder test uses
+    for folds_on_face in face_folds.values():
+        for i, a in enumerate(folds_on_face):
+            ra = float(radii[a])
+            if ra <= 0:
+                continue
+            for b in folds_on_face[i + 1:]:
+                rb = float(radii[b])
+                if rb <= 0:
+                    continue
+                if abs(ra - rb) / max(ra, rb) <= rel_tol:
+                    union(a, b)
     members: dict[int, list[int]] = {}
     for k in np.where(usable)[0]:
-        union(int(pairs[k, 0]), int(pairs[k, 1]))
-    for k in np.where(usable)[0]:
-        root = find(int(pairs[k, 0]))
-        members.setdefault(root, []).append(int(k))
+        k = int(k)
+        members.setdefault(find(k), []).append(k)
 
     closed: dict[int, bool] = {}
     for root, folds in members.items():
