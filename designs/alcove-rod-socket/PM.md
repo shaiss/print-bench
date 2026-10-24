@@ -75,7 +75,7 @@ the one motion the part really performs — seeded from the hero.
 | B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence — plus vibration insurance: ~730 axial curtain-tugs/yr vs single-digit unthreads, and a steep 2-start lead is what walks loose under cyclic load; nothing on the rod resists a slow unthread. Measured by the proving print's week-of-use seat check; a walked collar promotes B1 to #1 | small geometry + re-gate |
 | B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
 | ~~B5~~ | ~~25 mm reference coupons (thread + bore)~~ | **Done** (#809): gated `thread-coupon-25` + `bore-coupon-25`; knurl flute cap by OD (NOTES) | — |
-| B5b | Gated 25 mm production holders (`boss` / `collar` / `collar-shallow` at fixed 25 mm, Release + plate policy) | coupons prove the size; holders still need Customizer `rod_d=25` export until gated parts ship | ci.parts + README |
+| ~~B5b~~ | ~~Gated 25 mm production holders (`boss-25` / `collar-25` / `collar-shallow-25`)~~ | **Done** (#814): ci.parts + wrappers; no 25 mm plate (mirror 40 mm: plate stays default-depth pair only) | — |
 
 Re-ranked 2026-08-24 per the #379 thread's ruling (Vera's note: the issue
 body's order was two rounds stale — the committed order wins). A "B6" appears
@@ -108,3 +108,4 @@ All four are the brief's own open questions, non-blocking for modeling.
 | 2026-08-24 | v1 → v2 numbering (not v0.2) | the field-test failure forced a second version before any release shipped: v1 = the frozen geometry, v2 = the packaging fix |
 | 2026-09-12 | Ship `collar-shallow` as a gated part (B3 / #631) | `ci.parts` cannot carry a free-form `-D engagement_depth=12`; dual-`-D` hand-render is the foot-gun the deliverable rules stop. Depth threaded into `collar`/`collar_use`; plate unchanged (boss+collar only) |
 | 2026-10-04 | B5: gate 25 mm thread + bore coupons; cap knurl flutes by collar OD | 36 flutes fail N6 merge guard at 25 mm (collar OD 39); auto-cap to 32 keeps asserts without weakening floors — slip still 0.6 until a coupon says otherwise (#809) |
+| 2026-10-04 | B5b: gate 25 mm holders; no 25 mm plate | Same plate policy as B3: `ci.plate` stays the 40 mm default-depth `boss`+`collar` pair only; 25 mm users download gated `boss-25` / `collar-25` / `collar-shallow-25` STLs (and shallow is off-plate, like 40 mm `collar-shallow`) (#814) |
