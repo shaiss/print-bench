@@ -15,7 +15,9 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 > the base** — a geared stepper and reduction gear-train at each pod, a bevel
 > take-off up each stalk, and a central electronics bay. The base drivetrain and
 > the red interior are shown as **preview-only coloured parts** (a single-material
-> print is one colour; the two colours are the intent). The balls now screw
+> print is one colour; the two colours are the intent — in plastic the numerals
+> and slot read as **dark cut-outs**, not red; the two-tone needs the red
+> interior that does not ship in v0). The balls now screw
 > together on a **captive threaded seam** ([#602](https://github.com/shaiss/print-bench/issues/602)) and the base carries a **red
 > structural core** — a ballast keel with sealed shot pockets ([#603](https://github.com/shaiss/print-bench/issues/603)). Several
 > things are still deliberately simplified and tracked as issues: the base gears
