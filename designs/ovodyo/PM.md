@@ -34,14 +34,18 @@ gears, numerals, slot, core); a committed two-tone reveal render is [#600](https
 
 ## Out of scope
 
-**Deferred** (in the [#599](https://github.com/shaiss/print-bench/issues/599) backlog): the geodesic-ball lib
-(#600), true stencil numerals (#601), tapered space-frame base (#603), real
-bevel differential + `ci.plate` deliverable + **ball-side stalk hub/socket**
-(#604 — brass rods seat in `base-end` today; the hero's "reaches the ball
-centre" is preview-only until the hub lands), and a printable two-tone insert
-(red inner half-shells under the seam mouth — N1-compatible, no paint; top-ranked
-unfiled #599 item, composes with #604). **#602** (flat parting seam) **shipped**
-as the captive threaded seam — v1 box 1 then waits only on #601's stencil numerals.
+**Deferred** (in the [#599](https://github.com/shaiss/print-bench/issues/599) backlog), ranked:
+1. **printable two-tone insert** (red inner half-shells under the seam mouth —
+   N1-compatible, no paint; flush inlay is the readable form; composes with #604)
+2. geodesic-ball lib (#600)
+3. true stencil numerals (#601)
+4. tapered space-frame base (#603)
+5. real bevel differential + `ci.plate` deliverable + **ball-side stalk hub/socket**
+   (#604 — brass rods seat in `base-end` today; the hero's "reaches the ball
+   centre" is preview-only until the hub lands).
+
+**#602** (flat parting seam) **shipped** as the captive threaded seam — v1 box 1
+then waits only on #601's stencil numerals.
 
 **Never:**
 - **Painted two-tone** — the colour comes from geometry + material, not paint (N1).
