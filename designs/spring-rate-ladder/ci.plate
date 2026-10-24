@@ -1,0 +1,9 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/spring-rate-ladder-plate.3mf (scripts/plate.sh, gate.sh --check).
+#
+# The measurement instrument is coupon + cap: two parts that print SEPARATELY
+# and assemble by hand. A single STL of both would import as one fused body
+# (the multi-part-fuse rule). The ladder plate is a standalone deliverable
+# and is NOT on this plate. Fitcheck parts are excluded.
+coupon
+cap
