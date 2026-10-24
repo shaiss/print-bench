@@ -37,11 +37,13 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 
 ![Hero — the whole clock](previews/hero.png)
 
+*Stalk-to-ball join in the hero is preview-only until [#604](https://github.com/shaiss/print-bench/issues/604) — the printable halves have no pole socket yet.*
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ![A single ball](previews/hours-ball.png)
 
-![Helical slot through a corner](previews/slot-corner.png)
+![Helical slot path across corners](previews/slot-path.png)
 
 ## What you get
 
@@ -54,7 +56,9 @@ whole clock would print as one fused lump):
   10** (the split follows the tumble stop table, not an even/odd rule — see
   NOTES.md). Print one of each for a complete hours ball.
 - `minutes-top` + `minutes-bottom` — likewise for the minutes ball: top **10,
-  35, 25, 45, 55, 15**, bottom **30, 05, 40, 20, 00, 50** (00–55 in 5s).
+  35, 25, 45, 55, 15**, bottom **30, 05, 40, 20, 00, 50** (00–55 in 5s). Until
+  the real drive lands ([#604](https://github.com/shaiss/print-bench/issues/604)), day one the minutes ball is for
+  hand-spin demos (or sits pretty) — it is not yet a running clock face.
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
   (a Ø5.6 mm round nose) and carry a bored stalk boss over the motor pod, with
@@ -104,16 +108,18 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
 - **Seam (slicer):** the stock *Aligned* seam stacks a visible z-ridge down the
   ≥6 mm mating annulus. Paint the seam onto the helical-slot interruption, or set
   **Back** or **Random**, so the closed join reads as one fine line.
-- **Vitamins for the base:** Ø2 mm steel shot for the core's ballast pockets
-  (**≈ 55 g is a starting fill you may need to adjust** — `ci.cog` runs the
-  advisory CoG/tip-over check; TIP-RISK is a WARN, not a gate failure). The
-  first emit on tip `d8d9cf5` measured STABLE (38.28 mm clearance); this page
-  still does not claim the clock is STABLE for every future change. If a later
-  sticky or `cog-check.sh` line says **TIP-RISK**, the usable next steps are in
-  NOTES.md **TIP-RISK care** (read that CoG table, add ~5 g split across both
-  pockets if they are not already packed, re-read the WARN — do not change
-  the truss). Fill and plug **before** the core goes in, plus four Ø5 mm ×
-  1.5 mm hemispherical stick-on silicone bumpers for the foot recesses.
+- **Vitamins for the base:** two brass rods ≈Ø4.5 mm × ~120 mm (support stalks —
+  seat in the `base-end` bosses; length ≈ `ball_center_z −` wing height); Ø2 mm
+  steel shot for the core's ballast pockets (**≈ 55 g is a starting fill you may
+  need to adjust** — `ci.cog` runs the advisory CoG/tip-over check; TIP-RISK is a
+  WARN, not a gate failure). The first emit on tip `d8d9cf5` measured STABLE
+  (38.28 mm clearance); this page still does not claim the clock is STABLE for
+  every future change. If a later sticky or `cog-check.sh` line says
+  **TIP-RISK**, the usable next steps are in NOTES.md **TIP-RISK care** (read
+  that CoG table, add ~5 g split across both pockets if they are not already
+  packed, re-read the WARN — do not change the truss). Fill and plug **before**
+  the core goes in, plus four Ø5 mm × 1.5 mm hemispherical stick-on silicone
+  bumpers for the foot recesses.
 
 ## Parameters
 

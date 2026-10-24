@@ -13,5 +13,8 @@ fixed once reviewed; a new region gets a new line).
   crosses a corner facet. Added for #768 so the opened corner cut is visible as
   a shot, not only asserted in NOTES (new region = new line, never a reframe of
   `hours-ball`).
+- **slot-path** — near-equator view of the helical slot band cutting across
+  corner facets. Added after Drik R2 noted `slot-corner` mostly framed numerals;
+  new line, not a reframe of `slot-corner`.
 - **base-mech** — the base drivetrain alone: geared stepper + reduction train at
   each pod, bevel take-off up each stalk, central electronics bay.
