@@ -63,7 +63,7 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 ![Helical window broadside](previews/slot-window.png)
 
 *Looking into the 10 mm helical window — preview red reads through the cut;
-OpenCSG cut walls may tint green (renderer, not filament).*
+any green on the cut walls is a preview artifact, not your filament.*
 
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
 
