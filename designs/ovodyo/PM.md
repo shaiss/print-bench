@@ -18,7 +18,7 @@ exactly why they live here.
 | # | Constraint | Number | Source | Reopens if |
 |---|---|---|---|---|
 | N1 | Two-tone is **cut-through geometry**, never paint: numerals and the slot are real voids to a red interior | 12 plaques + 1 slot cut through the shell | reference video/diagrams | a multi-material printer makes flush numerals read as through-cuts to a reviewer |
-| N2 | **Tumble-to-index** motion: a fresh flat face lands upright at each stop, not a spin | hours index 450°, minutes 90° | reference text | never — this is the product |
+| N2 | **Tumble-to-index** motion: a fresh flat face lands upright at each stop, not a spin | built irregular yoke steps (≈54.7 / 62.7 / 180 / 305.3°); max landing error 1.62° — not a uniform 450°/90° index (reference quote was aspirational) | NOTES tumble stop table | never — this is the product |
 | N3 | Heavy **faceted** spheres on **brass stalks** over a **genuinely airy** base | 12 pentagon plaques; base fills <25% of its bbox | reference | never |
 | N4 | Honest colour code: **red = every working part** (gears, numerals, slot, core) | — | reference | never |
 
@@ -84,3 +84,5 @@ as the captive threaded seam — v1 box 1 then waits only on #601's stencil nume
 | 2026-10-24 | In-situ caption: pods aren't mirrors — hours/minutes reductions differ (N2) | Drik hunch / PM triage |
 | 2026-10-24 | #601 eyetest note: when a printed half exists, photograph at reading distance (~60 cm, desk lamp) | Drik used-it / PM queue |
 | 2026-10-24 | #602 captive threaded seam marked shipped; printable red insert stays top-ranked #599 deferred | PM triage charter follow-up |
+| 2026-10-24 | Care: hedged seam-as-release-plane + ambient lamplight clause; vitamins where-to-buy for Ø2 shot | Drik / PM triage |
+| 2026-10-24 | N2 Number cell → built stop table (irregular steps); printable red insert ranked first above #600 | Drik / PM triage |
