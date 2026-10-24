@@ -62,7 +62,7 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 
 ![Helical window broadside](previews/slot-window.png)
 
-*The 10 mm helical slot as a window into the interior (red is preview colour).*
+*Looking into the 10 mm helical window — red interior is preview colour.*
 
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
 
@@ -253,8 +253,9 @@ stages** (tapping while pouring fights the funnel). A folded-paper funnel with
 the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port is only about
 one and a half pellets wide, so shot will jam and arch. A strong magnet held
 against the pocket wall settles an arch and drags shot around through a couple
-of mm of plastic — worth a try (steel shot only). Press a Ø5 mm silicone bumper
-into each of the four foot recesses.
+of mm of plastic — worth a try (chrome-steel shot only; stainless bearing balls
+won't follow a magnet). Press a Ø5 mm silicone bumper into each of the four
+foot recesses.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
