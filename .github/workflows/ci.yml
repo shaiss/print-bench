@@ -1354,8 +1354,11 @@ jobs:
           # Postinst-free packages only (no update-alternatives) — a cache
           # restore skips postinst, see issue #85; docs-check.sh enforces.
           packages: xvfb prusa-slicer f3d
-          # cache key; bump to pull fresh package versions (see scad-check)
-          version: "2026-08"
+          # cache key; bump to pull fresh package versions (see scad-check).
+          # 2026-10: ubuntu-26.04 left a poisoned ~7KB manifest-only cache under
+          # 2026-08 that restored 0 packages, so --slice found no prusa-slicer
+          # (issue #916 follow-on).
+          version: "2026-10"
       - name: Install OpenSCAD nightly (cached)
         # Dev snapshots render with the Manifold backend — order-of-
         # magnitude faster than 2021.01's CGAL on these models. The stable

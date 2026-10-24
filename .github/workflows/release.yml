@@ -71,7 +71,9 @@ jobs:
           # a cache restore skips postinst, so alternatives-managed binaries
           # would come back dangling (issue #85).
           packages: xvfb prusa-slicer
-          version: "2026-08"
+          # Bumped with render-gate (issue #916): avoid the poisoned 26.04
+          # manifest-only cache that restored 0 packages under 2026-08.
+          version: "2026-10"
 
       - name: Install OpenSCAD nightly (cached)
         # The Manifold backend — the same engine render-gate uses, an order of
