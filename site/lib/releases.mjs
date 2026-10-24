@@ -137,12 +137,15 @@ export async function fetchLatestReleaseManifests({
   timeoutMs = 10000,
 } = {}) {
   const result = new Map();
-  const headers = { Accept: "application/vnd.github+json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // Authorization belongs only on api.github.com. browser_download_url redirects
+  // off the API (github.com → objects.githubusercontent.com); reusing the same
+  // headers object would send the build token to those hosts (issue #903).
+  const apiHeaders = { Accept: "application/vnd.github+json" };
+  if (token) apiHeaders.Authorization = `Bearer ${token}`;
   const latest = await fetchJson(
     fetchImpl,
     `${GITHUB_API}/repos/${owner}/${repo}/releases/latest`,
-    { headers, timeoutMs }
+    { headers: apiHeaders, timeoutMs }
   );
   if (!latest.ok) {
     if (latest.status === 404) return seamResult(SEAM.EMPTY, result); // nothing published yet
@@ -164,11 +167,16 @@ export async function fetchLatestReleaseManifests({
   }
   const failures = [];
   let failedDesigns = new Set();
+  // Public release assets need no auth — never pass Authorization here.
+  const assetHeaders = { Accept: "application/json" };
   for (const asset of release.assets) {
     if (!asset || typeof asset.name !== "string") continue;
     if (!asset.name.endsWith(".manifest.json")) continue;
     if (typeof asset.browser_download_url !== "string") continue;
-    const got = await fetchJson(fetchImpl, asset.browser_download_url, { headers, timeoutMs });
+    const got = await fetchJson(fetchImpl, asset.browser_download_url, {
+      headers: assetHeaders,
+      timeoutMs,
+    });
     const manifest = got.ok ? got.body : null;
     if (isReleaseManifest(manifest)) {
       result.set(manifest.design, manifest);
