@@ -77,6 +77,8 @@ jobs:
         # The Manifold backend — the same engine render-gate uses, an order of
         # magnitude faster than 2021.01's CGAL on these models.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10"
 
       - uses: actions/setup-python@v7
         with:

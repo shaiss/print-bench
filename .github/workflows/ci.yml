@@ -420,6 +420,10 @@ jobs:
         # .github/actions/setup-openscad-nightly fails here until it merges in
         # the default branch.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          # Bump when the cached OBS debs conflict with the runner image
+          # (issue #916: 2026-08 downgraded libhwy1t64 / librsvg2-2).
+          cache-version: "2026-10"
       - name: Install the render toolchain (xvfb, ImageMagick, gifsicle)
         if: steps.plan.outputs.render == 'true'
         # Deliberately plain apt-get rather than awalsh128/cache-apt-pkgs-action,
@@ -1136,6 +1140,8 @@ jobs:
         # Same engine as render-gate, so a swatch measures the same here as
         # it does in the gate that judges the printable parts.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -1290,6 +1296,8 @@ jobs:
           version: "2026-08"
       - name: Install OpenSCAD nightly (cached)
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10"
       # Same reason as scad-check above: check.sh's fusecheck selftest needs
       # printcheck, and the selftest has no skip path.
       - uses: actions/setup-python@v7
@@ -1355,6 +1363,8 @@ jobs:
         # binary remains covered by the scad-check job.
         if: needs.changes.outputs.gate_designs != ''
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10"
       - uses: actions/setup-python@v7
         if: needs.changes.outputs.gate_designs != ''
         with:
@@ -1718,6 +1728,8 @@ jobs:
       - name: Install OpenSCAD nightly (cached)
         # Same engine as render-gate so base and head render identically.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'

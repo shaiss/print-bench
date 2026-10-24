@@ -15,7 +15,7 @@ inputs:
       monthly, or when a nightly fix is needed). Keep it in sync with the
       value ci.yml passes so all five jobs share one cache entry.
     required: false
-    default: "2026-08"
+    default: "2026-10"
 runs:
   using: composite
   steps:
