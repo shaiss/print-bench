@@ -497,6 +497,10 @@ in place on z = 0) and `base-plug` its port plug (print two); `core-seat`,
 WARN on TIP-RISK). First CI emit on tip `d8d9cf5` / PR #789 sticky: STABLE,
 38.28 mm clearance under solid-mesh PLA 1.24; ≈55 g remains the starting
 fill. TIP-RISK care (add shot, never slab the truss) is the section above.
+`base-mech-in-situ` (drivetrain seated in the truss; companion to frozen
+`base-mech`) and `what-ships` (single-material honesty silhouette — shells +
+bare truss + uncoloured core, no gear theatre) are preview-only parts added for
+PM triage on PR #914; both have frozen cameras and README embeds. The
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
 faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in

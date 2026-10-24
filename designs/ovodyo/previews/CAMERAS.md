@@ -18,3 +18,8 @@ fixed once reviewed; a new region gets a new line).
   new line, not a reframe of `slot-corner`.
 - **base-mech** — the base drivetrain alone: geared stepper + reduction train at
   each pod, bevel take-off up each stalk, central electronics bay.
+- **base-mech-in-situ** — the same drivetrain seated in the truss so the gears
+  have scale and a home (companion to frozen `base-mech`; new line).
+- **what-ships** — single-material honesty shot of the printable silhouette
+  (shells + bare truss + stalks, no red cores or gear theatre). Lives beside the
+  v0 banner; must not replace the hero.

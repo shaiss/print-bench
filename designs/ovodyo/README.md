@@ -37,13 +37,22 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 
 ![Hero — the whole clock](previews/hero.png)
 
-*Stalk-to-ball join in the hero is preview-only until [#604](https://github.com/shaiss/print-bench/issues/604) — the printable halves have no pole socket yet.*
+*Stalk-to-ball join in the hero is preview-only until [#604](https://github.com/shaiss/print-bench/issues/604) — the printable halves have no pole socket yet. Red in these previews is OpenSCAD cut/working-part colour — a single-material print is one colour.*
+
+![What ships (single-material)](previews/what-ships.png)
+
+*What a single-material print looks like: white shells with void numerals, bare truss, no red interior or gear theatre. The two-tone hero above is the intent; this is the plate.*
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ![A single ball](previews/hours-ball.png)
 
 ![Helical slot path across corners](previews/slot-path.png)
+
+![Base drivetrain in the truss](previews/base-mech-in-situ.png)
+
+*Preview-only gears seated in the lattice — scale and home for the identity shot
+(`base-mech` is the close-up without the truss).*
 
 ## What you get
 
@@ -83,9 +92,11 @@ then segment + both ends + core + both plugs on a second plate with margin.
 
 The base drivetrain (gear-trains, steppers, bevels, PCB) and the balls' red
 interior are **preview-only** — colours are ignored on STL export, so they are
-not printable parts. See them assembled in the hero image and the `base-mech`
-gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
-`pod-drive` to preview the mechanism); the default render is the assembled clock.
+not printable parts. See them assembled in the hero image and the
+`base-mech-in-situ` gallery preview (drivetrain seated in the truss; `base-mech`
+is the close-up with no lattice). Select a part with `-D 'part="hours-top"'`
+(or `base-mech` / `base-mech-in-situ` / `pod-drive` to preview the mechanism);
+the default render is the assembled clock.
 
 ## Print settings
 
@@ -102,24 +113,28 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
   auto-supports off**, or the slicer fills the open bowl and welds the seam
   ring (the captive thread) shut.
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
-  first layer and the seam ring is the top of the print (as the parts render);
-  truss segments bottom-chord-down (as modeled); mock drive flat; the seam
-  coupon as rendered; core keel flat-bottom-down; plug head-down.
+  first layer and the seam ring is the top of the print (as the parts render).
+  The pole face carries a numeral, so **layer 1 is the stencil itself**; the
+  tied counters (0/4/6/8/9) are expected — keep going. Truss segments
+  bottom-chord-down (as modeled); mock drive flat; the seam coupon as rendered;
+  core keel flat-bottom-down; plug head-down.
 - **Seam (slicer):** the stock *Aligned* seam stacks a visible z-ridge down the
   ≥6 mm mating annulus. Paint the seam onto the helical-slot interruption, or set
   **Back** or **Random**, so the closed join reads as one fine line.
-- **Vitamins for the base:** two brass rods ≈Ø4.5 mm × ~120 mm (support stalks —
-  seat in the `base-end` bosses; length ≈ `ball_center_z −` wing height); Ø2 mm
-  steel shot for the core's ballast pockets (**≈ 55 g is a starting fill you may
-  need to adjust** — `ci.cog` runs the advisory CoG/tip-over check; TIP-RISK is a
-  WARN, not a gate failure). The first emit on tip `d8d9cf5` measured STABLE
-  (38.28 mm clearance); this page still does not claim the clock is STABLE for
-  every future change. If a later sticky or `cog-check.sh` line says
-  **TIP-RISK**, the usable next steps are in NOTES.md **TIP-RISK care** (read
-  that CoG table, add ~5 g split across both pockets if they are not already
-  packed, re-read the WARN — do not change the truss). Fill and plug **before**
-  the core goes in, plus four Ø5 mm × 1.5 mm hemispherical stick-on silicone
-  bumpers for the foot recesses.
+- **Vitamins for the base:** two brass rods ~120 mm long for the support stalks
+  (boss bore is Ø4.9 mm from `stalk_d=4.5` + 0.4 clearance). Shelf stock jumps
+  4→5 mm: **bless Ø4 mm rod + a wrap of tape** (tool-free snug); ream-to-Ø5 is
+  the alternative if you prefer. Length ≈ `ball_center_z −` wing height. Also
+  Ø2 mm steel shot for the core's ballast pockets (**≈ 55 g is a starting fill
+  you may need to adjust** — `ci.cog` runs the advisory CoG/tip-over check;
+  TIP-RISK is a WARN, not a gate failure). The first emit on tip `d8d9cf5`
+  measured STABLE (38.28 mm clearance); this page still does not claim the clock
+  is STABLE for every future change. If a later sticky or `cog-check.sh` line
+  says **TIP-RISK**, the usable next steps are in NOTES.md **TIP-RISK care**
+  (read that CoG table, add ~5 g split across both pockets if they are not
+  already packed, re-read the WARN — do not change the truss). Fill and plug
+  **before** the core goes in, plus four Ø5 mm × 1.5 mm hemispherical stick-on
+  silicone bumpers for the foot recesses.
 
 ## Parameters
 
@@ -153,6 +168,9 @@ dodecahedron.
 
 ## Assembly & use
 
+**v0 prints, screws together and stands; it does not yet move or tell time on
+its own** — the printed drive interface is [#604](https://github.com/shaiss/print-bench/issues/604).
+
 Print a **top and a bottom half** per ball (they carry different numbers) and
 **screw them together** around the equator: the bottom half carries a short
 threaded ring standing up from its flat seam face, the top half the matching
@@ -161,20 +179,22 @@ enters at that one clocking — and turn it **exactly one full turn** until the
 flat faces meet; the facets line up again as they close and the seam reads as
 one fine line. No glue, no dowels, and it unscrews the same way to reach the
 mechanism. **Print the seam coupon first** (`ovodyo-coupon.scad`: a male ring
-and a female puck side by side) and tune `seam_tol` in 0.05 mm steps until the
-puck runs on by hand with light drag and seats without rattle — then render
-the halves with that value. If the coupon's male ring feels tight only at the
-very start of the turn, that's **first-layer squish on the coupon**, not the
-fit — don't loosen `seam_tol` for it; the production seam never touches the bed.
+and a female puck side by side; the strip is **164 mm wide — needs a ≥170 mm
+bed**) and tune `seam_tol` in 0.05 mm steps until the puck runs on by hand with
+light drag and seats without rattle — then render the halves with that value. If
+the coupon's male ring feels tight only at the very start of the turn, that's
+**first-layer squish on the coupon**, not the fit — don't loosen `seam_tol` for
+it; the production seam never touches the bed.
 
-**Stalks (v0 display):** two brass rods (≈Ø4.5 mm) seat snug in the bored bosses
-on each `base-end` — if a rod rattles, a wrap of tape or a drop of CA fixes it;
-don't ream the boss. The **ball halves have no printed pole socket yet** — the
-hero preview unions a cylinder into the shell that no printable part carries.
-Until the hub lands in [#604](https://github.com/shaiss/print-bench/issues/604), stand each assembled ball on its
-flat pole pentagon beside the base, or rest it on the rod tip without claiming a
-retained mount. The three truss segments join end to end (printed bolt/flange
-joints are [#603](https://github.com/shaiss/print-bench/issues/603); tape or a dab of glue holds a temporary join).
+**Stalks (v0 display):** seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
+in the Ø4.9 mm `base-end` bosses — snug is right; don't ream unless you chose
+the Ø5 path. The **ball halves have no printed pole socket yet** — the hero
+preview unions a cylinder into the shell that no printable part carries. Until
+the hub lands in [#604](https://github.com/shaiss/print-bench/issues/604), stand each assembled ball on its flat pole
+pentagon beside the base, or rest it on the rod tip without claiming a retained
+mount (there is no v0 "running feel" to tune — that fit is #604's). The three
+truss segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603);
+tape or a dab of glue holds a temporary join).
 
 **The red core goes in before the clock stands up, and the order matters: 1. fill
 each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into each port

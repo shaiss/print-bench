@@ -16,7 +16,8 @@ include <tumble.scad>         // tumble-to-index kinematics: stop table, frames,
 /* [What to render] */
 // assembled | hours-top | hours-bottom | minutes-top | minutes-bottom |
 // hours-ball | minutes-ball | base-segment | base-end | mock-drive |
-// base-mech | pod-drive | seam-coupon | seam-fit | seam-fit-ctrl |
+// base-mech | base-mech-in-situ | what-ships | pod-drive |
+// seam-coupon | seam-fit | seam-fit-ctrl |
 // landing-flat | landing-flat-ctrl | landing-glyph | landing-glyph-rolled |
 // landing-glyph-mirrored | hours-posed |
 // base-core | base-plug | core-seat | core-seat-ctrl | pocket-clear | pocket-ctrl
@@ -817,6 +818,28 @@ else if (part == "base-segment") base_segment();           // constant centre se
 else if (part == "base-end")     base_end();               // tapering end wing
 else if (part == "mock-drive")   mock_drive();
 else if (part == "base-mech")    base_mech();              // preview: the base drivetrain
+// preview: drivetrain seated in the truss (companion to frozen base-mech)
+else if (part == "base-mech-in-situ") { full_base(); base_mech(); }
+// preview: what a single-material print looks like — shells + truss + stalks +
+// uncoloured core (no gear theatre, no red interior; honesty complement to the
+// two-tone hero). Rebuilds full_base without the color() wrap so OpenSCAD
+// draws one tone.
+else if (part == "what-ships") {
+  base_truss(0, n_bays);
+  stalk_boss(-ball_spacing / 2);
+  stalk_boss( ball_spacing / 2);
+  tip_nose(_bx(0));
+  tip_nose(_bx(n_bays));
+  wing_feet();
+  mirror([1, 0, 0]) wing_feet();
+  core_body();
+  core_plug_seated(-1);
+  core_plug_seated(1);
+  stalk(-ball_spacing / 2);
+  stalk( ball_spacing / 2);
+  translate([-ball_spacing / 2, 0, ball_center_z]) hours_ball();
+  translate([ ball_spacing / 2, 0, ball_center_z]) minutes_ball();
+}
 else if (part == "pod-drive")    pod_drive();              // preview: one pod's gear train
 else if (part == "seam-coupon")  seam_coupon();            // print this first: male ring + female puck
 else if (part == "seam-fit")     seam_fit(false);          // fitcheck: must render EMPTY

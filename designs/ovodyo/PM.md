@@ -56,3 +56,13 @@ hero's "reaches the ball centre" is preview-only until the hub lands).
 - [ ] A real bevel differential that the kinematics gate proves lands a face upright.
 - [ ] Product page shows the two-tone render (red reads through the cuts).
 - [ ] Human approves the shape (taste is a merge decision, not a gate).
+
+## Decision log (recent)
+
+| When | Decision | Source |
+|---|---|---|
+| 2026-10-24 | #768 chamfer normals + slot clip fixed; facet default kept 1.05 | issue #768 / PR #914 |
+| 2026-10-24 | Ball-side stalk hub/socket deferred to #604; page carries interim display | Drik block → coach/PM fork (b) |
+| 2026-10-24 | Vitamins bless Ø4 mm rod + tape shim (boss Ø4.9); Ø5 ream alternative | Drik used-it / PM triage |
+| 2026-10-24 | What-ships monochrome preview beside banner (hero stays two-tone) | Drik used-it / PM triage D4 |
+| 2026-10-24 | #604 note: numeral shadow-hole legibility at 288 indexes/day is a hot path once driven | Drik customer-sense / PM queue |
