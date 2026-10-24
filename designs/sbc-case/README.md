@@ -29,7 +29,8 @@ view lower down shows the green board and gold header pins seated just below the
   from `pcb_screw_positions`), four through-bored lid-screw posts
   (~95 × 76 × 26 mm)
 - `lid` — the flat top: register lip (notched around the lid-screw posts),
-  Ø37 fan aperture, four insert bosses on the inner face, lid-screw holes
+  co-planar intake grille over the Ø37 fan zone (not an open bore),
+  four insert bosses on the inner face, lid-screw holes
   (~95 × 76 × 2.5 mm plate + 7 mm bosses)
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
   first to tune the fits (~33 × 76 × 26 mm)
@@ -74,6 +75,11 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   touches, and its floor-and-skirt footprint hides the 0.1–0.2 mm shave.
 - **Feet:** stick four **adhesive rubber feet** on the floor — the case sits on
   a flat base, and feet keep it from walking when you plug a cable in one-handed.
+- **Grille holes (PETG):** a few wisps or strings across the ~30 small
+  through-holes are normal — clear them with a needle or fingernail before
+  assembly.
+- **Grille tone:** a faint blade-pass hum at full fan speed is normal for a
+  close co-planar grille — step the fan curve down if it bothers you at night.
 
 The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
@@ -87,8 +93,9 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 | `fit_clearance` | 0.25 mm | lid register lip vs cavity wall; tune on the coupon |
 | `standoff_h` | 5 mm | board standoff height (4–6 per the brief) |
 | `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector |
-| `fan_type` | `fan40x11` | fan vitamin; aperture and boss pitch follow it |
+| `fan_type` | `fan40x11` | fan vitamin; grille clip and boss pitch follow it |
 | `fan_center` | (−10, 0) mm | fan position; biased toward the SoC |
+| `grille_hole_d` / `grille_web` | 5.0 / 2.0 mm | co-planar intake holes and solid web (B11) |
 | `board_clr` | 0.75 mm | board-to-wall clearance |
 | `wall` / `floor_t` / `lid_t` | 2.0 / 2.0 / 2.5 mm | shell thicknesses |
 
@@ -123,9 +130,23 @@ so what you feel there is what the full parts do.
   thread. The board screws are the ones you touch once. One catch the fan adds: it
   lives on the lid, but its lead plugs into the board — so unplug that lead at the
   header before you lift the lid, or a set-aside lid hangs by two wires.
-- **Keep it breathing.** The fan blows *in* through an open-skirted case, so
-  it is an intake for dust too — on an always-on build, blow the fan and the
-  vent row out every few months.
+- **Closed ceiling over the fan bore.** The fan bolts to the lid's **outer**
+  face (above the plate); the grille is co-planar holes in the plate, not a
+  blade guard from outside.   It closes the case ceiling over the Ø37 zone so **fingers and larger dropped
+  objects** (coins, washers) meet the 2 mm webs instead of falling through a bare
+  bore — not protection against small hardware: **Ø5 mm** holes still pass M2.5/M3
+  screws (~2.5–3 mm shank), paperclips, and stiff wire. With the lid **off the
+  case**, a **pencil tip** fits a hole where a fingertip meets the web (assembled,
+  the fan bolts to the outer face and covers the grille). Airflow is reduced
+  versus a bare bore (~40 % of the old free area at the default 5.0 / 2.0 mm
+  holes and webs). Tune `grille_hole_d` / `grille_web` in the Customizer and
+  **reprint the lid** if your fan needs more pull (for example Ø6 holes on
+  7.6 mm pitch — 1.6 mm webs, ~49 % open — stays above the 1.2 mm web floor).
+  The coupon still proves lip, post, and screw fit only; it does not include the
+  fan-zone grille.
+- **Keep it breathing.** The fan still blows *in* through the grille and the
+  open-skirted case, so it is an intake for dust too — on an always-on build,
+  blow through the grille and the vent row out every few months.
 
 ![GPIO access notch above the 2×20 header — jumpers exit here with the lid on](previews/notch.png)
 
