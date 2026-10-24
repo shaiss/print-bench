@@ -1342,23 +1342,18 @@ jobs:
           echo "No geometry-affecting path changed and no design is in scope."
           echo "This required context runs as a formality — see the soft-infra"
           echo "note in the 'Detect changed paths' job."
-      - name: Install xvfb, PrusaSlicer and f3d (cached)
+      - name: Install xvfb, PrusaSlicer and f3d
         if: needs.changes.outputs.gate_designs != ''
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
-        with:
-          # PrusaSlicer stays on the Ubuntu package: upstream stopped
-          # shipping Linux binaries after 2.9.0 (Flatpak-only now), so
-          # apt 2.7.x is the newest CI-practical build. f3d likewise uses
-          # the Ubuntu package (2.2.x; upstream 3.x ships .debs if we ever
-          # need newer) — it only renders artifact previews here.
-          # Postinst-free packages only (no update-alternatives) — a cache
-          # restore skips postinst, see issue #85; docs-check.sh enforces.
-          packages: xvfb prusa-slicer f3d
-          # cache key; bump to pull fresh package versions (see scad-check).
-          # 2026-10: ubuntu-26.04 left a poisoned ~7KB manifest-only cache under
-          # 2026-08 that restored 0 packages, so --slice found no prusa-slicer
-          # (issue #916 follow-on).
-          version: "2026-10"
+        # Plain apt-get, not cache-apt-pkgs-action: on ubuntu-26.04 that
+        # action swallowed apt mirror 404s, cached 0 packages, and left
+        # prusa-slicer off PATH while reporting success (issue #916). Plain
+        # apt-get fails the step on fetch errors. PrusaSlicer stays on the
+        # Ubuntu package (upstream Flatpak-only after 2.9.0); f3d likewise.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb prusa-slicer f3d
+          command -v prusa-slicer
+          prusa-slicer --help >/dev/null
       - name: Install OpenSCAD nightly (cached)
         # Dev snapshots render with the Manifold backend — order-of-
         # magnitude faster than 2021.01's CGAL on these models. The stable
