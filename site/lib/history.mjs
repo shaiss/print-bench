@@ -14,8 +14,10 @@
 //     committed sources hold.
 //   - fetchDesignCommits() is the impure boundary: the design's path-filtered
 //     commits over the GitHub API, with an injectable `fetch`. BEST-EFFORT —
-//     any failure (offline, rate limit, non-2xx) yields [] and the timeline
-//     simply shows no git events, never a broken build.
+//     any failure (offline, rate limit, non-2xx) yields no commits, never a
+//     broken build — but it reports a seam status (seam.mjs) beside them, so
+//     an `unavailable` fetch puts a note in the History tab instead of
+//     passing for a design that has no git history.
 //
 // Determinism (the clarified site rule — build vs. deploy vs. served output):
 // the fetch is deploy-scoped (shouldFetchHistory). A plain ./scripts/site.sh
@@ -24,6 +26,8 @@
 // invention — every event is a real commit in this repo's own history, labelled
 // `commit · git` so a reader sees exactly where it came from. Product-scoped by
 // the `path=designs/<design>` filter: only work on THIS product appears.
+
+import { SEAM, seamResult, fetchedResult, fetchJson } from "./seam.mjs";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -106,11 +110,18 @@ export function loginHandleMap(members = []) {
 /**
  * Impure boundary — a design's commits over the GitHub API, path-filtered to
  * `designs/<design>` so only work on THIS product appears (the #122 product-
- * scoping principle). Best-effort: returns [] on any failure (no such design,
- * non-2xx, network error, unparseable body), so the caller wraps nothing and
- * the build never breaks. `fetchImpl` is injectable so tests never touch the
- * network; `token` (optional) lifts the unauthenticated rate limit but is
- * never required for a public repo.
+ * scoping principle). Returns a seam result (seam.mjs) and never throws, so the
+ * build never breaks:
+ *   ok           items: the commit array
+ *   empty        the path has no commits (the API answers 200 [])
+ *   unavailable  items: [], with the failure class in `reason` — a non-2xx
+ *                (a 404 here means the repo, not the path, is missing), a
+ *                network error, the timeout, an unparseable or non-array
+ *                body, or no design / fetch to run with
+ * `fetchImpl` is injectable so tests never touch the network; `token`
+ * (optional) lifts the unauthenticated rate limit but is never required for a
+ * public repo. Bounded by `timeoutMs` (fetchJson aborts the request and the
+ * body read), so a hung connection cannot stall the deploy build.
  */
 export async function fetchDesignCommits({
   fetchImpl = globalThis.fetch,
@@ -121,26 +132,16 @@ export async function fetchDesignCommits({
   perPage = 20,
   timeoutMs = 10000,
 } = {}) {
-  if (typeof fetchImpl !== "function" || !design) return [];
+  if (!design) return seamResult(SEAM.UNAVAILABLE, [], "no design given");
   const headers = { Accept: "application/vnd.github+json" };
   if (token) headers.Authorization = `Bearer ${token}`;
   const path = `designs/${design}`;
   const url = `${GITHUB_API}/repos/${owner}/${repo}/commits?path=${encodeURIComponent(
     path
   )}&per_page=${perPage}`;
-  // Bound the request so a hung connection cannot stall the deploy build: abort
-  // after timeoutMs, and the AbortError lands in the same best-effort catch as
-  // any other failure → [], no git events. The timer is always cleared.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetchImpl(url, { headers, signal: controller.signal });
-    if (!res || !res.ok) return []; // no such path / error → no git events
-    const body = await res.json();
-    return Array.isArray(body) ? body : [];
-  } catch {
-    return []; // offline / DNS / rate limit / timeout → none
-  } finally {
-    clearTimeout(timer);
-  }
+  const got = await fetchJson(fetchImpl, url, { headers, timeoutMs });
+  if (!got.ok) return seamResult(SEAM.UNAVAILABLE, [], got.reason);
+  // A 200 that is not a commit list (a `{ message }` body) is not "no commits".
+  if (!Array.isArray(got.body)) return seamResult(SEAM.UNAVAILABLE, [], "unexpected response body");
+  return fetchedResult(got.body);
 }

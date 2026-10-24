@@ -143,9 +143,11 @@ _DOMAIN_EPS = 1e-9;
 // were a number: span = 0 passes bistable_arch_y's domain check vacuously at
 // x = 0 (both bounds are 0) and evaluates cos(0/0); span = 0 in the force
 // divides by zero; a negative rise in the inverse solve takes the cube root
-// of a negative, and rise = 0 solves to a zero span. Checked BEFORE the domain
-// check, so a negative span is named as what it is rather than as an x off
-// the span.
+// of a negative, and rise = 0 solves to a zero span. t, width and E of 0 or
+// less hand back a zero/negative force (or a 0/NaN inverse span) without the
+// geometry generators' 0.8 mm t floor, which those generators still own.
+// Checked BEFORE the domain check, so a negative span is named as what it is
+// rather than as an x off the span.
 
 // Fixed–fixed first-mode centreline at LOCAL x (0 at the first clamp face).
 function bistable_arch_y(x, span, rise) =
@@ -162,6 +164,9 @@ function bistable_arch_y(x, span, rise) =
 function bistable_arch_fs(span, rise, t, width, E = 2000) =
     assert(span > 0, str("bistable_arch_fs: arch span must be positive (got ", span, ")"))
     assert(rise > 0, str("bistable_arch_fs: arch rise must be positive (got ", rise, ")"))
+    assert(t > 0, str("bistable_arch_fs: arch thickness t must be positive (got ", t, ")"))
+    assert(width > 0, str("bistable_arch_fs: arch width must be positive (got ", width, ")"))
+    assert(E > 0, str("bistable_arch_fs: arch modulus E must be positive (got ", E, " MPa)"))
     _ARCH_FS_CONST * E * (width * pow(t, 3) / 12) * rise / pow(span, 3);
 
 // Predicted centre travel between the two stable states, mm.
@@ -178,6 +183,9 @@ function bistable_arch_rise_for(travel) =
 function bistable_arch_span_for(fs, rise, t, width, E = 2000) =
     assert(fs > 0, str("target switch force must be positive (got ", fs, " N)"))
     assert(rise > 0, str("bistable_arch_span_for: arch rise must be positive (got ", rise, ")"))
+    assert(t > 0, str("bistable_arch_span_for: arch thickness t must be positive (got ", t, ")"))
+    assert(width > 0, str("bistable_arch_span_for: arch width must be positive (got ", width, ")"))
+    assert(E > 0, str("bistable_arch_span_for: arch modulus E must be positive (got ", E, " MPa)"))
     pow(_ARCH_FS_CONST * E * (width * pow(t, 3) / 12) * rise / fs, 1 / 3);
 
 // ---------------------------------------------------------------------------

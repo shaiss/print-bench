@@ -3,9 +3,10 @@
 //
 //   * the **product page** carries the team as two tab-panels (the site
 //     wireframes' 1d IA): Team — who built this product (identity only, not
-//     their profile: contributorRow + reviewedBy) — and History, the build
-//     history (historySlot). The team as seen *from the product*,
-//     product-scoped; templates.mjs designPage composes them.
+//     their profile: contributorRow, plus reviewedBy's "Review specialists"
+//     line) — and History, the build history (historySlot). The team as seen
+//     *from the product*, product-scoped; templates.mjs designPage composes
+//     them.
 //   * the **People page** (templates.mjs peoplePage) is the directory of
 //     everyone — humans, PM agents, shared specialists — each rendered as the
 //     full member profile with the product teams they've been part of.
@@ -20,6 +21,11 @@
 import { escapeHtml } from "./markdown.mjs";
 import { identityMark } from "./profile.mjs";
 import { timelineEvents } from "./timeline.mjs";
+import { SEAM } from "./seam.mjs";
+
+/** The History tab's note when this deploy could not read the design's git history. */
+export const HISTORY_UNAVAILABLE =
+  "Git history couldn't be loaded for this deploy; the next deploy retries.";
 
 /**
  * One light identity card for the product-page contributions row: the
@@ -45,10 +51,17 @@ ${core.map(contributorCard).join("\n")}
 }
 
 /**
- * The light "Reviewed by →" reference: the shared specialists servicing this
- * product (every team can call on them), named and linked to their profile on
- * the People page. Deliberately not roster cards — a reviewer is a shared
- * resource, not core team (the #122 distinction).
+ * The light "Review specialists →" line: the shared specialists every product
+ * team can call on (the #122 shared-specialists line), named and linked to
+ * their profile on the People page. Deliberately not roster cards — a
+ * reviewer is a shared resource, not core team (the #122 distinction).
+ *
+ * It is the same line on every rostered page — a statement of who is
+ * available to review, NOT a claim that these specialists reviewed this
+ * product or any particular PR. It used to read "Reviewed by →", which readers
+ * took as exactly that per-PR claim; the wording says what the data supports.
+ * (The `reviewed-by` / `reviewed-all` class names are kept so the stylesheet,
+ * and the asset hash every page carries, do not churn for a wording fix.)
  */
 export function reviewedBy(specialists) {
   if (!specialists.length) return "";
@@ -57,7 +70,7 @@ export function reviewedBy(specialists) {
       (m) => `<a href="/people/#profile-${escapeHtml(m.handle)}">${escapeHtml(m.name)}</a>`
     )
     .join(", ");
-  return `<p class="reviewed-by">Reviewed by <span aria-hidden="true">→</span> ${names} <a class="reviewed-all" href="/people/">People</a></p>`;
+  return `<p class="reviewed-by">Review specialists <span aria-hidden="true">→</span> ${names} <a class="reviewed-all" href="/people/">People</a></p>`;
 }
 
 /**
@@ -68,18 +81,27 @@ export function reviewedBy(specialists) {
  * timelineEvents renders them. A design with no committed history yet keeps the
  * honest empty state — no invented history, per #122's first principle.
  *
- *   events   the design's timeline events (readTimeline), or [].
- *   people   the team.mjs people Map, for attribution monograms.
+ *   events     the design's timeline events (readTimeline), or [].
+ *   people     the team.mjs people Map, for attribution monograms.
+ *   gitStatus  the deploy-time git-history seam's status for this design
+ *              (seam.mjs). "unavailable" adds a note that the git half
+ *              couldn't be loaded — the committed events still render below
+ *              it — so a failed fetch never passes for a design with no
+ *              commits. Every other status renders exactly as before.
  */
-export function historySlot(design, { events = [], people = new Map() } = {}) {
+export function historySlot(design, { events = [], people = new Map(), gitStatus = SEAM.OFF } = {}) {
   const list = timelineEvents(events, { people });
   const body =
     list ||
     `<p class="history-empty muted">The shared record of work on <code>${escapeHtml(
       design
     )}</code> — the team's decisions and field tests over time — lands here as it accumulates.</p>`;
+  const note =
+    gitStatus === SEAM.UNAVAILABLE
+      ? `\n  <p class="history-note muted">${HISTORY_UNAVAILABLE}</p>`
+      : "";
   return `<section class="team-history">
-  <p class="eyebrow">History of work together</p>
+  <p class="eyebrow">History of work together</p>${note}
   ${body}
 </section>`;
 }
