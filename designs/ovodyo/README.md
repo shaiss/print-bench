@@ -158,10 +158,10 @@ the default render is the assembled clock.
   (boss bore is Ø4.9 mm from `stalk_d=4.5` + 0.4 clearance). Shelf stock jumps
   4→5 mm: **bless Ø4 mm rod + a wrap of tape** (tool-free snug); ream-to-Ø5 is
   the alternative if you prefer. Length ≈ `ball_center_z −` wing height. Also
-  Ø2 mm steel shot / Ø2 mm bearing balls for the core's ballast pockets
-  (check the diameter — most "slingshot ammo" is 6–10 mm and too big; Ø4.5 mm
-  BBs will not pour the Ø3.2 mm ports either; **≈ 55 g is a starting fill you
-  may need to adjust** — `ci.cog` runs the advisory CoG/tip-over check;
+  Ø2 mm steel shot / Ø2 mm bearing balls (chrome steel) for the core's ballast
+  pockets (check the diameter — most "slingshot ammo" is 6–10 mm and too big;
+  Ø4.5 mm BBs will not pour the Ø3.2 mm ports either; **≈ 55 g is a starting
+  fill you may need to adjust** — `ci.cog` runs the advisory CoG/tip-over check;
   TIP-RISK is a WARN, not a gate failure). The first emit on tip `d8d9cf5`
   measured STABLE (38.28 mm clearance); this page still does not claim the clock
   is STABLE for every future change. If a later sticky or `cog-check.sh` line
