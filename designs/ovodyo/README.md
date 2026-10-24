@@ -60,6 +60,9 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 
 ![Helical slot path across corners](previews/slot-path.png)
 
+*The helical slot cutting across corner facets — a single-material print is one
+colour; any green in the void is a preview artifact, not your filament.*
+
 ![Helical window broadside](previews/slot-window.png)
 
 *Looking into the 10 mm helical window — preview red reads through the cut;
@@ -151,9 +154,11 @@ the default render is the assembled clock.
   The truss ridge chords also bridge ~32 mm between posts (bay length at
   `bays=4`) — expect underside sag on those spans; keep supports off, because
   anything painted inside the lattice can never be removed.
-- **Brim:** safe on every part — if the truss tips lift, turn the brim on.
-  No fit on this design touches the bed (the seam rings print at the top of
-  the pole-down halves; the core sockets exit vertical faces).
+- **Brim:** **on by default for `base-segment` and `base-end`** (line-contact
+  chords lift easily); the ball halves have big flat pole faces and can stay
+  off. Safe on every other part if a tip lifts. No fit on this design touches
+  the bed (the seam rings print at the top of the pole-down halves; the core
+  sockets exit vertical faces).
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render).
   The pole face carries a numeral, so **layer 1 is the stencil itself**; the
@@ -265,8 +270,10 @@ the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port is only about
 one and a half pellets wide, so shot will jam and arch. A strong magnet held
 against the pocket wall settles an arch and drags shot around through a couple
 of mm of plastic — worth a try (chrome-steel shot only; stainless bearing balls
-won't follow a magnet). Press a Ø5 mm silicone bumper into each of the four
-foot recesses.
+won't follow a magnet). Once the fill that lands STABLE is final, a few drops of
+CA (or epoxy) through each port before the plug locks the CoG you measured —
+loose shot can resettle and quietly eat tip clearance. Press a Ø5 mm silicone
+bumper into each of the four foot recesses.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot

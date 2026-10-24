@@ -90,3 +90,6 @@ then waits only on #601's stencil numerals.
 | 2026-10-24 | #602 captive threaded seam marked shipped; printable red insert stays top-ranked #599 deferred | PM triage charter follow-up |
 | 2026-10-24 | Care: hedged seam-as-release-plane + ambient lamplight clause; vitamins where-to-buy for Ø2 shot | Drik / PM triage |
 | 2026-10-24 | N2 Number cell → built stop table (irregular steps); printable red insert ranked first above #600 | Drik / PM triage |
+| 2026-10-24 | what-ships camera frozen as-is — caption carries grounded-ness; no reframe | Jane / PM triage |
+| 2026-10-24 | CA-lock ballast after STABLE fill; brim-ON default for base-segment/base-end; slot-path green-artifact caption | Jane/Drik / PM triage |
+| 2026-10-24 | #601 gains reading-distance land-check + new close-up camera when glyphs change; #603 gains bumper-recess lead-in | Jane/Drik / PM queue |
