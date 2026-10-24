@@ -15,7 +15,7 @@ inputs:
       monthly, or when a nightly fix is needed). Keep it in sync with the
       value ci.yml passes so all five jobs share one cache entry.
     required: false
-    default: "2026-10"
+    default: "2026-10-24"
 runs:
   using: composite
   steps:
@@ -24,9 +24,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # ubuntu-latest is migrating 24.04 → 26.04; OBS publishes a matching
-        # xUbuntu_<VERSION_ID> suite per release. Hardcoding 24.04 (issue #916)
-        # made apt refuse openscad-nightly on resolute (libpython3.12t64 gone).
+        # OBS publishes xUbuntu_<VERSION_ID> per Ubuntu release; the nightly's
+        # Depends track that suite (24.04 → libpython3.12t64, 26.04 →
+        # libpython3.14). CI pins every consumer to ubuntu-24.04 (issue #916
+        # reopen) so we stay on the known-good suite, but VERSION_ID still
+        # drives the OBS URL and the cache key so a stray 26.04 runner can
+        # never install a 24.04 deb (or share its cache entry).
         . /etc/os-release
         if [ -z "${VERSION_ID:-}" ]; then
           echo "::error::could not read VERSION_ID from /etc/os-release"
@@ -43,8 +46,8 @@ runs:
         path: ~/.cache/openscad-nightly-debs
         # No restore-keys on purpose: a partial match could mix packages from
         # two different OBS snapshots / Ubuntu suites.
-        # VERSION_ID is in the key so a 24.04-built nightly never lands on a
-        # 26.04 runner (different SONAME deps: libpython3.12 vs 3.14, …).
+        # VERSION_ID is in the key so 24.04 and 26.04 debs never share a
+        # cache entry (different SONAME deps: libpython3.12 vs 3.14, …).
         key: openscad-nightly-debs-${{ runner.os }}-${{ steps.os.outputs.version_id }}-${{ inputs.cache-version }}
     - name: Download openscad-nightly from OBS (cache miss)
       if: steps.debs.outputs.cache-hit != 'true'
