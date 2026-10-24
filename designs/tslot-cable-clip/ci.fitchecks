@@ -1,0 +1,6 @@
+# Boolean fit checks (gate.sh): the production lug must sit inside the
+# E2020 slot's negative space with zero overlap against the rail solid;
+# the tight variant (neck grown 0.3 mm) must overlap — the negative control
+# proving the check can fail.
+lug-fit empty
+lug-fit-tight interferes
