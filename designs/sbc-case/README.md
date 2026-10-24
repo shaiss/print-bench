@@ -1,11 +1,21 @@
-# sbc-case — vented Raspberry Pi 4 case with fan mount
+# sbc-case — vented Raspberry Pi 4 / Pi 3 B+ case with fan mount
 
-A two-piece FDM case for the Raspberry Pi 4 (and other NopSCADlib-catalogued
-SBCs) with a 40 mm intake fan, heat-set inserts at every repeated-assembly
-point, and cable access through open skirted edges — no connectors ever fight
-a tight hole. The standoff pattern is generated from the board's own mounting
-hole list at build time, so pointing `board` at another PCB re-places the
-standoffs automatically.
+A two-piece FDM case for the Raspberry Pi 4 (primary target) with a 40 mm
+intake fan, heat-set inserts at every repeated-assembly point, and cable access
+through open skirted edges — no connectors ever fight a tight hole. The standoff
+pattern is generated from the board's own mounting hole list at build time.
+The Customizer also offers a **validated Raspberry Pi 3 B+** preset (same
+85×56 mm outline and mounting holes as the Pi 4 in the vendored NopSCADlib
+catalog); set `board_preset` to *Raspberry Pi 3 B+* or pass
+`-D board_preset=1` / `-D board=RPI3` on the command line. Exporting `base` at
+`-D board_preset=1` matches the default Pi 4 shell geometry (argus-diff on the
+exported STLs: +0.00 % volume, 0 modified bodies, 1 unchanged). Committed
+previews and product shots still show the Pi 4 vitamin — only the generated
+standoff input changes with `board_preset`; the shell is the same. The default
+`fan_center = (−10, 0)` sits over the SoC on both boards — they're ~2.5 mm apart
+in the case frame, both ~6 mm from the fan centre under the Ø37 intake — so leave
+it unchanged on either preset. There is no Pi 5 or Zero 2 W vitamin in the
+vendored tree yet.
 
 ![Product shot](previews/product-hero.png)
 
@@ -83,10 +93,11 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `board` | `RPI4` | NopSCADlib board type — standoffs follow its hole list |
+| `board_preset` | Raspberry Pi 4 | Customizer board choice — sets the NopSCADlib `board` constant (Pi 4 or Pi 3 B+) |
+| `board` | `RPI4` | NopSCADlib pcb type (derived from `board_preset`; override with `-D board=…`) — standoffs follow `pcb_holes(board)` |
 | `fit_clearance` | 0.25 mm | lid register lip vs cavity wall; tune on the coupon |
 | `standoff_h` | 5 mm | board standoff height (4–6 per the brief) |
-| `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector |
+| `interior_h` | 24 mm | interior height; sized over the tallest RPI4 connector (the Pi 3 B+'s stacked USB-A is the same `usb_Ax2` vitamin, 15.6 mm) |
 | `fan_type` | `fan40x11` | fan vitamin; aperture and boss pitch follow it |
 | `fan_center` | (−10, 0) mm | fan position; biased toward the SoC |
 | `board_clr` | 0.75 mm | board-to-wall clearance |
@@ -114,7 +125,8 @@ so what you feel there is what the full parts do.
 - **Swap the micro-SD without opening the case.** The −X edge is open, so the
   card — and every cable — *should* come out with the lid on and every screw
   untouched — the first real print verifies the card clears the restored rim
-  (the planned field test in NOTES). The 2 a.m. reflash needs no tools.
+  (the planned field test in NOTES — a Pi 4 build; the Pi 3 B+'s connector fit
+  is vitamin-checked, first plastic pending). The 2 a.m. reflash needs no tools.
 - **GPIO stays reachable.** A notch in the +Y wall clears the 2×20 header, so
   jumper wires reach the pins with the lid on.
 - **Serviceable where it counts.** The heat-set inserts sit at the two joints
