@@ -170,11 +170,30 @@ back_pocket_d = 1.0;
 // left ~4.27° sunburst through-slots (Bugbot / CodeRabbit / Drik R4).
 back_clear_ang = 0.25;          // angular assembly clearance in the lap (deg)
 back_z_clear   = 0.20;          // vertical clearance in the half-thickness lap
+// Layer height the shingle faces must land on (README print settings).
+back_layer_h   = 0.2;
 // Post circle — inset from the flange OD so posts fully union into the hub
 r_post      = r_hub - hub_post_d;
+// Hub-mount pad radius (matches the pad cylinder in rim_segment)
+pad_r       = hub_post_d / 2 + 1.2;
 // Inner radius of the back pie — reaches inside the post circle so the
-// mount pads union into the pie (pad radius ≈ hub_post_d/2 + 1.2)
+// mount pads union into the pie
 r_pie_in    = r_post - (hub_post_d / 2 + 1.6);
+// Female back-lap recess must stay outside the hub-mount pad (Bugbot):
+// pad centres sit at ±seg_ang·0.28; angular half-width at the post circle
+// plus a small keep-out so the recess never nicks the boss wall.
+pad_keep_ang = atan(pad_r / r_post) + 0.5;
+// Usable back-lap span after pad keep-out (female side at −seg_ang·0.28)
+a_pad_f        = -seg_ang * 0.28;
+a_back0_nom    = -seg_ang / 2;
+a_back_recess1 = min(a_back0_nom + joint_lap / r_run * 180 / PI,
+                     a_pad_f - pad_keep_ang);
+back_lap_span  = a_back_recess1 - a_back0_nom;
+// Layer-snapped half-lap heights: tongue + recess = back_t, both on the
+// 0.2 mm grid so the designed vertical clearance survives slicing.
+back_tongue_h = floor((back_t / 2 - back_z_clear / 2) / back_layer_h)
+                * back_layer_h;
+back_recess_h = back_t - back_tongue_h;
 
 // Bounding-box diagonal of one annular-sector segment (back flat on bed).
 // Conservative: outer chord + radial span, ignoring the lap's small add.
@@ -250,6 +269,26 @@ assert(back_pocket_d > 0 && back_pocket_d < back_t - 0.8, str(
 assert(back_t >= 2.0, str(
     "BACK SHINGLE: back_t = ", back_t, " mm is under 2.0 — need room for a",
     " half-thickness lap with ≥ 0.8 mm on each side (N3 closed disc)."));
+// Layer-grid snap: tongue and recess land on back_layer_h, sum to back_t,
+// and keep a positive vertical clearance (≥ back_z_clear) after slicing.
+assert(abs(back_t / back_layer_h - round(back_t / back_layer_h)) < 1e-9, str(
+    "BACK SHINGLE LAYER: back_t = ", back_t, " mm is not a multiple of",
+    " back_layer_h = ", back_layer_h, " mm."));
+assert(abs(back_tongue_h / back_layer_h - round(back_tongue_h / back_layer_h)) < 1e-9
+    && abs(back_recess_h / back_layer_h - round(back_recess_h / back_layer_h)) < 1e-9, str(
+    "BACK SHINGLE LAYER: tongue_h = ", back_tongue_h, " / recess_h = ",
+    back_recess_h, " must land on ", back_layer_h, " mm layers."));
+assert(abs(back_tongue_h + back_recess_h - back_t) < 1e-9, str(
+    "BACK SHINGLE LAYER: tongue_h + recess_h = ",
+    back_tongue_h + back_recess_h, " ≠ back_t = ", back_t));
+assert(back_tongue_h >= 0.8 && back_recess_h - back_tongue_h >= back_z_clear - 1e-9, str(
+    "BACK SHINGLE LAYER: tongue_h = ", back_tongue_h, " / clear = ",
+    back_recess_h - back_tongue_h, " — need tongue ≥ 0.8 and clear ≥ ",
+    back_z_clear, " mm."));
+// Female recess must retain a usable lap after the hub-pad keep-out.
+assert(back_lap_span >= 1.5, str(
+    "BACK SHINGLE PAD: usable back lap span = ", back_lap_span,
+    "° after hub-pad keep-out — need ≥ 1.5° so the shingle still closes."));
 
 // ---------------------------------------------------------------------------
 // Rim segment — back flat on the bed, running surface extruded in +Z
@@ -283,13 +322,11 @@ module rim_segment() {
     // Back-pie shingle: full-thickness core stops short of the pitch plane;
     // a separate half-thickness male tongue covers the kerf under the
     // neighbour's female recess. Additive (not cut-back) so joint-fit cannot
-    // pick up a coplanar kiss at θ = seg_ang/2. Reuses the tread lap angle.
-    back_lap_ang = lap_ang;
-    a_back0 = -seg_ang / 2;
+    // pick up a coplanar kiss at θ = seg_ang/2. Lap span is pad-clipped
+    // (back_lap_span) so the female recess never nicks the hub-mount pad.
+    a_back0 = a_back0_nom;
     a_back_core1 = seg_ang / 2 - back_clear_ang;
-    a_back_tongue1 = seg_ang / 2 + back_lap_ang - back_clear_ang;
-    back_tongue_h = back_t / 2 - back_z_clear / 2;
-    back_recess_h = back_t / 2 + back_z_clear / 2;
+    a_back_tongue1 = a_back_core1 + back_lap_span;
     // Female / male cuts span the wall's downward ov bite (z = back_t-ov)
     // as well as the tread — otherwise adjacent walls intersect in that
     // buried band and joint-fit reports a few dozen interference facets.
@@ -327,12 +364,14 @@ module rim_segment() {
                             cylinder(d = hub_post_d + 2.4,
                                      h = back_t + hub_post_h);
             }
-            // Female back-lap recess (bottom half) — neighbour tongue seats here
+            // Female back-lap recess (bottom half) — neighbour tongue seats
+            // here. Angular end is pad-clipped (a_back_recess1) so the cut
+            // stops before the hub-mount pad keep-out; rin stays at r_pie_in
+            // so the half-thickness tongue still closes the hub-near kerf (N3).
             translate([0, 0, -0.01])
                 linear_extrude(height = back_recess_h + 0.01)
                     annular_sector_2d(r_pie_in - 0.01, r_run + ov + 0.01,
-                                      a_back0 - 0.05,
-                                      a_back0 + back_lap_ang);
+                                      a_back0 - 0.05, a_back_recess1);
             // Female pocket: starts behind the printable lip land (joint_lip).
             // Slightly oversize vs the tongue for assembly clearance.
             translate([0, 0, cut_z0])

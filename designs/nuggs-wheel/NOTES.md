@@ -37,8 +37,10 @@ Syrian-scale Ø280 mm wheel exceeds the gate's 200 mm test-slice ceiling (#673).
 - **Back pie lightening is blind** (`back_pocket_d = 1.0` mm from the inside
   face). Through-slots violated N3 (Drik F1); closed floor remains.
 - **Back pies shingle** with a half-thickness circumferential lap
-  (`back_clear_ang = 0.25°`, `back_z_clear = 0.20` mm, lap = tread
-  `joint_lap` angle). A prior `back_half = seg_ang/2 − lap/2 − 0.5` left
+  (`back_clear_ang = 0.25°`, `back_z_clear = 0.20` mm; tongue/recess
+  heights snapped to the 0.2 mm layer grid as **1.0 / 1.4 mm** summing to
+  `back_t`; female recess angularly pad-clipped so it never nicks the
+  hub-mount boss). A prior `back_half = seg_ang/2 − lap/2 − 0.5` left
   ~4.27° sunburst through-slots (~1.3 mm near the hub to ~10.4 mm at the
   tread). `back-closed` fitcheck (seam-wedge probes at z≈0.05–0.20 minus
   the assembled rim) must stay empty; ctrl omits one segment.
@@ -116,20 +118,20 @@ two coupons).
 | Axle Ø 8 + clearance | `axle_d=8`, `axle_clear=0.35` → bore 8.70 | `axle-fit` empty; `axle-fit-ctrl` interferes; axle AABB Ø **8.00** |
 | Stand footprint ≥ 0.6×Ø | `stand_depth_mult=0.60` → 168 | Foot depth in use frame 168; `ci.cog` STABLE, margin **23.81 mm** (> 2.0) with printed-part mass 383 g at axle |
 | Lip vs footplate ≥ 5 | `wheel_floor_clear=15` → `axle_z=155` | Lip OD 145.4; lip underside 9.6; footplate top 3.6; clearance **6.0 mm**. Use height ~164 mm |
-| Back closed | blind pockets + back-pie shingle (`back_clear_ang=0.25`, `back_z_clear=0.20`) | `back-closed` fitcheck empty (seam probes at z≈0.05–0.20); `back-closed-ctrl` interferes; pockets only above z≈1.4 |
+| Back closed | blind pockets + layer-snapped back-pie shingle (`tongue_h=1.0`, `recess_h=1.4`, pad keep-out) | `back-closed` fitcheck empty (seam probes at z≈0.05–0.20); `back-closed-ctrl` interferes; pockets only above z≈1.4 |
 
-Gate scores (local Manifold nightly, `gate.sh --slice`, post back-shingle):
-rim-segment **84**/100 (caveats: thin-wall + overhang samples), hub **100**,
+Gate scores (local Manifold nightly, `gate.sh --slice`, post pad/layer wrap-up):
+rim-segment **92**/100 (caveats: thin-wall + overhang samples), hub **100**,
 stand **84** (overhang + small bed contact on port-down pose), axle **100**,
 coupon **92**. CoG uses printed-part mass **383 g** at the axle (was 180 g)
 — STABLE, margin **23.81 mm**. Plate 4 objects (one of each; clone segment
 ×8 + spare). Fitchecks: `mates` / `axle-fit` / `joint-fit` / `back-closed`
 empty; all `*-ctrl` interfere.
 
-Slice estimates (same run): rim-segment **3h 52m / 45.8 g** (×8 ≈ 31h /
-366 g), hub **1h 4m / 12.0 g**, stand **8h 27m / 117.5 g**, axle **22m /
+Slice estimates (same run): rim-segment **3h 37m / 45.5 g** (×8 ≈ 29h /
+364 g), hub **1h 4m / 12.0 g**, stand **8h 27m / 117.5 g**, axle **22m /
 4.8 g**, coupon **3h 7m / 35.9 g**. Full set (8× rim + hub + stand + axle)
-≈ **41h / 501 g** before the coupon.
+≈ **39h / 499 g** before the coupon.
 
 ## Field test log
 

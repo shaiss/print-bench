@@ -26,7 +26,7 @@ Separately printed parts — the deliverable is the multi-object 3MF plate
 (`build/nuggs-wheel-plate.3mf`), not a single assembled STL (that would fuse).
 
 - `rim-segment` × **8** (identical) — arc of running surface + closed back pie +
-  shingle joint (≈ 155 mm XY diagonal at defaults). About **3h 52m / 46 g**
+  shingle joint (≈ 155 mm XY diagonal at defaults). About **3h 37m / 45.5 g**
   each (Manifold nightly slice)
 - `hub` — axle carrier with posts into the segment pads (Ø48 × 22 mm);
   about **1h 4m / 12 g**
