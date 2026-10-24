@@ -820,10 +820,12 @@ else if (part == "mock-drive")   mock_drive();
 else if (part == "base-mech")    base_mech();              // preview: the base drivetrain
 // preview: drivetrain seated in the truss (companion to frozen base-mech)
 else if (part == "base-mech-in-situ") { full_base(); base_mech(); }
-// preview: what a single-material print looks like — shells + truss + stalks +
-// uncoloured core (no gear theatre, no red interior; honesty complement to the
-// two-tone hero). Rebuilds full_base without the color() wrap so OpenSCAD
-// draws one tone.
+// preview: what a single-material print looks like — shells + bare truss +
+// uncoloured core (no gear theatre, no coloured interiors). Balls stand
+// pole-down on their pentagon plaques *beside* the base — the interim display
+// the page describes — not up on stalks (v0 has no retained mount). Prefer the
+// cameras.conf `render` opt so OpenCSG cut-face tinting doesn't fake a second
+// colour.
 else if (part == "what-ships") {
   base_truss(0, n_bays);
   stalk_boss(-ball_spacing / 2);
@@ -835,10 +837,12 @@ else if (part == "what-ships") {
   core_body();
   core_plug_seated(-1);
   core_plug_seated(1);
-  stalk(-ball_spacing / 2);
-  stalk( ball_spacing / 2);
-  translate([-ball_spacing / 2, 0, ball_center_z]) hours_ball();
-  translate([ ball_spacing / 2, 0, ball_center_z]) minutes_ball();
+  // Past each wing tip (not under the stalk bosses) so the shot cannot be
+  // read as a retained mount — interim display = pole-flat on the desk.
+  translate([-ball_spacing / 2 - 100, 0, ball_d / 2])
+    rotate([_pole_up, 0, 0]) hours_ball();
+  translate([ ball_spacing / 2 + 100, 0, ball_d / 2])
+    rotate([_pole_up, 0, 0]) minutes_ball();
 }
 else if (part == "pod-drive")    pod_drive();              // preview: one pod's gear train
 else if (part == "seam-coupon")  seam_coupon();            // print this first: male ring + female puck

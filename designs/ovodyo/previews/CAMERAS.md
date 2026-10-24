@@ -20,6 +20,7 @@ fixed once reviewed; a new region gets a new line).
   each pod, bevel take-off up each stalk, central electronics bay.
 - **base-mech-in-situ** — the same drivetrain seated in the truss so the gears
   have scale and a home (companion to frozen `base-mech`; new line).
-- **what-ships** — single-material honesty shot of the printable silhouette
-  (shells + bare truss + stalks, no red cores or gear theatre). Lives beside the
-  v0 banner; must not replace the hero.
+- **what-ships** — single-material honesty shot: shells + bare truss, balls
+  standing pole-down beside the base (the interim display; not on stalks).
+  Rendered with CGAL (`render`) so cut faces stay one colour. Beside the v0
+  banner; must not replace the hero.
