@@ -837,11 +837,15 @@ else if (part == "what-ships") {
   core_body();
   core_plug_seated(-1);
   core_plug_seated(1);
-  // Past each wing tip (not under the stalk bosses) so the shot cannot be
-  // read as a retained mount — interim display = pole-flat on the desk.
-  translate([-ball_spacing / 2 - 100, 0, ball_d / 2])
+  // In front of the truss (negative y), clear of the wing envelope and empty
+  // stalk bosses — interim display = pole-flat on the desk. Shared ground
+  // plane with the chord undersides (z = −strut_d/2), not nested above them.
+  // (An earlier ±(ball_spacing/2+100) on the x-axis left the nose under the
+  // pole pentagon — ~7 mm past the tip vs ~39 mm ball radius — and read as a
+  // mount; see Jane #914.)
+  translate([-55, -110, ball_d / 2 - strut_d / 2])
     rotate([_pole_up, 0, 0]) hours_ball();
-  translate([ ball_spacing / 2 + 100, 0, ball_d / 2])
+  translate([ 55, -110, ball_d / 2 - strut_d / 2])
     rotate([_pole_up, 0, 0]) minutes_ball();
 }
 else if (part == "pod-drive")    pod_drive();              // preview: one pod's gear train

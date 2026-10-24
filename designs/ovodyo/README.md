@@ -34,8 +34,11 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 > follow the care playbook in NOTES.md rather than treating STABLE as a claim.
 > There's no committed two-tone reveal render yet ([#600](https://github.com/shaiss/print-bench/issues/600)). See NOTES.md.
 >
-> **Desk space:** needs about **40 cm of clear desk** (383 mm base) and **~17 cm of
-> headroom** (balls sit at ~124 mm centres, ~163 mm overall height).
+> **Desk space:** the base alone is **383 mm**. v0 display (balls pole-flat in
+> front of the base — see the what-ships shot) keeps that length and needs about
+> **~20 cm of depth** and **~8 cm tall**. The **40 cm clear desk + ~17 cm
+> headroom** figure is the post-[#604](https://github.com/shaiss/print-bench/issues/604) stalk clock (balls at ~124 mm
+> centres, ~163 mm overall).
 
 ![Hero — the whole clock](previews/hero.png)
 
@@ -45,8 +48,9 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 
 *What a single-material print looks like (OpenSCAD default yellow — one colour).
 Shells with void numerals and the bare truss; no gear theatre. Balls sit on
-their pole pentagons beside the base, the interim display until [#604](https://github.com/shaiss/print-bench/issues/604)
-lands a retained mount. The two-tone hero above is the intent.*
+their pole pentagons in front of the base (clear of the wing tips), the interim
+display until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained mount. The two-tone
+hero above is the intent.*
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
@@ -217,9 +221,11 @@ pour, and lift from the centre segment so the taped ends don't peel).
 each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into each port
 → 3. slide the keel into the centre segment** until it drops onto the deck struts
 (it seats one way only). Fill and plug *before* you slide — a seated keel has no
-port access. Weigh the pour first (~55 g total starting fill); the Ø3.2 mm ports
-are tight for Ø2 mm shot — tap and shake as you pour so the shot doesn't arch in
-the throat. Press a Ø5 mm silicone bumper into each of the four foot recesses.
+port access. Print the plugs on the coffee-break plate with the other base parts,
+never solo (a Ø5 mm part is easy to lose; a spare is cheap insurance). Weigh the
+pour first (~55 g total starting fill); the Ø3.2 mm ports are tight for Ø2 mm
+shot — tap and shake as you pour so the shot doesn't arch in the throat. Press a
+Ø5 mm silicone bumper into each of the four foot recesses.
 
 The real
 clock is driven by a geared stepper through a bevel differential and homed with a

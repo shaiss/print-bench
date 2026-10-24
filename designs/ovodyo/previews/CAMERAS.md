@@ -9,18 +9,19 @@ fixed once reviewed; a new region gets a new line).
   stalks over the tapered truss, with the red gear-trains and PCB in the base.
 - **hours-ball** — a single ball three-quarter: flush pentagon plaques, bold
   cut-through numerals, helical slot framing the red interior.
-- **slot-corner** — close three-quarter aimed at the helical slot where it
-  crosses a corner facet. Added for #768 so the opened corner cut is visible as
-  a shot, not only asserted in NOTES (new region = new line, never a reframe of
-  `hours-ball`).
+- **slot-corner** — close three-quarter of numeral plaques with the helical slot
+  peeking at the frame edge (original #768 evidence ask; the corner-crossing
+  story is carried by `slot-path` after Drik R2 noted this framing). Description
+  corrected to match the committed pixels — freeze rule: no reframe.
 - **slot-path** — near-equator view of the helical slot band cutting across
-  corner facets. Added after Drik R2 noted `slot-corner` mostly framed numerals;
-  new line, not a reframe of `slot-corner`.
+  corner facets (the #768 corner-cut money shot). CGAL `render` so cut faces
+  stay one colour. Added after Drik R2 noted `slot-corner` framed numerals;
+  new line, not a reframe.
 - **base-mech** — the base drivetrain alone: geared stepper + reduction train at
   each pod, bevel take-off up each stalk, central electronics bay.
 - **base-mech-in-situ** — the same drivetrain seated in the truss so the gears
   have scale and a home (companion to frozen `base-mech`; new line).
 - **what-ships** — single-material honesty shot: shells + bare truss, balls
-  standing pole-down beside the base (the interim display; not on stalks).
-  Rendered with CGAL (`render`) so cut faces stay one colour. Beside the v0
-  banner; must not replace the hero.
+  standing pole-down *in front of* the base on a shared ground plane (clear of
+  wing tips — an earlier on-axis placement nested the nose under the pole).
+  CGAL `render`. Beside the v0 banner; must not replace the hero.
