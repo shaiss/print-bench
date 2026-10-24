@@ -1086,16 +1086,20 @@ write_intents() {
 
 # True when $1's first non-empty line leads with a hard-stop marker
 # (DECLINED / DECISION NEEDED / DEFERRED). Same first-line rule as
-# intents_stop_indicated / hard_stop_from_comments.
+# intents_stop_indicated / hard_stop_from_comments — reuse their jq
+# fl() so Unicode whitespace (U+00A0/U+3000/U+0085/U+2028) matches.
+# awk's ASCII-only [[:space:]] left those prefixes on the line, so a
+# stop posted but stop_posted stayed unset and settle locked (#893).
 body_is_stop_comment() {
-  local first
-  first="$(printf '%s' "${1:-}" | awk '
-    { line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line);
-      if (length(line) > 0) { print line; exit } }')"
-  case "$first" in
-    "${STOP_MARKER_DECLINED}"*|"${STOP_MARKER_DECISION}"*|"${STOP_MARKER_DEFERRED}"*) return 0 ;;
-    *) return 1 ;;
-  esac
+  jq -ne --arg b "${1:-}" \
+    --arg d1 "$STOP_MARKER_DECLINED" \
+    --arg d2 "$STOP_MARKER_DECISION" \
+    --arg d3 "$STOP_MARKER_DEFERRED" '
+    def fl($b): ($b // "") | split("\n")
+      | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+      | map(select(length > 0)) | (.[0] // "");
+    fl($b) | startswith($d1) or startswith($d2) or startswith($d3)
+  ' >/dev/null 2>&1
 }
 
 # Apply the agent's issue intents (settle job, trusted artifact download).
@@ -2524,6 +2528,39 @@ EOF
     echo "selftest: DECLINED-only path did not note skipping the settle lock after a posted stop" >&2
     exit 1
   }
+
+  # Cipher CLEAR of #892 / #893: body_is_stop_comment must agree with the
+  # jq readers on Unicode whitespace. A leading NBSP (or U+3000 / U+2028)
+  # used to leave intents_stop_indicated true but body_is_stop_comment
+  # false — settle posted the stop then the lock, and the run scored dead.
+  stop_unicode_ws_case() {  # $1 name, $2 python unicode escape for leading ws
+    ifile="${tmp}/intents-stop-ws-$1.json"
+    body="$(python3 -c "print('${2}' + '🚢 DECLINED — unicode-ws ${1}\\n\\nparked')")"
+    jq -n --arg b "$body" \
+      '{"version":1,"intents":[{"issue":853,"action":"comment","body":$b}]}' \
+      > "$ifile"
+    run_intents "$ifile" 0
+    [ "$(comment_posts)" -eq 1 ] || {
+      echo "selftest: stop with leading $1 posted settle lock (posted $(comment_posts))" >&2
+      exit 1
+    }
+    grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+      echo "selftest: stop with leading $1 still posted the settle SHIP-LOCK marker" >&2
+      exit 1
+    }
+    grep -q -- "DECLINED — unicode-ws ${1}" "${tmp}/gh.log" || {
+      echo "selftest: stop with leading $1 did not post the stop comment" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+      echo "selftest: stop with leading $1 did not skip the settle lock after posting" >&2
+      exit 1
+    }
+  }
+  stop_unicode_ws_case nbsp '\u00a0'
+  stop_unicode_ws_case ideographic '\u3000'
+  stop_unicode_ws_case linesep '\u2028'
+  stop_unicode_ws_case nel '\u0085'
 
   # Cipher L2 (#884 case b): a stop intent that fails validation (HTML
   # comment marker) must NOT silently skip the lock — fall back to posting it.
