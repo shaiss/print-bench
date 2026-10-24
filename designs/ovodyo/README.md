@@ -282,8 +282,9 @@ dust — unscrew a ball (one full turn) and wipe the cavity when it looks dull;
 dust the lattice with a soft brush. Rotate which numeral faces the desk under
 the putty dab so wear doesn't pick one face forever. A knock should prefer the
 one-turn seam over cracking a shell — unscrew fully and re-seat (expectation,
-not a guarantee). Low raking daylight through the cut numerals is this clock's
-best look — worth a window seat (ambient light only; no built-in LEDs).
+not a guarantee). Low side light through the cut numerals is this clock's best look —
+near a window, out of direct afternoon sun (PLA can soften and fade on a
+hot sill; PETG/ASA tolerate it better). Ambient light only; no built-in LEDs.
 
 The real
 clock is driven by a geared stepper through a bevel differential and homed with a
