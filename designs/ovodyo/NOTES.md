@@ -50,8 +50,8 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   `2·r+4`). Measured (shell ∩ swept-blade − `gb_slot`, `d=78`, `width=10`,
   `turns=0.5`): **before** (old `r+2` clip / `1.1·r` blade, mirrored normals) →
   12 significant leftover bodies (>1 mm³), max radius 46.1 mm (issue reported
-  15 / 46.1 — same failure mode, $fn/split variance); **after** → 0 significant
-  bodies (3 CGAL slivers totaling <1 mm³).
+  15 / 46.1 — same failure mode, $fn/split variance); **after** → empty
+  residual (OpenSCAD: “Current top level object is empty”).
 - **Numerals:** **cut clean through** the shell to the red interior (the
   reference's read-through red numbers), stencilised so no enclosed counter
   (0/4/6/8/9, and 0/6/8/9 offset from centre in a two-digit "10"/"00") drops
