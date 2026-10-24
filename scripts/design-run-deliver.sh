@@ -3938,10 +3938,72 @@ EOF
     echo "selftest: expected 5 subprocess env scrubs, found ${scrub_n}" >&2
     exit 1
   }
+  if grep -q 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"' "$workflow"; then
+    echo "selftest: design-run must not set SCRUB=0 (issue #875 / Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$workflow"; then
+    echo "selftest: design-run must not clear apparmor_restrict_unprivileged_userns (Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'curl .*install\.sh(\s|\|)|install\.sh \| bash|bootstrap\.sh' "$workflow"; then
+    echo "selftest: design-run must not curl|bash install.sh (Cipher #876)" >&2
+    exit 1
+  fi
+  preflight_line="$(grep -n 'name: Install bubblewrap and pinned Claude Code before disabling sudo' "$workflow" | head -1 | cut -d: -f1)"
   sudo_line="$(grep -n 'name: Disable sudo before the agent' "$workflow" | head -1 | cut -d: -f1)"
+  smoke_line="$(grep -n 'name: Smoke-test Claude SCRUB=1 sandbox as the agent user' "$workflow" | head -1 | cut -d: -f1)"
+  verify1_line="$(grep -n 'name: Verify Claude Code pin (before link 1)' "$workflow" | head -1 | cut -d: -f1)"
   agent_line="$(grep -n 'name: Run via Z.AI (GLM, chain link 1)' "$workflow" | head -1 | cut -d: -f1)"
-  [ -n "$sudo_line" ] && [ -n "$agent_line" ] && [ "$sudo_line" -lt "$agent_line" ] || {
-    echo "selftest: sudo is not disabled before the agent steps" >&2
+  [ -n "$preflight_line" ] && [ -n "$sudo_line" ] && [ -n "$smoke_line" ] \
+    && [ -n "$verify1_line" ] && [ -n "$agent_line" ] \
+    && [ "$preflight_line" -lt "$sudo_line" ] && [ "$sudo_line" -lt "$smoke_line" ] \
+    && [ "$smoke_line" -lt "$verify1_line" ] && [ "$verify1_line" -lt "$agent_line" ] || {
+    echo "selftest: design-run preflight → disable-sudo → scrub smoke → verify → agent (Cipher #876)" >&2
+    exit 1
+  }
+  grep -q 'bubblewrap apparmor-profiles' "$workflow" && grep -q 'ripgrep' "$workflow" || {
+    echo "selftest: design-run preflight does not apt-get bubblewrap+apparmor-profiles+ripgrep" >&2
+    exit 1
+  }
+  grep -q 'setup-bwrap-apparmor.sh' "$workflow" || {
+    echo "selftest: design-run missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  grep -q 'install-claude-code-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing install-claude-code-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'smoke-claude-scrub-sandbox.sh' "$workflow" || {
+    echo "selftest: design-run missing smoke-claude-scrub-sandbox.sh" >&2
+    exit 1
+  }
+  grep -q 'verify-claude-code-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing verify-claude-code-pin.sh" >&2
+    exit 1
+  }
+  path_pin_n="$(grep -c 'path_to_claude_code_executable: \${{ steps.preflight.outputs.claude_bin }}' "$workflow" || true)"
+  [ "$path_pin_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run path_to_claude_code_executable pins, found ${path_pin_n}" >&2
+    exit 1
+  }
+  for gate in "steps.preflight.outcome == 'success'" "steps.disable_sudo.outcome == 'success'" \
+    "steps.scrub_smoke.outcome == 'success'"; do
+    gate_n="$(grep -c "$gate" "$workflow" || true)"
+    # 5 agent + 5 verify + smoke/disable references vary; require >= 5 on agent path
+    [ "$gate_n" -ge 5 ] || {
+      echo "selftest: design-run expected >=5 gates on ${gate}, found ${gate_n}" >&2
+      exit 1
+    }
+  done
+  verify_gate_n="$(grep -c "steps.verify_claude_[1-5].outcome == 'success'" "$workflow" || true)"
+  [ "$verify_gate_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run agent steps gated on verify_claude_N, found ${verify_gate_n}" >&2
+    exit 1
+  }
+  verify_step_n="$(grep -c 'name: Verify Claude Code pin (before link' "$workflow" || true)"
+  [ "$verify_step_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run per-link verify steps, found ${verify_step_n}" >&2
     exit 1
   }
   grep -q 'sudo -n true' "$workflow" || {
@@ -4246,10 +4308,33 @@ EOF
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2
     exit 1
   }
+  if grep -q 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"' "$burn"; then
+    echo "selftest: backlog-burn must not set SCRUB=0 (issue #875 / Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$burn"; then
+    echo "selftest: backlog-burn must not clear apparmor_restrict_unprivileged_userns (Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'curl .*install\.sh(\s|\|)|install\.sh \| bash|bootstrap\.sh' "$burn"; then
+    echo "selftest: backlog-burn must not curl|bash install.sh (Cipher #876)" >&2
+    exit 1
+  fi
   burn_install_line="$(grep -n 'name: Install preflight toolchain before disabling sudo' "$burn" | head -1 | cut -d: -f1)"
   burn_sudo_line="$(grep -n 'name: Disable sudo before the agent' "$burn" | head -1 | cut -d: -f1)"
-  burn_pip_line="$(grep -n 'name: Install preflight Python tools after disabling sudo' "$burn" | head -1 | cut -d: -f1)"
+  burn_smoke_line="$(grep -n 'name: Smoke-test Claude SCRUB=1 sandbox as the agent user' "$burn" | head -1 | cut -d: -f1)"
+  burn_verify1_line="$(grep -n 'name: Verify Claude Code pin (before link 1)' "$burn" | head -1 | cut -d: -f1)"
   burn_agent_line="$(grep -n 'name: Ship via Z.AI (GLM, chain link 1)' "$burn" | head -1 | cut -d: -f1)"
+  [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_smoke_line" ] \
+    && [ -n "$burn_verify1_line" ] && [ -n "$burn_agent_line" ] \
+    && [ "$burn_install_line" -lt "$burn_sudo_line" ] \
+    && [ "$burn_sudo_line" -lt "$burn_smoke_line" ] \
+    && [ "$burn_smoke_line" -lt "$burn_verify1_line" ] \
+    && [ "$burn_verify1_line" -lt "$burn_agent_line" ] || {
+    echo "selftest: burn preflight → disable-sudo → scrub smoke → verify → agent (Cipher #876)" >&2
+    exit 1
+  }
+  burn_pip_line="$(grep -n 'name: Install preflight Python tools after disabling sudo' "$burn" | head -1 | cut -d: -f1)"
   # apt (needs root) before disable-sudo; pip (no root) after it; then the agent.
   # A pip install that drifts back before disable-sudo reopens Cipher #868 LOW.
   [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_pip_line" ] \
@@ -4347,8 +4432,148 @@ EOF
     echo "selftest: expected at least 5 burn steps gated on preflight_pip (keyed ships), found ${burn_pip_gate_n}" >&2
     exit 1
   }
-  grep -q 'openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq' "$burn" || {
-    echo "selftest: the burn preflight install does not apt-get the session-start toolchain" >&2
+  # apt line may wrap after prusa-slicer; require both halves.
+  grep -q 'openscad xvfb imagemagick prusa-slicer' "$burn" \
+    &&   grep -q 'ffmpeg gifsicle jq bubblewrap apparmor-profiles' "$burn" \
+    && grep -q 'ripgrep' "$burn" || {
+    echo "selftest: the burn preflight install does not apt-get toolchain + bubblewrap + apparmor-profiles + ripgrep" >&2
+    exit 1
+  }
+  grep -q 'setup-bwrap-apparmor.sh' "$burn" || {
+    echo "selftest: burn missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  grep -q 'install-claude-code-pin.sh' "$burn" || {
+    echo "selftest: burn missing install-claude-code-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'smoke-claude-scrub-sandbox.sh' "$burn" || {
+    echo "selftest: burn missing smoke-claude-scrub-sandbox.sh" >&2
+    exit 1
+  }
+  grep -q 'verify-claude-code-pin.sh' "$burn" || {
+    echo "selftest: burn missing verify-claude-code-pin.sh" >&2
+    exit 1
+  }
+  burn_path_pin_n="$(grep -c 'path_to_claude_code_executable: \${{ steps.preflight.outputs.claude_bin }}' "$burn" || true)"
+  [ "$burn_path_pin_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn path_to_claude_code_executable pins, found ${burn_path_pin_n}" >&2
+    exit 1
+  }
+  for gate in "steps.preflight.outcome == 'success'" "steps.disable_sudo.outcome == 'success'" \
+    "steps.scrub_smoke.outcome == 'success'"; do
+    gate_n="$(grep -c "$gate" "$burn" || true)"
+    [ "$gate_n" -ge 5 ] || {
+      echo "selftest: burn expected >=5 gates on ${gate}, found ${gate_n}" >&2
+      exit 1
+    }
+  done
+  burn_verify_gate_n="$(grep -c "steps.verify_claude_[1-5].outcome == 'success'" "$burn" || true)"
+  [ "$burn_verify_gate_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn agent steps gated on verify_claude_N, found ${burn_verify_gate_n}" >&2
+    exit 1
+  }
+  burn_verify_step_n="$(grep -c 'name: Verify Claude Code pin (before link' "$burn" || true)"
+  [ "$burn_verify_step_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn per-link verify steps, found ${burn_verify_step_n}" >&2
+    exit 1
+  }
+  claude_ver_file="${repo_root}/.github/claude-code-version"
+  [ -f "$claude_ver_file" ] || {
+    echo "selftest: .github/claude-code-version is missing" >&2
+    exit 1
+  }
+  claude_ver="$(awk '/^version:/{print $2; exit}' "$claude_ver_file")"
+  claude_sha="$(awk '/^linux-x64-sha256:/{print $2; exit}' "$claude_ver_file")"
+  claude_fpr="$(awk '/^gpg-fingerprint:/{print $2; exit}' "$claude_ver_file")"
+  [[ "$claude_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "selftest: .github/claude-code-version has no exact version: pin" >&2
+    exit 1
+  }
+  [ "$claude_sha" = "bc1aad9982c7b59c7d889ff92595d61cf46e0a6eae074cb551d932a989bcd222" ] || {
+    echo "selftest: committed linux-x64-sha256 is not the Cipher-pinned 2.1.301 digest" >&2
+    exit 1
+  }
+  [ "$claude_fpr" = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE" ] || {
+    echo "selftest: committed gpg-fingerprint is not the Anthropic Claude Code signing key" >&2
+    exit 1
+  }
+  srt_pin="${repo_root}/.github/sandbox-runtime-version"
+  [ -f "$srt_pin" ] || {
+    echo "selftest: .github/sandbox-runtime-version is missing" >&2
+    exit 1
+  }
+  srt_ver="$(awk '/^version:/{print $2; exit}' "$srt_pin")"
+  srt_integrity="$(awk '/^dist-integrity:/{print $2; exit}' "$srt_pin")"
+  [ "$srt_ver" = "0.0.80" ] || {
+    echo "selftest: sandbox-runtime version pin is not 0.0.80 (got ${srt_ver:-empty})" >&2
+    exit 1
+  }
+  [ "$srt_integrity" = "sha512-WG4P8faU/JDH90I8NLUBPmg7e72zhanlW3AVCD0OF06JCtId9IDFewFgv4YRvHLcnn//h1r6a1AMosBsMLpxnA==" ] || {
+    echo "selftest: sandbox-runtime dist-integrity is not the committed 0.0.80 pin" >&2
+    exit 1
+  }
+  for script in install-claude-code-pin.sh install-sandbox-runtime-pin.sh \
+    verify-claude-code-pin.sh setup-bwrap-apparmor.sh smoke-claude-scrub-sandbox.sh; do
+    [ -x "${repo_root}/scripts/${script}" ] || {
+      echo "selftest: scripts/${script} missing or not executable" >&2
+      exit 1
+    }
+  done
+  grep -q 'install-sandbox-runtime-pin.sh' "$burn" || {
+    echo "selftest: burn missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'install-sandbox-runtime-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  # Actual install lines only — comments may mention the forbidden form.
+  if grep -E '^[[:space:]]*(sudo[[:space:]]+)?npm install -g.*@anthropic-ai/sandbox-runtime' \
+       "$burn" "$workflow" >/dev/null; then
+    echo "selftest: ship workflows still bare-npm-install sandbox-runtime (Cipher #876)" >&2
+    exit 1
+  fi
+  canary="${repo_root}/.github/workflows/claude-sandbox-canary.yml"
+  [ -f "$canary" ] || {
+    echo "selftest: claude-sandbox-canary.yml is missing" >&2
+    exit 1
+  }
+  grep -q 'permissions:' "$canary" && grep -A2 '^permissions:' "$canary" | grep -q 'contents: read' || {
+    echo "selftest: canary must set permissions contents: read" >&2
+    exit 1
+  }
+  if grep -E '\$\{\{[[:space:]]*secrets\.|ANTHROPIC_API_KEY: \$\{|ZAI_KEY: \$\{|GH_TOKEN: \$\{|REGEN_TOKEN: \$\{' \
+       "$canary" >/dev/null; then
+    echo "selftest: canary must not reference provider/PAT secrets" >&2
+    exit 1
+  fi
+  grep -q 'install-sandbox-runtime-pin.sh' "$canary" || {
+    echo "selftest: canary missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'smoke-claude-scrub-sandbox.sh' "$canary" || {
+    echo "selftest: canary missing smoke-claude-scrub-sandbox.sh" >&2
+    exit 1
+  }
+  grep -q 'setup-bwrap-apparmor.sh' "$canary" || {
+    echo "selftest: canary missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  grep -q 'ripgrep' "$canary" || {
+    echo "selftest: canary preflight does not apt-get ripgrep (srt dependency)" >&2
+    exit 1
+  }
+  if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$canary"; then
+    echo "selftest: canary must not clear apparmor_restrict_unprivileged_userns" >&2
+    exit 1
+  fi
+  grep -q 'dist-integrity' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not check dist-integrity" >&2
+    exit 1
+  }
+  grep -q -- '--ignore-scripts' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not use --ignore-scripts" >&2
     exit 1
   }
   grep -q 'sudo -n true' "$burn" || {

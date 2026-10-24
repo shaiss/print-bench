@@ -1,0 +1,171 @@
+name: Claude SCRUB sandbox canary
+
+# Keyless proof that Cipher's #876 path works on a real ubuntu-latest runner:
+# AppArmor bwrap-userns-restrict (sysctl stays 1), GPG-pinned Claude Code
+# under /opt, integrity-pinned sandbox-runtime, then SCRUB=1 sandbox smoke
+# as the runner uid after disable-sudo. Reuses the same scripts the ship
+# workflows call — no duplicated install/smoke logic.
+#
+# MUST NOT be a required check (not in ci-ok). No provider/PAT secrets.
+#
+# Triggers:
+#   • pull_request when the ship workflows, pin files, install/verify/smoke
+#     scripts, or this canary change
+#   • workflow_dispatch
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/backlog-burn.yml"
+      - ".github/workflows/design-run.yml"
+      - ".github/workflows/claude-sandbox-canary.yml"
+      - ".github/claude-code-version"
+      - ".github/sandbox-runtime-version"
+      - "scripts/install-claude-code-pin.sh"
+      - "scripts/install-sandbox-runtime-pin.sh"
+      - "scripts/verify-claude-code-pin.sh"
+      - "scripts/setup-bwrap-apparmor.sh"
+      - "scripts/smoke-claude-scrub-sandbox.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: SCRUB=1 sandbox under unpriv_bwrap
+    # Skip fork PRs: downloads.claude.ai / npm registry reachability is an
+    # environmental failure mode, not a signal about this PR's scripts.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Trusted preflight (AppArmor + GPG Claude + integrity-pinned srt)
+        id: preflight
+        # Cipher: install must not see provider/PAT secrets.
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_KEY ZAI_KEY \
+            OPENROUTER_API_KEY GH_TOKEN REGEN_TOKEN || true
+          export DEBIAN_FRONTEND=noninteractive
+          # needrestart after apt can hang the job on php-fpm; keep installs quiet.
+          export NEEDRESTART_MODE=a
+          sudo apt-get update -qq 2>/dev/null || true
+          # ripgrep: sandbox-runtime refuses to start without `rg` on PATH.
+          sudo apt-get install -y -qq bubblewrap apparmor-profiles socat gnupg ripgrep
+          for bin in bwrap rg; do
+            command -v "$bin" >/dev/null || {
+              echo "::error::preflight missing ${bin} after apt" >&2
+              exit 1
+            }
+          done
+          "${GITHUB_WORKSPACE}/scripts/setup-bwrap-apparmor.sh"
+          "${GITHUB_WORKSPACE}/scripts/install-claude-code-pin.sh" \
+            "${GITHUB_WORKSPACE}/.github/claude-code-version"
+          "${GITHUB_WORKSPACE}/scripts/install-sandbox-runtime-pin.sh" \
+            "${GITHUB_WORKSPACE}/.github/sandbox-runtime-version"
+          command -v srt >/dev/null || {
+            echo "::error::preflight missing srt after verified install" >&2
+            exit 1
+          }
+          echo "agent_uid=$(id -u)" >> "$GITHUB_OUTPUT"
+          echo "agent_user=$(id -un)" >> "$GITHUB_OUTPUT"
+          sysctl_val="$(tr -d '[:space:]' < /proc/sys/kernel/apparmor_restrict_unprivileged_userns)"
+          echo "userns_sysctl=${sysctl_val}" >> "$GITHUB_OUTPUT"
+          echo "preflight ok as $(id -un) uid=$(id -u); sysctl=${sysctl_val}"
+
+      - name: Disable sudo before the smoke
+        id: disable_sudo
+        if: steps.preflight.outcome == 'success'
+        run: |
+          set -euo pipefail
+          if command -v systemctl >/dev/null 2>&1; then
+            sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
+          fi
+          sudo rm -f /var/run/docker.sock /run/docker.sock /run/containerd/containerd.sock
+          if id -nG | tr ' ' '\n' | grep -qx docker; then
+            sudo gpasswd -d "$(id -un)" docker || true
+          fi
+          targets=()
+          for bin in /usr/bin/sudo /bin/sudo /usr/bin/pkexec /bin/pkexec /usr/bin/su /bin/su /usr/bin/doas /bin/doas; do
+            if [ -e "$bin" ]; then
+              targets+=("$bin")
+            fi
+          done
+          if [ "${#targets[@]}" -gt 0 ]; then
+            sudo chmod a-s "${targets[@]}"
+          fi
+          if sudo -n true 2>/dev/null; then
+            echo "::error::sudo -n true still succeeds after the disable step"
+            exit 1
+          fi
+          if [ -S /var/run/docker.sock ] || [ -S /run/docker.sock ] || [ -S /run/containerd/containerd.sock ]; then
+            echo "::error::a container socket is still present after the disable step"
+            exit 1
+          fi
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            echo "::error::docker is still reachable after the disable step"
+            exit 1
+          fi
+
+      - name: Smoke-test Claude SCRUB=1 sandbox as the runner uid
+        id: scrub_smoke
+        if: >-
+          steps.preflight.outcome == 'success'
+          && steps.disable_sudo.outcome == 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_KEY ZAI_KEY \
+            OPENROUTER_API_KEY GH_TOKEN REGEN_TOKEN || true
+          echo "smoke as $(id -un) uid=$(id -u)"
+          sysctl_val="$(tr -d '[:space:]' < /proc/sys/kernel/apparmor_restrict_unprivileged_userns)"
+          echo "apparmor_restrict_unprivileged_userns=${sysctl_val}"
+          [ "$sysctl_val" = "1" ] || {
+            echo "::error::sysctl must remain 1 during smoke (got ${sysctl_val}); not falling back to clearing it" >&2
+            exit 1
+          }
+          "${GITHUB_WORKSPACE}/scripts/smoke-claude-scrub-sandbox.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}"
+
+      - name: Re-verify Claude Code pin after smoke
+        id: verify_claude
+        if: >-
+          steps.preflight.outcome == 'success'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.scrub_smoke.outcome == 'success'
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ''
+          CLAUDE_KEY: ''
+          ZAI_KEY: ''
+          OPENROUTER_API_KEY: ''
+          GH_TOKEN: ''
+          REGEN_TOKEN: ''
+        run: |
+          set -euo pipefail
+          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+            "${{ steps.preflight.outputs.claude_bin }}" \
+            "${{ steps.preflight.outputs.claude_sha256 }}"
+          echo "canary ok: smoke passed under unpriv_bwrap; sysctl=${{ steps.preflight.outputs.userns_sysctl }}; uid=${{ steps.preflight.outputs.agent_uid }} (${{ steps.preflight.outputs.agent_user }})"
