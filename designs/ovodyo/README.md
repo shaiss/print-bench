@@ -1,11 +1,11 @@
 # ovodyo — kinetic dice-ball clock
 
-A desk clock that tells the time on two slowly tumbling faceted balls: the left
-ball shows the hour, the right ball the minutes in five-minute steps, each number
-sitting on one of twelve pentagon plaques. A helical slot cut through each shell
-frames the gears inside, so the mechanism is the ornament. This is a clean-room
-re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
-**v0 base** the improvement backlog ([#599](https://github.com/shaiss/print-bench/issues/599)) refines.
+A desk clock that will tell the time on two slowly tumbling faceted balls: the
+left ball shows the hour, the right ball the minutes in five-minute steps, each
+number sitting on one of twelve pentagon plaques. A helical slot cut through each
+shell frames the gears inside, so the mechanism is the ornament. This is a
+clean-room re-creation, in print-bench, of the "ovodyo" clock by Mectolab —
+built as a **v0 base** the improvement backlog ([#599](https://github.com/shaiss/print-bench/issues/599)) refines.
 
 > **v0 — a working substrate, not the finished clock.** The geometry renders,
 > gates and slices, and the signature look is here: chunky faceted dice-balls
@@ -96,7 +96,7 @@ parts as eight separate objects a slicer imports as parts — duplicate `base-en
 and `base-plug` in the slicer to print two of each. On a **256 mm bed**, plan on
 **two plates**: the four ball halves alone (they pack 2×2 with shared settings —
 the long plate), then segment + both ends + core + both plugs on a second plate
-with margin (the coffee-break plate).
+that packs tightly — lay it out in the slicer first (the coffee-break plate).
 - `mock-drive` — a single representative reduction gear, kept as a gated
   printability sample of the (otherwise preview-only) drivetrain. It is not a
   placed assembly part and is not included on the production plate.
