@@ -16,7 +16,8 @@ include <tumble.scad>         // tumble-to-index kinematics: stop table, frames,
 /* [What to render] */
 // assembled | hours-top | hours-bottom | minutes-top | minutes-bottom |
 // hours-ball | minutes-ball | base-segment | base-end | mock-drive |
-// base-mech | pod-drive | seam-coupon | seam-fit | seam-fit-ctrl |
+// base-mech | base-mech-in-situ | what-ships | pod-drive |
+// seam-coupon | seam-fit | seam-fit-ctrl |
 // landing-flat | landing-flat-ctrl | landing-glyph | landing-glyph-rolled |
 // landing-glyph-mirrored | hours-posed |
 // base-core | base-plug | core-seat | core-seat-ctrl | pocket-clear | pocket-ctrl
@@ -35,11 +36,13 @@ ball_spacing = 200;
 ball_center_z = 124;
 
 /* [Ball surface] */
-// Faceting: how far out the 20 triangle-corner-chamfer planes sit (× ball
-// radius). 1.0 = biggest triangular facets (≈ an icosidodecahedron); 1.05 =
-// dominant pentagon number-faces with crisp corners (the reference); >=1.12 = a
-// plain dodecahedron with clean corners. The 12 numbered pentagons stay flush at
-// the ball radius regardless.
+// Faceting: how far out the 20 corner-chamfer planes sit (× ball radius).
+// Measured on the true icosahedral-face-centre normals (#768): 1.0 = deepest
+// cut (pentagons + hexagons); 1.05 = dominant pentagon plaques with hexagonal
+// corners (default); ≈1.098 = icosidodecahedron (pentagons + triangles);
+// >1.098 = truncated dodeca (decagon plaques — avoid); ≥1.2584 = plain
+// dodecahedron. The 12 numbered pentagons stay flush at the ball radius for
+// facet ≤ ≈1.098.
 facet = 1.05;
 // Shell wall (mm) — keep >= 1.2
 wall = 2.2;
@@ -815,6 +818,36 @@ else if (part == "base-segment") base_segment();           // constant centre se
 else if (part == "base-end")     base_end();               // tapering end wing
 else if (part == "mock-drive")   mock_drive();
 else if (part == "base-mech")    base_mech();              // preview: the base drivetrain
+// preview: drivetrain seated in the truss (companion to frozen base-mech)
+else if (part == "base-mech-in-situ") { full_base(); base_mech(); }
+// preview: what a single-material print looks like — shells + bare truss +
+// uncoloured core (no gear theatre, no coloured interiors). Balls stand
+// pole-down on their pentagon plaques *beside* the base — the interim display
+// the page describes — not up on stalks (v0 has no retained mount). Prefer the
+// cameras.conf `render` opt so OpenCSG cut-face tinting doesn't fake a second
+// colour.
+else if (part == "what-ships") {
+  base_truss(0, n_bays);
+  stalk_boss(-ball_spacing / 2);
+  stalk_boss( ball_spacing / 2);
+  tip_nose(_bx(0));
+  tip_nose(_bx(n_bays));
+  wing_feet();
+  mirror([1, 0, 0]) wing_feet();
+  core_body();
+  core_plug_seated(-1);
+  core_plug_seated(1);
+  // In front of the truss (negative y), clear of the wing envelope and empty
+  // stalk bosses — interim display = pole-flat on the desk. Shared ground
+  // plane with the chord undersides (z = −strut_d/2), not nested above them.
+  // (An earlier ±(ball_spacing/2+100) on the x-axis left the nose under the
+  // pole pentagon — ~7 mm past the tip vs ~39 mm ball radius — and read as a
+  // mount; see Jane #914.)
+  translate([-55, -110, ball_d / 2 - strut_d / 2])
+    rotate([_pole_up, 0, 0]) hours_ball();
+  translate([ 55, -110, ball_d / 2 - strut_d / 2])
+    rotate([_pole_up, 0, 0]) minutes_ball();
+}
 else if (part == "pod-drive")    pod_drive();              // preview: one pod's gear train
 else if (part == "seam-coupon")  seam_coupon();            // print this first: male ring + female puck
 else if (part == "seam-fit")     seam_fit(false);          // fitcheck: must render EMPTY

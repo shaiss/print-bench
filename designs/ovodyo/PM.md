@@ -36,7 +36,9 @@ gears, numerals, slot, core); a committed two-tone reveal render is [#600](https
 
 **Deferred** (in the [#599](https://github.com/shaiss/print-bench/issues/599) backlog): the geodesic-ball lib
 (#600), true stencil numerals (#601), flat parting seam (#602), tapered
-space-frame base (#603), real bevel differential + `ci.plate` deliverable (#604).
+space-frame base (#603), real bevel differential + `ci.plate` deliverable +
+**ball-side stalk hub/socket** (#604 — brass rods seat in `base-end` today; the
+hero's "reaches the ball centre" is preview-only until the hub lands).
 
 **Never:**
 - **Painted two-tone** — the colour comes from geometry + material, not paint (N1).
@@ -54,3 +56,20 @@ space-frame base (#603), real bevel differential + `ci.plate` deliverable (#604)
 - [ ] A real bevel differential that the kinematics gate proves lands a face upright.
 - [ ] Product page shows the two-tone render (red reads through the cuts).
 - [ ] Human approves the shape (taste is a merge decision, not a gate).
+
+## Decision log (recent)
+
+| When | Decision | Source |
+|---|---|---|
+| 2026-10-24 | #768 chamfer normals + slot clip fixed; facet default kept 1.05 | issue #768 / PR #914 |
+| 2026-10-24 | Ball-side stalk hub/socket deferred to #604; page carries interim display | Drik block → coach/PM fork (b) |
+| 2026-10-24 | Vitamins bless Ø4 mm rod + tape shim (boss Ø4.9); Ø5 ream alternative | Drik used-it / PM triage |
+| 2026-10-24 | What-ships monochrome preview beside banner (hero stays two-tone) | Drik used-it / PM triage D4 |
+| 2026-10-24 | #604 note: numeral shadow-hole legibility at 288 indexes/day is a hot path once driven | Drik customer-sense / PM queue |
+| 2026-10-24 | Re-rank #604: ball-side hub/socket **first** within the issue (demo ↔ chipped plaque) | Drik used-it / PM triage |
+| 2026-10-24 | #601 approach: swap `text()` numerals for `lib/stencil-glyphs.scad` `stencil_text()` | Jane bench-sense / PM queue |
+| 2026-10-24 | v0 desk-die framing adopted (until #604) | Drik customer-sense / PM triage |
+| 2026-10-24 | Interim ballast-in-balls: packed pour blessed, loose shot forbidden (rattle) | Drik customer-sense / PM ruling |
+| 2026-10-24 | Kinematics proof table resolved (landing-flat 10–11 empty; ctrls 236/108) | Drik hunch / NOTES hygiene |
+| 2026-10-24 | Numeral legibility is a **v0** hot path (reads/day start day one), not only post-#604 | Drik used-it / PM triage → #601 |
+| 2026-10-24 | New `slot-window` camera sells the aperture; base-mech embedded | Drik/Jane / PM triage |

@@ -21,12 +21,17 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 
 - **Ball geometry:** a **chamfered dodecahedron** — 12 big FLUSH pentagon
   number-faces (the reference's headline: bold numbers on the outermost faces)
-  with the 20 dodecahedron vertices shaved into triangular corner facets, so it
-  reads as a chunky faceted dice-ball. Built (in `geodesic-ball.scad`,
-  `gb_faceted_ball`) as the intersection of 12 pentagon half-spaces at radius
-  `d/2` and 20 triangle half-spaces at `tri_k·d/2`; `tri_k` (default 1.05) sets
-  how deep the corner triangles cut — 1.0 ≈ a full icosidodecahedron (biggest
-  triangles), ≥1.12 collapses to a plain dodecahedron (no visible chamfer). The
+  with the 20 dodecahedron vertices shaved into corner facets, so it reads as a
+  chunky faceted dice-ball. Built (in `geodesic-ball.scad`, `gb_faceted_ball`)
+  as the intersection of 12 pentagon half-spaces at radius `d/2` and 20 corner
+  half-spaces at `tri_k·d/2`. The corner normals are the true icosahedral-face
+  centres `((0,±φ,±1/φ), (±φ,±1/φ,0), (±1/φ,0,±φ))` — verified against
+  `gb_icosa_verts()` face centres (#768); the swapped cyclic order that shipped
+  from #605 produced 9-gon plaques and a 47.7 mm max radius at the defaults.
+  With the corrected normals at `d=78`, `tri_k=1.05`: **5-sided plaques, 6-sided
+  corners, max radius ≈ 44.0 mm**. See **Facet retune (#768)** below for the
+  full measured curve (the pre-#768 "1.0 ≈ icosidodecahedron / ≥1.12 plain
+  dodecahedron" notes were taken on the mirrored normals and do not hold). The
   pentagons at `d/2` are the outermost faces, so the numerals read face-on.
   **Two earlier constructions were wrong and are recorded so they aren't
   retried:** (a) a geodesic icosphere clipped into pentagon *plaques* recessed
@@ -39,6 +44,14 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   numbered pentagons *outermost*, which is the whole point. Generator is
   **design-local for now** — issue #600 promotes it to `lib/geodesic-ball.scad`
   with demo/guards/mates.
+- **Helical slot outer bound (#768):** `gb_slot` clips to the dodecahedron
+  circumradius `1.2584·r` plus a 2 mm margin and extends the swept blade to
+  match; extrude height/twist stay at the pre-#768 pitch (`360·turns` over
+  `2·r+4`). Measured (shell ∩ swept-blade − `gb_slot`, `d=78`, `width=10`,
+  `turns=0.5`): **before** (old `r+2` clip / `1.1·r` blade, mirrored normals) →
+  12 significant leftover bodies (>1 mm³), max radius 46.1 mm (issue reported
+  15 / 46.1 — same failure mode, $fn/split variance); **after** → empty
+  residual (OpenSCAD: “Current top level object is empty”).
 - **Numerals:** **cut clean through** the shell to the red interior (the
   reference's read-through red numbers), stencilised so no enclosed counter
   (0/4/6/8/9, and 0/6/8/9 offset from centre in a two-digit "10"/"00") drops
@@ -229,6 +242,7 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
 | Ballast pockets + ≈55 g starting fill; `ci.cog` advisory CoG/tip-over (WARN on TIP-RISK); first emit on `d8d9cf5` / PR #789 measured STABLE 38.28 mm — fill still a starting guess, playbook in “TIP-RISK care” | #603 (item 10 remaining: this manifest; platform half #623 / #652) |
+| **No ball-side stalk socket** — brass rod seats in `base-end` only; hero preview's "reaches the ball centre" is not a printable interface (Drik #914) | #604 (hub/bearing with the real drive); page carries the interim display note until then |
 
 ## Tumble kinematics (N2)
 
@@ -342,13 +356,17 @@ facet-count` on the binary STL; 0 = empty):
 
 | part | stops rendered | facets |
 |---|---|---|
-| `landing-flat` | 0–11 | stop 0: 0; stop 1: 0; stop 2: 0; stop 3: 0; stop 4: 0; stop 5: 0; stop 6: 0; stop 7: 0; stop 8: 0; stop 9: 0; stop 10: in flight at hand-off; stop 11: in flight at hand-off |
-| `landing-flat-ctrl` | 0, 1 | stop 0: in flight at hand-off — must be > 0; stop 1: in flight at hand-off — must be > 0 |
+| `landing-flat` | 0–11 | 0 at every stop (0,0,0,0,0,0,0,0,0,0,0,0) |
+| `landing-flat-ctrl` | 0, 1 | stop 0: 236; stop 1: 108 (> 0, the check can fail) |
 | `landing-glyph` | 0–11 | 0 at every stop (0,0,0,0,0,0,0,0,0,0,0,0) |
 | `landing-glyph-rolled` | 0, 3 | 698; 348 (> 0, the check can fail) |
 | `landing-glyph-mirrored` | 0, 3 | 334; 178 (> 0, mirroring is caught) |
 
-The rows marked *in flight at hand-off* were still rendering when this commit was cut (the batch ran 2-wide on a shared 4-CPU box at ~65 s per full-ball render); `stops 0–9` of `landing-flat` came back 0. Re-run: `for s in 10 11; do xvfb-run -a openscad --export-format binstl -o build/lf-$s.stl -D 'part="landing-flat"' -D stop=$s designs/ovodyo/ovodyo.scad; ./scripts/lineage.sh facet-count build/lf-$s.stl; done` (and the same with `landing-flat-ctrl` at 0 and 1, which must count > 0).
+Resolved 2026-10-24 on tip `c9acb05` (OpenSCAD 2021.01 CGAL): stops 10–11 of
+`landing-flat` empty; both `landing-flat-ctrl` rows nonempty — the landing
+proof is falsifiable. Re-run if the stop table moves:
+`for s in 10 11; do xvfb-run -a openscad --export-format binstl -o build/lf-$s.stl -D 'part="landing-flat"' -D stop=$s designs/ovodyo/ovodyo.scad; ./scripts/lineage.sh facet-count build/lf-$s.stl; done`
+(and the same with `landing-flat-ctrl` at 0 and 1).
 
 **Regenerate.** `python3 designs/ovodyo/tumble_stops.py` prints the report and
 the baked block; `--write` splices it into `tumble.scad`; `--check` exits
@@ -449,16 +467,18 @@ print, same material and profile as the halves.
   turn is right; grinding or needing to force it is too tight.
 - **Too tight / won't start:** raise `seam_tol` by 0.05 and reprint the
   coupon. **Rattles, wobbles, or spins back off:** lower it by 0.05.
-- **First-layer squish** tightens the first groove of a bore printed mouth-down
-  and fattens a ring's foot. The **female** puck prints bore-mouth-down like the
-  top half, so its fit is faithful. The **male** puck, though, stands on a flange
-  *on the bed*, while the production male ring prints at the *top* of the
-  pole-down bottom half — so the male coupon can show a first-flank elephant's
-  foot the ball never gets. If the male starts hard but runs free afterwards,
-  that is coupon-only flange foot: fix the first layer (z-offset / flow), and do
-  **not** loosen `seam_tol` to chase it — prefer the looser-feeling end of a
-  clean seat before locking the value for the halves. (Printing the coupon male
-  top-down like the half is a coupon-fidelity follow-up.)
+- **First-layer squish** fattens a ring's flange foot on the bed. The **female**
+  groove prints **mouth-up** at the top of the puck (same as the production top
+  half, whose seam face is the last plane printed), so first-layer squish never
+  touches it — that is why the female fit is faithful. The **male** coupon,
+  though, stands on a flange *on the bed*, while the production male ring prints
+  at the *top* of the pole-down bottom half — so the male coupon can show a
+  first-flank elephant's foot the ball never gets. If the male starts hard but
+  runs free afterwards, that is coupon-only flange foot: fix the first layer
+  (z-offset / flow), and do **not** loosen `seam_tol` to chase it — prefer the
+  looser-feeling end of a clean seat before locking the value for the halves.
+  (Printing the coupon male top-down like the half is a coupon-fidelity
+  follow-up.)
 - Then render the four halves with the winning value and print them
   pole-down (see Key decisions: Ball seam).
 
@@ -483,6 +503,10 @@ in place on z = 0) and `base-plug` its port plug (print two); `core-seat`,
 WARN on TIP-RISK). First CI emit on tip `d8d9cf5` / PR #789 sticky: STABLE,
 38.28 mm clearance under solid-mesh PLA 1.24; ≈55 g remains the starting
 fill. TIP-RISK care (add shot, never slab the truss) is the section above.
+`base-mech-in-situ` (drivetrain seated in the truss; companion to frozen
+`base-mech`) and `what-ships` (single-material honesty silhouette — shells +
+bare truss + uncoloured core, no gear theatre) are preview-only parts added for
+PM triage on PR #914; both have frozen cameras and README embeds. The
 `base-mech` (whole drivetrain) and `pod-drive` (one pod's gear train) are
 PREVIEW-ONLY coloured mechanism — not in `ci.parts`, not printed. The ball's
 faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in
@@ -492,3 +516,24 @@ faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in
 design because the ball's rotated half-space cubes fatten OpenSCAD's preview
 bbox — render scratch shots with an explicit camera `dist`; the committed
 previews use explicit cameras so they are unaffected.
+
+## Facet retune (#768)
+
+The pre-#768 tuning notes ("1.0 ≈ icosidodecahedron, ≥1.12 plain dodecahedron")
+were measured on the **mirrored** corner normals and do not describe the
+corrected solid. Re-derived by intersecting the 12 + 20 half-spaces at
+`d = 78` (same method as the issue), with the true face-centre normals:
+
+| `tri_k` | plaque sides | corner sides | max radius (mm) | reading |
+|---|---|---|---|---|
+| 1.00 | 5 | 6 | 42.27 | deepest cut (truncated-icosa family) |
+| **1.05** (default, kept) | **5** | **6** | **43.96** | dominant pentagons, hexagonal corners |
+| ≈1.0982 | 5 | 3 | 45.85 | regular icosidodecahedron |
+| 1.10 | 10 | 3 | 45.85 | truncated dodeca — plaques no longer pentagons |
+| ≥1.2584 | 5 | — | 49.08 | plain dodecahedron (chamfer clears vertices) |
+
+Default stays **1.05**: it is the only shipped value whose corrected geometry
+matches the issue's expected table (5-gon plaques, 6-gon corners, ~44 mm), and
+raising it past ≈1.098 to chase triangular corners would turn the number
+plaques into decagons. Triangular corners with pentagon plaques exist only at
+the exact icosidodecahedron point (`tri_k ≈ 1.0982`).
