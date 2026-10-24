@@ -21,13 +21,30 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 
 - **Ball geometry:** a **chamfered dodecahedron** — 12 big FLUSH pentagon
   number-faces (the reference's headline: bold numbers on the outermost faces)
-  with the 20 dodecahedron vertices shaved into triangular corner facets, so it
-  reads as a chunky faceted dice-ball. Built (in `geodesic-ball.scad`,
-  `gb_faceted_ball`) as the intersection of 12 pentagon half-spaces at radius
-  `d/2` and 20 triangle half-spaces at `tri_k·d/2`; `tri_k` (default 1.05) sets
-  how deep the corner triangles cut — 1.0 ≈ a full icosidodecahedron (biggest
-  triangles), ≥1.12 collapses to a plain dodecahedron (no visible chamfer). The
+  with the 20 dodecahedron vertices chamfered off, so it reads as a chunky
+  faceted dice-ball. Built (in `geodesic-ball.scad`, `gb_faceted_ball`) as the
+  intersection of 12 pentagon half-spaces at radius `d/2` and 20 corner
+  half-spaces at `tri_k·d/2` along the icosahedron's face centres. `tri_k`
+  (default 1.05) sets how deep the corners cut. **Re-derived in #768** after the
+  corner normals were found mirrored (the old `(0,±1/φ,±φ)` family is the
+  other cyclic order; it cut across the pentagons and shipped **9-sided**
+  plaques, 95.4 mm across the corners). Measured with the corrected normals:
+  below 1.098 the plaques are true pentagons with hexagonal corners (1.05:
+  **5-sided plaques, inradius 16.4 mm, 87.9 mm across the corners**); 1.098
+  is the icosidodecahedron; 1.10–1.258 gives triangular corners but 10-sided
+  plaques; ≥1.2584 is a plain dodecahedron. (The old "1.0 ≈ icosidodecahedron,
+  ≥1.12 plain dodecahedron" notes were measured on the mirrored normals.) The
   pentagons at `d/2` are the outermost faces, so the numerals read face-on.
+- **Slot clip (#768):** `gb_slot` used to clip at `r + 2` (41 mm), short of
+  every corner, so wherever the helix crossed one the outer wall stayed as a
+  solid skin over the window (1839 mm³, reaching 46.1 mm). It now clips at the
+  dodecahedron circumradius `1.2584·r` + 2 mm, which bounds the solid for any
+  `tri_k`, with the sweep continued at the same pitch and phase past the old
+  ±41 mm ends. Measured: the shell inside `gb_slot_blade` outside the slot's
+  clip band renders **empty** (0 facets) for both handednesses, on CGAL and
+  manifold (`ci.fitchecks` `slot-clear`, with `slot-clear-ctrl` proving the old
+  41 mm clip fails it). The two-tone is still
+  cut-through geometry: the window opens onto the red core.
   **Two earlier constructions were wrong and are recorded so they aren't
   retried:** (a) a geodesic icosphere clipped into pentagon *plaques* recessed
   the numbers into ~5 mm dimples where they were unreadable from any oblique
@@ -124,8 +141,9 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   overhangs — a roof at exactly 45° tessellates to 44.98° and sits on
   printcheck's threshold, so 40° buys margin). What remains flagged is the
   generator's: the chamfer facets ringing the pole pentagon sit 37°+ off the
-  pole axis, i.e. 52°+ overhangs when pole-down (~1.7 k mm² low on the print;
-  a slicer prints them with some droop, no support needed) — a `tri_k` /
+  pole axis, i.e. 52°+ overhangs when pole-down (printcheck: ≈2.33–2.36 k mm²
+  per half since #768 made them full hexagons, up from ≈1.53 k on the
+  mirrored normals; a slicer prints them with some droop, no support needed) — a `tri_k` /
   chamfer-alignment matter for the lib, not the seam. The pole pentagon
   (numeral and all) is the first layer, the seam ring the top. Proven by
   `ci.fitchecks`: `seam-fit` (male ring ∩ top half at the seated pose) renders

@@ -7,6 +7,15 @@
 # fail. Both are `part` values of ovodyo.scad (module seam_fit).
 seam-fit       empty
 seam-fit-ctrl  interferes
+# Helical slot clearance (#768): the shell wall inside the slot's swept blade
+# (gb_slot_blade) that lies outside gb_slot's radial clip band — i.e. what the
+# slot fails to cut — for both balls' handedness, must render zero facets: no
+# solid bridge left over the window at any corner the helix crosses. (The band
+# is subtracted rather than gb_slot itself so no blade face is coplanar in the
+# boolean; checked empty on 2021.01 CGAL and nightly --backend=manifold.) `slot-clear-ctrl` rebuilds the pre-#768 clip at r + 2 (41 mm), which
+# stops short of the corners and MUST leave wall standing.
+slot-clear       empty
+slot-clear-ctrl  interferes
 # Red structural core (base-core) fit proofs — dispatch parts of ovodyo.scad.
 # core-seat: the seated core ∩ the centre segment's struts must be EMPTY — the
 #   keel's underside sockets nest every deck tie and Warren diagonal without

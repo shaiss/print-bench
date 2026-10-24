@@ -9,8 +9,8 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 
 > **v0 — a working substrate, not the finished clock.** The geometry renders,
 > gates and slices, and the signature look is here: chunky faceted dice-balls
-> (chamfered dodecahedra — twelve flush pentagon faces plus triangular corner
-> facets), **bold numerals cut clean through** each shell to a red interior
+> (chamfered dodecahedra — twelve flush pentagon faces plus hexagonal corner
+> facets, 78 mm across the faces and 88 mm across the corners), **bold numerals cut clean through** each shell to a red interior
 > (stencilised so no counter drops out), and the reference's **exposed gearing in
 > the base** — a geared stepper and reduction gear-train at each pod, a bevel
 > take-off up each stalk, and a central electronics bay. The base drivetrain and
@@ -127,9 +127,21 @@ Customizer sections; override with `-D 'name=value'`):
 | `tip_d` | 5.6 mm | round nose at each wing tip (2 × `strut_d`) |
 | `foot_recess_d` | 4.9 mm | foot-pad recess, sized to a Ø5 mm stick-on bumper |
 
-The ball's faceting is `facet` in `ovodyo.scad` (default 1.05):
-1.0 gives the biggest triangular corner facets (≈ an icosidodecahedron), ≥1.12
-a plain dodecahedron with clean corners.
+The ball's faceting is `facet` in `ovodyo.scad` (default 1.05), re-measured in
+[#768](https://github.com/shaiss/print-bench/issues/768) by intersecting the
+face half-spaces:
+
+| `facet` | number plaques | corner facets | across the corners |
+|---|---|---|---|
+| 1.0 | pentagons | big hexagons | 84.5 mm |
+| **1.05** (default) | **pentagons** | **hexagons** | **87.9 mm** |
+| ≈ 1.098 | pentagons meeting triangles edge to edge (icosidodecahedron) | triangles | 91.7 mm |
+| 1.10–1.25 | 10-sided | triangles | 91.7–97.5 mm |
+| ≥ 1.2584 | pentagons (plain dodecahedron) | none | 98.2 mm |
+
+The helical slot cuts clean through every corner it crosses — it is clipped at
+the dodecahedron's circumradius, so it never leaves a bridge over the window at
+any `facet`.
 
 ## Assembly & use
 

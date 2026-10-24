@@ -35,11 +35,12 @@ ball_spacing = 200;
 ball_center_z = 124;
 
 /* [Ball surface] */
-// Faceting: how far out the 20 triangle-corner-chamfer planes sit (× ball
-// radius). 1.0 = biggest triangular facets (≈ an icosidodecahedron); 1.05 =
-// dominant pentagon number-faces with crisp corners (the reference); >=1.12 = a
-// plain dodecahedron with clean corners. The 12 numbered pentagons stay flush at
-// the ball radius regardless.
+// Faceting: how far out the 20 corner-chamfer planes sit (× ball radius).
+// Measured (#768): below 1.098 the plaques are true pentagons with hexagonal
+// corner facets that grow as it falls (1.05: 88 mm across the corners); 1.098
+// is the icosidodecahedron; 1.098-1.258 gives triangular corners but 10-sided
+// plaques; >= 1.258 is a plain dodecahedron. The 12 numbered plaques stay flush
+// at the ball radius regardless.
 facet = 1.05;
 // Shell wall (mm) — keep >= 1.2
 wall = 2.2;
@@ -486,6 +487,34 @@ module mock_drive() {
   cylinder(d = 10, h = 9, $fn = 32);          // hub/boss
 }
 
+// ---- slot clearance fit check (#768) ----------------------------------------
+// The wall that lies inside the slot's swept blade but survives gb_slot — i.e.
+// a solid bridge left over the window — for both balls' handedness, in the
+// ball frame. Must render EMPTY (ci.fitchecks `slot-clear`): the slot is
+// clipped past the dodecahedron circumradius, so it cuts through every corner
+// it crosses. `clip_r` rebuilds the pre-#768 `r + 2` clip as the negative
+// control (`slot-clear-ctrl`), which leaves the corners standing.
+module slot_clear_check(clip_r = 0) {
+  // Inside the slot's own blade, gb_slot removes exactly the radial band
+  // (cavity - 0.5, clip]. So the shell it leaves behind there is the shell
+  // minus that band; subtracting the band rather than gb_slot itself keeps
+  // every blade face out of the boolean, so no coplanar sliver can survive
+  // on either CGAL or manifold and a non-empty result is a real bridge.
+  ro = (clip_r > 0) ? clip_r : gb_slot_clip_r(ball_d);
+  for (t = [slot_turns, -slot_turns])
+    intersection() {
+      difference() {
+        gb_faceted_ball(ball_d, tri_k = facet);
+        sphere(r = _cavity_r, $fn = 96);
+      }
+      gb_slot_blade(ball_d, slot_width, t);
+      difference() {
+        sphere(r = ro + 50, $fn = 24);           // everything out to well past the ball
+        sphere(r = ro, $fn = 96);                // minus gb_slot's clip band
+      }
+    }
+}
+
 // ---- ball red interior (PREVIEW-ONLY two-tone; never in the printed shell) --
 // The reference is white shell + red working parts: the numerals read red
 // because they cut through to a red interior, and the slot frames a red spiral
@@ -819,6 +848,8 @@ else if (part == "pod-drive")    pod_drive();              // preview: one pod's
 else if (part == "seam-coupon")  seam_coupon();            // print this first: male ring + female puck
 else if (part == "seam-fit")     seam_fit(false);          // fitcheck: must render EMPTY
 else if (part == "seam-fit-ctrl") seam_fit(true);          // fitcheck control: must interfere
+else if (part == "slot-clear")   slot_clear_check();       // fitcheck: no wall left over the slot (#768)
+else if (part == "slot-clear-ctrl") slot_clear_check(clip_r = ball_d / 2 + 2);  // control: old r+2 clip → bridges
 // tumble kinematics (N2, ci.kinematics): landing-pose booleans at stop `stop`
 else if (part == "landing-flat")           landing_flat(stop);           // empty: plaque within tol of +x
 else if (part == "landing-flat-ctrl")      landing_flat_ctrl(stop);      // control: 20 deg off, must hit

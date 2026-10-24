@@ -45,16 +45,29 @@ function gb_icosa_verts() = [
   [ PHI, 0,  1 ], [ PHI, 0, -1 ], [-PHI, 0,  1 ], [-PHI, 0, -1 ],
 ];
 
-// The 20 dodecahedron-vertex directions == the 20 triangular-facet normals (the
-// corners we shave off the dodecahedron). These are the icosahedral-face centres.
+// The 20 dodecahedron-vertex directions == the 20 corner-chamfer normals (the
+// corners we shave off the dodecahedron). These are the icosahedral-face
+// centres of gb_icosa_verts(): (±1,±1,±1) plus the cyclic family
+// (0,±φ,±1/φ), (±φ,±1/φ,0), (±1/φ,0,±φ) — e.g. the face {(0,1,φ), (0,−1,φ),
+// (φ,0,1)} is centred along (1/φ,0,φ). Issue #768: the family used to be the
+// OTHER cyclic order, (0,±1/φ,±φ)…, which is the mirror image; those 12
+// planes cut across the pentagons instead of the corners and left 9-sided
+// plaques with a 47.7 mm (95 mm across) envelope at tri_k 1.05.
 function gb_dodeca_verts() =
   let (I = 1 / PHI)
   concat(
     [ for (a=[-1,1], b=[-1,1], c=[-1,1]) [a, b, c] ],   // (±1,±1,±1)
-    [ [0, I, PHI],[0, I,-PHI],[0,-I, PHI],[0,-I,-PHI] ],
-    [ [I, PHI,0],[I,-PHI,0],[-I, PHI,0],[-I,-PHI,0] ],
-    [ [PHI,0, I],[PHI,0,-I],[-PHI,0, I],[-PHI,0,-I] ]
+    [ for (a=[-1,1], b=[-1,1]) [0, a * PHI, b * I] ],    // (0,±φ,±1/φ)
+    [ for (a=[-1,1], b=[-1,1]) [a * PHI, b * I, 0] ],    // (±φ,±1/φ,0)
+    [ for (a=[-1,1], b=[-1,1]) [a * I, 0, b * PHI] ]     // (±1/φ,0,±φ)
   );
+
+// Dodecahedron circumradius / inradius = sqrt(3(φ+2))/φ² ≈ 1.2584. The faceted
+// solid is the 12 pentagon half-spaces at d/2 (a dodecahedron of inradius d/2)
+// with corners cut further, so for ANY tri_k it lies inside the sphere of
+// radius 1.2584·d/2. gb_slot clips there (plus a margin) so it can never pass
+// UNDER a corner and leave a bridge over the window (#768).
+_GB_DODECA_CIRCUM = sqrt(3 * (PHI + 2)) / (PHI * PHI);
 
 // The numbered pentagon faces sit at exactly d/2 — they are the OUTERMOST flush
 // faces (the whole point, so the numerals read face-on instead of being buried
@@ -65,12 +78,19 @@ function gb_dodeca_verts() =
 // bulged out through each number face and difference() carved a round hole.)
 _GB_PENT_R = 1.0;                        // centre → pentagon face = d/2
 
-// How far out the 20 triangle-chamfer planes sit, as a multiple of d/2. The
-// dodecahedron's own vertices are at 1.2584·(d/2); a chamfer plane between 1.0
-// and 1.2584 shaves each vertex into a flat triangle while the 12 pentagons stay
-// full-size and flush. Smaller = bigger (deeper) triangle facets; 1.0 cuts them
-// level with the pentagons (≈ icosidodecahedron). The default reads like the
-// reference: dominant number pentagons with crisp triangular corners.
+// How far out the 20 corner-chamfer planes sit, as a multiple of d/2. Measured
+// by intersecting the half-spaces (issue #768, corrected normals), the plaques
+// and corner facets go through these regimes:
+//   tri_k >= 1.2584        plain dodecahedron, no chamfer (pentagon plaques);
+//   1.0982 < tri_k < 1.2584 truncated dodecahedron: TRIANGULAR corners, and
+//                          the plaques lose their corners — 10-sided;
+//   tri_k = 1.0982         icosidodecahedron (pentagons and triangles meet
+//                          edge to edge);
+//   tri_k < 1.0982         chamfered past it: true PENTAGON plaques with
+//                          HEXAGONAL corners that grow as tri_k falls.
+// The default sits in the last regime: 12 flush pentagon number-plaques
+// (inradius 16.4 mm at d = 78) and 20 hexagonal corner facets, 88 mm across
+// the corners. The plaques at d/2 are always the outermost (flush) faces.
 _GB_TRI_K = 1.05;
 
 // A half-space {p : p·n̂ <= dist}, as a large cube whose +face is that plane.
@@ -79,9 +99,10 @@ module _gb_halfspace(n, dist, big = 600) {
 }
 
 // The faceted ball solid (before hollowing / cutting): a dodecahedron whose 20
-// vertices are chamfered into triangles — 12 big flush pentagon number-faces at
-// d/2 plus 20 triangular corner facets. Built as the intersection of 12 pentagon
-// half-spaces (at d/2) and 20 triangle half-spaces (at tri_k·d/2). `freq`/
+// vertices are chamfered off — 12 flush pentagon number-faces at d/2 plus 20
+// corner facets (hexagons at the default tri_k; _GB_TRI_K lists the regimes).
+// Built as the intersection of 12 pentagon half-spaces (at d/2) and 20 corner
+// half-spaces (at tri_k·d/2). `freq`/
 // `plaque` are accepted for call-site compatibility but do not shape the solid.
 module gb_faceted_ball(d = 78, freq = 2, plaque = 0.95, tri_k = _GB_TRI_K) {
   R = d / 2;
@@ -166,19 +187,52 @@ module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
 }
 
 // One helical slot: a narrow radial blade swept with a twist and clipped to the
-// wall shell (inner_r .. r+2), so it cuts clean THROUGH the wall wherever it
-// runs and reads as a thin band spiralling around the ball (the reference's
-// "swirl") rather than a wide crater. `inner_r` is the cavity radius so the clip
-// spans the whole wall including the recessed pentagon faces.
-module gb_slot(d = 78, width = 7, turns = 0.5, starts = 1, inner_r = 0) {
+// wall shell (inner_r .. past the outermost corner), so it cuts clean THROUGH
+// the wall wherever it runs and reads as a thin band spiralling around the
+// ball (the reference's "swirl") rather than a wide crater. `inner_r` is the
+// cavity radius so the clip spans the whole wall including the pentagon faces.
+// The outer clip is the dodecahedron circumradius plus `_GB_SLOT_MARGIN`, which
+// bounds the faceted solid for every tri_k: the old r + 2 clip stopped short of
+// the corners (47.7 mm before #768, 44.0 mm after) and left the wall beyond
+// 41 mm standing as a solid skin over the window wherever the helix crossed a
+// corner (#768: 1839 mm³ reaching 46.1 mm at the ovodyo defaults; now empty —
+// the shell inside gb_slot_blade minus gb_slot renders 0 facets). The blade
+// reaches past the clip radially, and the sweep runs out to ±clip in z at the
+// SAME pitch and phase (`turns` is still the wrap over ±(r + 2), the old sweep
+// height), so the helix follows the old path and simply exits through the
+// corners instead of passing under them.
+_GB_SLOT_MARGIN = 2;
+function gb_slot_clip_r(d = 78) = d / 2 * _GB_DODECA_CIRCUM + _GB_SLOT_MARGIN;
+
+// The slot's swept blade alone, unclipped: the helix gb_slot cuts with. Split
+// out so a check can measure what the clip leaves standing (the shell inside
+// this blade minus gb_slot must be empty: no bridge over the window).
+module gb_slot_blade(d = 78, width = 7, turns = 0.5) {
+  r  = d / 2;
+  ro = gb_slot_clip_r(d);  // past every corner
+  h0 = 2 * r + 4;                                // height `turns` is measured over
+  h  = 2 * ro;                                   // swept height: past the poles
+  tw = 360 * turns * h / h0;                     // same twist per mm as over h0
+  // linear_extrude(center = true) leaves the profile turned -twist/2 at z = 0;
+  // turn it back by the extra half-twist so the helix keeps the phase the h0
+  // sweep had and only its ends move. ~3° per slice, as the old default.
+  rotate([0, 0, (tw - 360 * turns) / 2])
+    linear_extrude(height = h, twist = tw, center = true,
+                   slices = max(1, ceil(abs(tw) / 3)), $fn = 120)
+      translate([-r * 0.1, -width / 2]) square([ro + r * 0.1 + 1, width]);  // thin blade
+}
+
+// `clip_r` overrides the outer clip radius; it exists only so a fit check can
+// rebuild the pre-#768 `r + 2` clip as its negative control. Leave it 0.
+module gb_slot(d = 78, width = 7, turns = 0.5, starts = 1, inner_r = 0, clip_r = 0) {
   r  = d / 2;
   ir = (inner_r > 0) ? inner_r - 0.5 : r * 0.78;  // clip below the innermost face
+  ro = (clip_r > 0) ? clip_r : gb_slot_clip_r(d);  // clip past every corner
   for (s = [0 : starts - 1])
     rotate([0, 0, s * 360 / starts])
       intersection() {
-        difference() { sphere(r = r + 2, $fn = 96); sphere(r = ir, $fn = 96); }  // wall shell
-        linear_extrude(height = 2 * r + 4, twist = 360 * turns, center = true, $fn = 120)
-          translate([r * 0.5, 0]) square([r * 1.2, width], center = true);       // thin blade
+        difference() { sphere(r = ro, $fn = 96); sphere(r = ir, $fn = 96); }  // wall shell
+        gb_slot_blade(d, width, turns);
       }
 }
 
