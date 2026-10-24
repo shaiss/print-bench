@@ -61,7 +61,10 @@
 #      autonomy-ok), and only within per-run caps (8 KiB/comment body,
 #      64 KiB payload). Bare ASCII SHIP-LOCK first lines and HTML comment
 #      markers are rejected. Off-issue and non-allowlisted intents are
-#      dropped with a ::warning::, never posted.
+#      dropped with a ::warning::, never posted. A stop-marker intent
+#      defers the settle SHIP-LOCK and skips it only after a validated
+#      stop comment actually posts; a rejected or failed stop falls back
+#      to posting the lock (Cipher L2, #884).
 #
 # Usage:
 #   scripts/design-run-deliver.sh --repo <owner/name> --issue <N> \
@@ -976,26 +979,69 @@ refuse_if_hard_stop() {
   fi
 }
 
+# Indices of intents entries the stop/order jq filters must skip: a
+# non-object element, or a comment whose body is not a string. Either
+# shape makes an unguarded `.action` / `split(.body)` abort jq (Bugbot /
+# CodeRabbit on #909), so both paths skip these with a warning and keep
+# going. Prints one index per line; empty when the file is unreadable.
+intents_malformed_indices() {
+  local f="$1"
+  jq -r '
+    (.intents // []) | to_entries[]
+    | select(
+        (.value | type) != "object"
+        or (
+          ((.value.action // "") == "comment")
+          and ((.value.body | type) != "string")
+        )
+      )
+    | .key
+  ' "$f" 2>/dev/null || true
+}
+
+# ::warning:: each malformed intents entry (see intents_malformed_indices).
+# Prints the warned indices on stdout so a caller can count rejections.
+warn_malformed_intents() {
+  local f="$1" idx
+  while IFS= read -r idx; do
+    [ -n "$idx" ] || continue
+    echo "::warning::intents entry ${idx} is malformed (want an object; comment body must be a string) — skipped" >&2
+    printf '%s\n' "$idx"
+  done < <(intents_malformed_indices "$f")
+}
+
 # A stop can no longer arrive as a comment from the agent (issues: read),
 # so the bundle step also reads the agent's intents file: a comment intent
 # on the selected issue whose first non-empty body line leads with a stop
 # marker is the same hard stop refuse_if_hard_stop reads on the thread.
 # A malformed or missing file indicates nothing (the applier warns on it
-# separately); this predicate never fails the run.
+# separately); this predicate never fails the run. Non-object entries and
+# non-string comment bodies are skipped with a warning so a valid sibling
+# stop still indicates (Bugbot / CodeRabbit on #909).
 # $1 optional path (default INTENTS_FILENAME). True when a selected-issue
 # comment intent leads with a stop marker.
 intents_stop_indicated() {
   local f="${1:-${INTENTS_FILENAME}}"
   [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  # Skip+warn malformed entries so a bad sibling cannot hide a real stop.
+  # apply_intents sets INTENTS_STOP_QUIET=1 and warns once on the apply path.
+  if [ "${INTENTS_STOP_QUIET:-}" != 1 ]; then
+    warn_malformed_intents "$f" >/dev/null
+  fi
   jq -e --arg issue "$ISSUE" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" '
-    def fl($b): ($b // "") | split("\n")
-      | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
-      | map(select(length > 0)) | (.[0] // "");
+    def fl($b):
+      if ($b | type) != "string" then ""
+      else ($b | split("\n")
+        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+        | map(select(length > 0)) | (.[0] // ""))
+      end;
     [ (.intents // [])[]
+      | select(type == "object")
       | select(((.issue // 0) | tostring) == $issue)
       | select((.action // "") == "comment")
+      | select((.body | type) == "string")
       | fl(.body)
       | select(startswith($d1) or startswith($d2) or startswith($d3)) ]
     | length > 0
@@ -1038,20 +1084,48 @@ write_intents() {
   }
 }
 
+# True when $1's first non-empty line leads with a hard-stop marker
+# (DECLINED / DECISION NEEDED / DEFERRED). Same first-line rule as
+# intents_stop_indicated / hard_stop_from_comments — reuse their jq
+# fl() so Unicode whitespace (U+00A0/U+3000/U+0085/U+2028) matches.
+# awk's ASCII-only [[:space:]] left those prefixes on the line, so a
+# stop posted but stop_posted stayed unset and settle locked (#893).
+body_is_stop_comment() {
+  jq -ne --arg b "${1:-}" \
+    --arg d1 "$STOP_MARKER_DECLINED" \
+    --arg d2 "$STOP_MARKER_DECISION" \
+    --arg d3 "$STOP_MARKER_DEFERRED" '
+    def fl($b): ($b // "") | split("\n")
+      | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+      | map(select(length > 0)) | (.[0] // "");
+    fl($b) | startswith($d1) or startswith($d2) or startswith($d3)
+  ' >/dev/null 2>&1
+}
+
 # Apply the agent's issue intents (settle job, trusted artifact download).
 # Posts the settle SHIP-LOCK claim (constant body with HTML marker)
-# first, then applies intents. One intent posts only when: it targets THIS
-# issue, its action is comment or label, its label is in INTENTS_ALLOWLIST,
-# and the per-run caps hold. Comment bodies are NFKC-normalized (Cf stripped,
-# whitespace collapsed) before the ship-lock regex; HTML comment markers and
-# oversize bodies are rejected (Cipher, #864). Everything else is dropped
-# with a ::warning:: naming why. Exit 0 for agent-side problems (the run's
-# disposition comes from the thread, not from here); exit 1 only for an
-# unreadable/oversized file, a normalizer failure, or broken arguments —
-# an applier that cannot read its input must not look like "no intents".
+# first, then applies intents — except when intents indicate a hard stop,
+# in which case the lock is deferred and skipped only after a validated
+# stop comment actually posts (Cipher L2, #884). Stop comment intents are
+# applied last (Cipher, #894): skip-lock settle leaves the thread claimless,
+# and lock-cleanup's claimless_stop requires the latest comment to be the
+# stop — array order stop-then-other would otherwise post the other comment
+# with a higher id and score the run dead. When a stop is indicated, one
+# comment slot under INTENTS_MAX_COMMENTS is reserved for it so the cap
+# never cuts a valid stop queued last (Cipher LOW, #910). One intent posts
+# only when: it targets THIS issue, its action is comment or label, its
+# label is in INTENTS_ALLOWLIST, and the per-run caps hold. Comment bodies
+# are NFKC-normalized (Cf stripped, whitespace collapsed) before the
+# ship-lock regex; HTML comment markers and oversize bodies are rejected
+# (Cipher, #864). Everything else is dropped with a ::warning:: naming why.
+# Exit 0 for agent-side problems (the run's disposition comes from the
+# thread, not from here); exit 1 only for an unreadable/oversized file, a
+# normalizer failure, or broken arguments — an applier that cannot read its
+# input must not look like "no intents".
 apply_intents() {
-  local path="$1" n i applied=0 rejected=0 comments=0 labels=0
-  local intent_issue action body label size normalized
+  local path="$1" i applied=0 rejected=0 comments=0 labels=0
+  local intent_issue action body label size normalized order
+  local defer_settle_lock=0 stop_posted=0
   if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
     echo "design-run-deliver: issue must be numeric, got '${ISSUE}'" >&2
     exit 2
@@ -1082,29 +1156,67 @@ apply_intents() {
     echo "::warning::intents file is malformed (want {version:1,intents:[...]} of at most '${INTENTS_MAX_ENTRIES}' entries) — no intents applied" >&2
     exit 0
   fi
-  # Settle claim: constant body, never intent text. Skip when intents
-  # already carry a stop (DECLINED / DECISION NEEDED / DEFERRED) — posting
-  # a lock then would leave an active claim that cleanup treats as
-  # declined-after-claim and does not withdraw (Bugbot MED, #864).
-  if intents_stop_indicated "$path"; then
-    note "skipping settle SHIP-LOCK — intents carry a stop marker on #${ISSUE}"
+  # Settle claim: constant body, never intent text. When intents carry a
+  # stop (DECLINED / DECISION NEEDED / DEFERRED), defer the lock until
+  # after intents apply — skip only once a validated stop actually posts
+  # (Cipher L2, #884). A rejected or failed stop falls back to the normal
+  # lock so settle never posts nothing. Posting lock-then-stop would leave
+  # an active claim cleanup treats as declined-after-claim and does not
+  # withdraw (Bugbot MED, #864); deferring avoids that without the silent
+  # skip-on-indication hole.
+  # Warn-skip malformed entries once for this apply (stop detection is
+  # quieted below so the same indices are not double-warned).
+  local mal_idx
+  while IFS= read -r mal_idx; do
+    [ -n "$mal_idx" ] || continue
+    rejected=$((rejected + 1))
+  done < <(warn_malformed_intents "$path")
+  if INTENTS_STOP_QUIET=1 intents_stop_indicated "$path"; then
+    defer_settle_lock=1
   else
     post_settle_ship_lock
   fi
-  n="$(jq '.intents | length' "$path")"
-  i=0
-  while [ "$i" -lt "$n" ]; do
+  # Cipher (#894): non-stop intents (comments + labels) keep relative order,
+  # then stop comments keep theirs. Same first-line markers as
+  # intents_stop_indicated / body_is_stop_comment. Type-guard objects and
+  # string bodies so a bad sibling cannot abort the whole batch (#909).
+  if ! order="$(jq -r --arg d1 "$STOP_MARKER_DECLINED" \
+      --arg d2 "$STOP_MARKER_DECISION" --arg d3 "$STOP_MARKER_DEFERRED" '
+    def fl($b):
+      if ($b | type) != "string" then ""
+      else ($b | split("\n")
+        | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+        | map(select(length > 0)) | (.[0] // ""))
+      end;
+    def usable:
+      (type == "object")
+      and (
+        ((.action // "") != "comment")
+        or ((.body | type) == "string")
+      );
+    def is_stop_comment:
+      usable
+      and ((.action // "") == "comment")
+      and (fl(.body) | startswith($d1) or startswith($d2) or startswith($d3));
+    [.intents | to_entries[] | select(.value | usable) | select(.value | is_stop_comment | not) | .key]
+    + [.intents | to_entries[] | select(.value | usable) | select(.value | is_stop_comment) | .key]
+    | .[]
+  ' "$path")"; then
+    echo "design-run-deliver: could not order intents — refusing to apply" >&2
+    exit 1
+  fi
+  # Word-split of newline-separated indices is intentional.
+  # shellcheck disable=SC2086
+  for i in $order; do
     if ! intent_issue="$(jq -r --argjson i "$i" '.intents[$i].issue // "" | if type == "number" then tostring else . end' "$path")" \
       || ! action="$(jq -r --argjson i "$i" '.intents[$i].action // ""' "$path")"; then
       echo "::warning::intents entry ${i} is unreadable — skipped" >&2
       rejected=$((rejected + 1))
-      i=$((i + 1))
       continue
     fi
     if ! [[ "$intent_issue" =~ ^[0-9]+$ ]] || [ "$intent_issue" != "$ISSUE" ]; then
       echo "::warning::intent ${i} targets issue '${intent_issue}', not the selected #${ISSUE} — rejected (off-issue writes are the attack #862 closes)" >&2
       rejected=$((rejected + 1))
-      i=$((i + 1))
       continue
     fi
     case "$action" in
@@ -1112,7 +1224,6 @@ apply_intents() {
         if ! body="$(jq -r --argjson i "$i" '.intents[$i].body // ""' "$path")"; then
           echo "::warning::comment intent ${i} is unreadable — skipped" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         local blen
@@ -1120,14 +1231,12 @@ apply_intents() {
         if [ -z "$body" ] || [ "${blen:-0}" -gt "$INTENTS_BODY_MAX" ]; then
           echo "::warning::comment intent ${i} has an empty or over-length body (cap ${INTENTS_BODY_MAX} bytes) — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         case "$body" in
           *'<!--'*|*'-->'*)
             echo "::warning::comment intent ${i} contains an HTML comment marker — rejected" >&2
             rejected=$((rejected + 1))
-            i=$((i + 1))
             continue
             ;;
         esac
@@ -1138,21 +1247,30 @@ apply_intents() {
         if printf '%s' "$normalized" | normalized_body_has_ship_lock; then
           echo "::warning::comment intent ${i} matches ship-lock after normalization — rejected (intents cannot author a lock; see #872 for burn residual)" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
-        if [ "$comments" -ge "$INTENTS_MAX_COMMENTS" ]; then
+        # When a hard stop is indicated, reserve one slot under the
+        # comment cap for a stop applied last (#910). Without this, 8
+        # non-stop notes fill the cap and the stop is rejected; settle
+        # then falls back to SHIP-LOCK and lock-cleanup scores claimed
+        # instead of declined.
+        local comment_cap="$INTENTS_MAX_COMMENTS"
+        if [ "$defer_settle_lock" -eq 1 ] && ! body_is_stop_comment "$body"; then
+          comment_cap=$((INTENTS_MAX_COMMENTS - 1))
+        fi
+        if [ "$comments" -ge "$comment_cap" ]; then
           echo "::warning::comment intent ${i} exceeds the ${INTENTS_MAX_COMMENTS}-comment cap — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         if ! gh api --method POST "repos/${REPO}/issues/${ISSUE}/comments" \
           -f body="$body" >/dev/null; then
           echo "::warning::comment intent ${i} failed to post on #${ISSUE}" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
+        fi
+        if body_is_stop_comment "$body"; then
+          stop_posted=1
         fi
         comments=$((comments + 1))
         applied=$((applied + 1))
@@ -1161,7 +1279,6 @@ apply_intents() {
         if ! label="$(jq -r --argjson i "$i" '.intents[$i].label // ""' "$path")"; then
           echo "::warning::label intent ${i} is unreadable — skipped" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         local allowed=0 wl
@@ -1171,13 +1288,11 @@ apply_intents() {
         if [ "$allowed" -ne 1 ]; then
           echo "::warning::label intent ${i} names '${label}', which is not in the allowlist (${INTENTS_ALLOWLIST}) — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         if [ "$labels" -ge "$INTENTS_MAX_LABELS" ]; then
           echo "::warning::label intent ${i} exceeds the ${INTENTS_MAX_LABELS}-label cap — rejected" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         # Ensure-then-add (the §9 idiom): create the label if this repo has
@@ -1186,14 +1301,12 @@ apply_intents() {
           if ! gh api --method POST "repos/${REPO}/labels" -f name="$label" -f color=d876e3 >/dev/null; then
             echo "::warning::label intent ${i}: '${label}' is absent and could not be created — skipped" >&2
             rejected=$((rejected + 1))
-            i=$((i + 1))
             continue
           fi
         fi
         if ! gh api --method POST "repos/${REPO}/issues/${ISSUE}/labels" -f "labels[]=${label}" >/dev/null; then
           echo "::warning::label intent ${i} failed to add '${label}' on #${ISSUE}" >&2
           rejected=$((rejected + 1))
-          i=$((i + 1))
           continue
         fi
         labels=$((labels + 1))
@@ -1204,8 +1317,17 @@ apply_intents() {
         rejected=$((rejected + 1))
         ;;
     esac
-    i=$((i + 1))
   done
+  # Cipher L2 (#884): lock skip is earned by a posted stop, not by
+  # indication alone. Rejected / failed stops fall back to the lock.
+  if [ "$defer_settle_lock" -eq 1 ]; then
+    if [ "$stop_posted" -eq 1 ]; then
+      note "skipping settle SHIP-LOCK — validated stop posted on #${ISSUE}"
+    else
+      note "stop indicated but none posted — posting settle SHIP-LOCK on #${ISSUE}"
+      post_settle_ship_lock
+    fi
+  fi
   note "applied ${applied} issue intent(s) on #${ISSUE} (${comments} comment(s), ${labels} label(s)); ${rejected} rejected"
   exit 0
 }
@@ -1521,12 +1643,21 @@ if [ "\$1" = "api" ]; then
     esac
   done
   if [ -n "\${posting:-}" ]; then
+    # Optional: fail a comment POST whose argv matches FAIL_COMMENT_POST_MATCH
+    # (used by the #884 stop-post-failure selftest). Settle lock posts omit
+    # the match string so the fallback lock still succeeds.
+    if [ -n "\${FAIL_COMMENT_POST_MATCH:-}" ] \
+      && printf '%s\n' "\$*" | grep -- '--method POST' >/dev/null \
+      && printf '%s\n' "\$*" | grep -F -- "\${FAIL_COMMENT_POST_MATCH}" >/dev/null; then
+      echo "comment post refused" >&2
+      exit 1
+    fi
     printf '%s\n' '{"id":1}'
     exit 0
   fi
   # Hard-stop read: one JSON array of comments. Empty when the fixture
   # has not planted a thread.
-  if printf '%s\n' "\$*" | grep -q 'created_at'; then
+  if printf '%s\n' "\$*" | grep 'created_at' >/dev/null; then
     if [ -f "${tmp}/comments.json" ]; then
       cat "${tmp}/comments.json"
     else
@@ -1535,8 +1666,8 @@ if [ "\$1" = "api" ]; then
     exit 0
   fi
   # --jq path: one count per page, 1 when a prior success comment exists.
-  if printf '%s\n' "\$*" | grep -q -- '--jq'; then
-    if [ -f "${tmp}/comment.body" ] && head -n 1 "${tmp}/comment.body" | grep -q 'design-run delivered'; then
+  if printf '%s\n' "\$*" | grep -- '--jq' >/dev/null; then
+    if [ -f "${tmp}/comment.body" ] && head -n 1 "${tmp}/comment.body" | grep 'design-run delivered' >/dev/null; then
       printf '%s\n' 1
     else
       printf '%s\n' 0
@@ -1651,7 +1782,7 @@ EOF
   # -z so a quote or space in a path is not C-quoted by ls-tree.
   tree_has() {
     git_cmd --git-dir="$bare" ls-tree -r -z --name-only refs/heads/claude/issue-853-nuggs-ladder \
-      | grep -zqxF "$1"
+      | grep -zxF "$1" >/dev/null
   }
   tree_has 'designs/old/my file.scad' || {
     echo "selftest: space in path was not pushed" >&2
@@ -1763,11 +1894,11 @@ EOF
     printf '%s\n' "$stderr" >&2
     exit 1
   fi
-  if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+  if printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null; then
     echo "selftest: GIT_CONFIG_GLOBAL refusal printed the file" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$stderr" | grep -q 'refusing to run with GIT_CONFIG_GLOBAL set'; then
+  if ! printf '%s\n' "$stderr" | grep 'refusing to run with GIT_CONFIG_GLOBAL set' >/dev/null; then
     echo "selftest: GIT_CONFIG_GLOBAL did not report the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -1789,8 +1920,8 @@ EOF
     --base-branch main --run-url https://example.test/run/1 --push-url "$bare" 2>&1 >/dev/null)"
   rc=$?
   set -e
-  if [ "$rc" -ne 1 ] || printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN' \
-      || ! printf '%s\n' "$stderr" | grep -q 'refusing to run with GIT_CONFIG_SYSTEM set'; then
+  if [ "$rc" -ne 1 ] || printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null \
+      || ! printf '%s\n' "$stderr" | grep 'refusing to run with GIT_CONFIG_SYSTEM set' >/dev/null; then
     echo "selftest: GIT_CONFIG_SYSTEM was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -1849,11 +1980,11 @@ EOF
     echo "selftest: url rewrite exited ${rc}, expected 1" >&2
     exit 1
   fi
-  if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+  if printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null; then
     echo "selftest: url rewrite printed the config value" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$stderr" | grep -q 'url\.\*'; then
+  if ! printf '%s\n' "$stderr" | grep 'url\.\*' >/dev/null; then
     echo "selftest: url rewrite did not report the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -1886,7 +2017,7 @@ JSON
     echo "selftest: non-draft PR was pushed" >&2
     exit 1
   }
-  if [ -f "${tmp}/comment.body" ] || grep -q 'pr create' "${tmp}/gh.log"; then
+  if [ -f "${tmp}/comment.body" ] || grep 'pr create' "${tmp}/gh.log" >/dev/null; then
     echo "selftest: non-draft PR created a PR or posted success" >&2
     exit 1
   fi
@@ -1899,7 +2030,7 @@ JSON
   PR_SEED="${tmp}/wrong-oid.json"
   run_case 'draft oid mismatch' 1 fresh
   unset PR_SEED
-  if [ -f "${tmp}/comment.body" ] || grep -q 'pr create' "${tmp}/gh.log"; then
+  if [ -f "${tmp}/comment.body" ] || grep 'pr create' "${tmp}/gh.log" >/dev/null; then
     echo "selftest: oid mismatch created another PR or posted success" >&2
     exit 1
   fi
@@ -1918,7 +2049,7 @@ JSON
     echo "selftest: cross-repo case moved the remote" >&2
     exit 1
   }
-  if [ -f "${tmp}/comment.body" ] || grep -q 'pr create' "${tmp}/gh.log"; then
+  if [ -f "${tmp}/comment.body" ] || grep 'pr create' "${tmp}/gh.log" >/dev/null; then
     echo "selftest: cross-repo PR created another PR or posted success" >&2
     exit 1
   fi
@@ -1997,11 +2128,11 @@ JSON
       echo "selftest: ${hostile_key} exited ${rc}, expected 1" >&2
       exit 1
     fi
-    if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+    if printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null; then
       echo "selftest: ${hostile_key} printed the config value" >&2
       exit 1
     fi
-    if ! printf '%s\n' "$stderr" | grep -q 'hostile local git config'; then
+    if ! printf '%s\n' "$stderr" | grep 'hostile local git config' >/dev/null; then
       echo "selftest: ${hostile_key} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -2094,7 +2225,7 @@ JSON
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: wrong bundle sha exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'bundle sha256 does not match' || {
+  printf '%s\n' "$stderr" | grep 'bundle sha256 does not match' >/dev/null || {
     echo "selftest: wrong bundle sha did not report the refusal" >&2
     exit 1
   }
@@ -2134,7 +2265,7 @@ p.write_bytes(data)
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: tampered bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -Eq 'git bundle verify failed|could not fetch the bundle' || {
+  printf '%s\n' "$stderr" | grep -E 'git bundle verify failed|could not fetch the bundle' >/dev/null || {
     echo "selftest: tampered bundle was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2159,7 +2290,7 @@ p.write_bytes(data)
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: orphan bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'ancestry does not start at START_SHA' || {
+  printf '%s\n' "$stderr" | grep 'ancestry does not start at START_SHA' >/dev/null || {
     echo "selftest: orphan bundle did not refuse the ancestry" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2196,7 +2327,7 @@ p.write_bytes(data)
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: older-prerequisite bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'ancestry does not start at START_SHA' || {
+  printf '%s\n' "$stderr" | grep 'ancestry does not start at START_SHA' >/dev/null || {
     echo "selftest: older prerequisite was accepted" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2213,11 +2344,14 @@ p.write_bytes(data)
   git_cmd -C "$isrc" -c user.email=t@example.com -c user.name=t commit --allow-empty -m base >/dev/null
   ibase="$(git_cmd -C "$isrc" rev-parse HEAD)"
   run_intents() {  # $1 intents file, $2 expected exit. Captures stderr+rc.
+    # Optional FAIL_COMMENT_POST_MATCH is forwarded so the fake gh can
+    # refuse a matching comment POST (Cipher L2, #884 case c).
     : > "${tmp}/gh.log"
     set +e
     stderr="$(env PATH="${tmp}/bin:${PATH}" GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
       DELIVER_WORKTREE="$isrc" \
+      FAIL_COMMENT_POST_MATCH="${FAIL_COMMENT_POST_MATCH:-}" \
       "$SELF" --repo acme/print-bench --issue 853 --base "$ibase" \
       --base-branch main --run-url https://example.test/run/1 \
       --apply-intents "$1" 2>&1 >/dev/null)"
@@ -2285,7 +2419,7 @@ EOF
   [ "$(label_posts)" -eq 0 ] || { echo "selftest: an off-issue label intent was posted" >&2; exit 1; }
   # settle lock + the surviving on-issue comment
   [ "$(comment_posts)" -eq 2 ] || { echo "selftest: the on-issue comment was dropped with the off-issue label (posted $(comment_posts))" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q "targets issue '999', not the selected #853" || {
+  printf '%s\n' "$stderr" | grep "targets issue '999', not the selected #853" >/dev/null || {
     echo "selftest: the off-issue rejection did not name the reason" >&2
     exit 1
   }
@@ -2300,7 +2434,7 @@ EOF
   run_intents "$ifile" 0
   # settle lock only — the off-issue comment never posts
   [ "$(comment_posts)" -eq 1 ] || { echo "selftest: an off-issue comment intent was posted (posted $(comment_posts))" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q "targets issue '999'" || {
+  printf '%s\n' "$stderr" | grep "targets issue '999'" >/dev/null || {
     echo "selftest: the off-issue comment rejection did not name the reason" >&2
     exit 1
   }
@@ -2316,7 +2450,7 @@ EOF
 EOF
   run_intents "$ifile" 0
   [ "$(label_posts)" -eq 0 ] || { echo "selftest: a non-allowlisted label intent was posted" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q "not in the allowlist" || {
+  printf '%s\n' "$stderr" | grep "not in the allowlist" >/dev/null || {
     echo "selftest: the allowlist rejection did not name the reason" >&2
     exit 1
   }
@@ -2352,7 +2486,7 @@ EOF
       echo "selftest: ship-lock case '$1' dropped its safe sibling" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q 'matches ship-lock after normalization' || {
+    printf '%s\n' "$stderr" | grep 'matches ship-lock after normalization' >/dev/null || {
       echo "selftest: ship-lock case '$1' did not name the reason" >&2
       exit 1
     }
@@ -2367,8 +2501,10 @@ EOF
   reject_shiplock_case fullwidth "$(python3 -c 'print("\uff33\uff28\uff29\uff30\uff0d\uff2c\uff2f\uff23\uff2b spoof")')"
   reject_shiplock_case line2 $'preamble\nSHIP-LOCK on line two'
 
-  # Cipher / Bugbot MED (#864): a DECLINED-only intents payload must NOT
-  # post a settle lock (cleanup would leave it active as declined-after-claim).
+  # Cipher / Bugbot MED (#864) + Cipher L2 (#884 case a): a valid
+  # DECLINED-only intents payload posts the stop and skips the settle
+  # lock (cleanup would leave lock-then-stop active as declined-after-claim).
+  # Skip is earned only after the stop posts — see cases b/c below.
   ifile="${tmp}/intents-declined-only.json"
   cat > "$ifile" <<'EOF'
 {"version":1,"intents":[
@@ -2388,8 +2524,257 @@ EOF
     echo "selftest: DECLINED-only intents did not post the stop comment" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK' || {
-    echo "selftest: DECLINED-only path did not note skipping the settle lock" >&2
+  printf '%s\n' "$stderr" | grep 'skipping settle SHIP-LOCK — validated stop posted' >/dev/null || {
+    echo "selftest: DECLINED-only path did not note skipping the settle lock after a posted stop" >&2
+    exit 1
+  }
+
+  # Cipher CLEAR of #892 / #893: body_is_stop_comment must agree with the
+  # jq readers on Unicode whitespace. A leading NBSP (or U+3000 / U+2028)
+  # used to leave intents_stop_indicated true but body_is_stop_comment
+  # false — settle posted the stop then the lock, and the run scored dead.
+  stop_unicode_ws_case() {  # $1 name, $2 python unicode escape for leading ws
+    ifile="${tmp}/intents-stop-ws-$1.json"
+    body="$(python3 -c "print('${2}' + '🚢 DECLINED — unicode-ws ${1}\\n\\nparked')")"
+    jq -n --arg b "$body" \
+      '{"version":1,"intents":[{"issue":853,"action":"comment","body":$b}]}' \
+      > "$ifile"
+    run_intents "$ifile" 0
+    [ "$(comment_posts)" -eq 1 ] || {
+      echo "selftest: stop with leading $1 posted settle lock (posted $(comment_posts))" >&2
+      exit 1
+    }
+    grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+      echo "selftest: stop with leading $1 still posted the settle SHIP-LOCK marker" >&2
+      exit 1
+    }
+    grep -q -- "DECLINED — unicode-ws ${1}" "${tmp}/gh.log" || {
+      echo "selftest: stop with leading $1 did not post the stop comment" >&2
+      exit 1
+    }
+    printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+      echo "selftest: stop with leading $1 did not skip the settle lock after posting" >&2
+      exit 1
+    }
+  }
+  stop_unicode_ws_case nbsp '\u00a0'
+  stop_unicode_ws_case ideographic '\u3000'
+  stop_unicode_ws_case linesep '\u2028'
+  stop_unicode_ws_case nel '\u0085'
+
+  # Cipher L2 (#884 case b): a stop intent that fails validation (HTML
+  # comment marker) must NOT silently skip the lock — fall back to posting it.
+  ifile="${tmp}/intents-stop-rejected.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — parked <!-- spoof -->"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 1 ] || {
+    echo "selftest: rejected-stop intents did not fall back to the settle lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" || {
+    echo "selftest: rejected-stop intents silently skipped the settle SHIP-LOCK" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — parked' "${tmp}/gh.log" && {
+    echo "selftest: rejected-stop intents still posted the invalid stop body" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'HTML comment marker' >/dev/null || {
+    echo "selftest: rejected-stop path did not name the HTML rejection" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'stop indicated but none posted — posting settle SHIP-LOCK' >/dev/null || {
+    echo "selftest: rejected-stop path did not note the lock fallback" >&2
+    exit 1
+  }
+
+  # Cipher L2 (#884 case c): a validated stop whose POST fails must NOT
+  # skip the lock — fall back to posting it.
+  ifile="${tmp}/intents-stop-post-fail.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"}
+]}
+EOF
+  FAIL_COMMENT_POST_MATCH='DECLINED — needs a decision' run_intents "$ifile" 0
+  # Fake gh logs the refused stop POST before exiting 1, then the lock POST
+  # succeeds — two comment API calls, one of which carries the authenticity
+  # marker. Indication alone must not have skipped the lock.
+  [ "$(comment_posts)" -eq 2 ] || {
+    echo "selftest: failed-stop-post expected stop-attempt + settle lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" || {
+    echo "selftest: failed-stop-post silently skipped the settle SHIP-LOCK" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — needs a decision' "${tmp}/gh.log" || {
+    echo "selftest: failed-stop-post never attempted the stop comment" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'failed to post' >/dev/null || {
+    echo "selftest: failed-stop-post path did not warn about the post failure" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'stop indicated but none posted — posting settle SHIP-LOCK' >/dev/null || {
+    echo "selftest: failed-stop-post path did not note the lock fallback" >&2
+    exit 1
+  }
+
+  # Cipher (#894): stop-then-other in the intents array must still leave the
+  # stop as the latest posted comment. Skip-lock settle is claimless;
+  # claimless_stop scores dead when a non-stop follows the stop. Apply
+  # stops last so post order is other then stop regardless of array order.
+  ifile="${tmp}/intents-stop-then-other.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"},
+ {"issue":853,"action":"comment","body":"**Design name:** widget\n\n**Gate contract**\n- [ ] G1"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 2 ] || {
+    echo "selftest: stop-then-other expected 2 comments, no lock (posted $(comment_posts))" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: stop-then-other still posted the settle SHIP-LOCK" >&2
+    exit 1
+  }
+  other_line="$(grep -n -- 'Gate contract' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  stop_line="$(grep -n -- 'DECLINED — needs a decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  [ -n "$other_line" ] && [ -n "$stop_line" ] && [ "$other_line" -lt "$stop_line" ] || {
+    echo "selftest: stop-then-other did not post the non-stop before the stop (other=${other_line:-?} stop=${stop_line:-?})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'skipping settle SHIP-LOCK — validated stop posted' >/dev/null || {
+    echo "selftest: stop-then-other path did not skip the settle lock after posting the stop" >&2
+    exit 1
+  }
+
+  # Bugbot / CodeRabbit (#909): non-object entries and non-string comment
+  # bodies must not abort the order jq or hide stop detection. Mixed with
+  # valid intents, the bad ones warn-skip; valid non-stops then stop still
+  # post in that order, and the settle lock stays deferred.
+  ifile="${tmp}/intents-malformed-entries.json"
+  cat > "$ifile" <<'EOF'
+{"version":1,"intents":[
+ null,
+ "not-an-object",
+ {"issue":853,"action":"comment","body":42},
+ {"issue":853,"action":"comment","body":"**Design name:** widget\n\n**Gate contract**\n- [ ] G1"},
+ {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\n\nparked"},
+ {"issue":853,"action":"label","label":"needs-decision"}
+]}
+EOF
+  run_intents "$ifile" 0
+  [ "$(comment_posts)" -eq 2 ] || {
+    echo "selftest: malformed-entries expected non-stop + stop, no lock (posted $(comment_posts))" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  [ "$(label_posts)" -eq 1 ] || {
+    echo "selftest: malformed-entries did not post the valid label sibling" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: malformed-entries still posted the settle SHIP-LOCK (stop detection missed)" >&2
+    exit 1
+  }
+  other_line="$(grep -n -- 'Gate contract' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  stop_line="$(grep -n -- 'DECLINED — needs a decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  label_line="$(grep -n -- 'labels\[\]=needs-decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  [ -n "$other_line" ] && [ -n "$label_line" ] && [ -n "$stop_line" ] \
+    && [ "$other_line" -lt "$label_line" ] && [ "$label_line" -lt "$stop_line" ] || {
+    echo "selftest: malformed-entries did not keep non-stop then stop order (other=${other_line:-?} label=${label_line:-?} stop=${stop_line:-?})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'intents entry 0 is malformed' >/dev/null || {
+    echo "selftest: malformed-entries did not warn about the null entry" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'intents entry 2 is malformed' >/dev/null || {
+    echo "selftest: malformed-entries did not warn about the non-string body" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep 'skipping settle SHIP-LOCK — validated stop posted' >/dev/null || {
+    echo "selftest: malformed-entries path did not skip the settle lock after posting the stop" >&2
+    exit 1
+  }
+  # Standalone stop detection (write-bundle path) must also warn-skip and
+  # still see the valid stop among malformed siblings.
+  ISSUE=853
+  stderr_stop="$(intents_stop_indicated "$ifile" 2>&1)" && stop_rc=0 || stop_rc=$?
+  [ "$stop_rc" -eq 0 ] || {
+    echo "selftest: intents_stop_indicated missed the valid stop among malformed entries" >&2
+    printf '%s\n' "$stderr_stop" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr_stop" | grep 'intents entry 1 is malformed' >/dev/null || {
+    echo "selftest: intents_stop_indicated did not warn about a malformed entry" >&2
+    printf '%s\n' "$stderr_stop" >&2
+    exit 1
+  }
+
+  # Cipher LOW (#910): 8 non-stop notes + 1 stop must still post the stop
+  # (one slot reserved under the comment cap). Without the reserve, the
+  # stop is cut after #909's stop-last ordering and settle falls back to
+  # SHIP-LOCK — lock-cleanup then scores claimed instead of declined.
+  ifile="${tmp}/intents-cap-reserve-stop.json"
+  {
+    printf '%s\n' '{"version":1,"intents":['
+    for ci in 1 2 3 4 5 6 7 8; do
+      printf ' {"issue":853,"action":"comment","body":"note %d gate text"},\n' "$ci"
+    done
+    printf ' {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\\n\\nparked"}\n'
+    printf '%s\n' ']}'
+  } > "$ifile"
+  run_intents "$ifile" 0
+  # 7 notes (one cut for the reserved slot) + stop; no settle lock.
+  [ "$(comment_posts)" -eq 8 ] || {
+    echo "selftest: 8-notes+stop expected 7 notes + stop (posted $(comment_posts))" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — needs a decision' "${tmp}/gh.log" || {
+    echo "selftest: 8-notes+stop did not post the stop (cap cut it)" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: 8-notes+stop fell back to settle SHIP-LOCK (would score claimed)" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  note_n="$(grep -c -- 'note [0-9] gate text' "${tmp}/gh.log" || true)"
+  [ "$note_n" -eq 7 ] || {
+    echo "selftest: 8-notes+stop expected 7 notes under the reserved cap (got ${note_n})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  last_note_line="$(grep -n -- 'note [0-9] gate text' "${tmp}/gh.log" | tail -1 | cut -d: -f1)"
+  stop_line="$(grep -n -- 'DECLINED — needs a decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  [ -n "$last_note_line" ] && [ -n "$stop_line" ] && [ "$last_note_line" -lt "$stop_line" ] || {
+    echo "selftest: 8-notes+stop did not keep stop last (note=${last_note_line:-?} stop=${stop_line:-?})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+    echo "selftest: 8-notes+stop path did not skip the settle lock after posting the stop" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'exceeds the .*comment cap' || {
+    echo "selftest: 8-notes+stop did not warn about the cut non-stop under the reserved cap" >&2
+    printf '%s\n' "$stderr" >&2
     exit 1
   }
 
@@ -2409,7 +2794,7 @@ EOF
     echo "selftest: the sibling of an HTML-marker body was dropped" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'HTML comment marker' || {
+  printf '%s\n' "$stderr" | grep 'HTML comment marker' >/dev/null || {
     echo "selftest: HTML-marker rejection did not name the reason" >&2
     exit 1
   }
@@ -2428,7 +2813,7 @@ EOF
     echo "selftest: the sibling of an over-length body was dropped" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'over-length body' || {
+  printf '%s\n' "$stderr" | grep 'over-length body' >/dev/null || {
     echo "selftest: over-length body rejection did not name the reason" >&2
     exit 1
   }
@@ -2444,7 +2829,7 @@ EOF
     echo "selftest: an oversized intents file still posted" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'refusing to apply' || {
+  printf '%s\n' "$stderr" | grep 'refusing to apply' >/dev/null || {
     echo "selftest: an oversized intents file did not fail closed" >&2
     exit 1
   }
@@ -2456,14 +2841,14 @@ EOF
     echo "selftest: a malformed intents file still posted" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'intents file is malformed' || {
+  printf '%s\n' "$stderr" | grep 'intents file is malformed' >/dev/null || {
     echo "selftest: a malformed intents file did not warn" >&2
     exit 1
   }
 
   # A missing file is an infra failure (exit 1), never a silent no-op.
   run_intents "${tmp}/intents-absent.json" 1
-  printf '%s\n' "$stderr" | grep -q 'missing or not a regular file' || {
+  printf '%s\n' "$stderr" | grep 'missing or not a regular file' >/dev/null || {
     echo "selftest: a missing intents file did not fail loudly" >&2
     exit 1
   }
@@ -2547,7 +2932,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: a committed intents file exited ${rc}, expected 1" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'design-run-intents.json' || {
+  printf '%s\n' "$stderr" | grep 'design-run-intents.json' >/dev/null || {
     echo "selftest: a committed intents file did not name the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2655,7 +3040,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: dangling-prerequisite bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'is not an ancestor of START_SHA' || {
+  printf '%s\n' "$stderr" | grep 'is not an ancestor of START_SHA' >/dev/null || {
     echo "selftest: dangling prerequisite was accepted" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2688,7 +3073,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: merged scripts bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/from-main.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/from-main.sh' >/dev/null || {
     echo "selftest: merged scripts path was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2748,7 +3133,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: evil-merge bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/evil.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/evil.sh' >/dev/null || {
     echo "selftest: merge-only protected path was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2778,7 +3163,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: protected-path bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/evil.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/evil.sh' >/dev/null || {
     echo "selftest: protected-path bundle was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -3117,19 +3502,19 @@ EOF
     printing { print }
   ' "$workflow")"
   [ -n "$deliver_run" ] || { echo "selftest: could not extract the bundle run block" >&2; exit 1; }
-  printf '%s\n' "$deliver_run" | grep -q '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' || {
+  printf '%s\n' "$deliver_run" | grep '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' >/dev/null || {
     echo "selftest: bundle step does not git-show the pinned script" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'DELIVER_SHA256' || {
+  printf '%s\n' "$deliver_run" | grep 'DELIVER_SHA256' >/dev/null || {
     echo "selftest: deliver step does not check the pre-agent sha256" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'objects/info/alternates' || {
+  printf '%s\n' "$deliver_run" | grep 'objects/info/alternates' >/dev/null || {
     echo "selftest: deliver step does not refuse object alternates" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES' || {
+  printf '%s\n' "$deliver_run" | grep 'GIT_ALTERNATE_OBJECT_DIRECTORIES' >/dev/null || {
     echo "selftest: deliver step does not drop GIT_ALTERNATE_OBJECT_DIRECTORIES" >&2
     exit 1
   }
@@ -3193,7 +3578,7 @@ EOF
     echo "selftest: the bundle is not uploaded from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/upload-artifact@v7' "$workflow" || grep -q 'actions/checkout@v7' "$workflow" || grep -q 'actions/setup-python@v7' "$workflow"; then
+  if grep -q 'actions/upload-artifact@v7' "$workflow" || grep 'actions/checkout@v7' "$workflow" >/dev/null || grep -q 'actions/setup-python@v7' "$workflow"; then
     echo "selftest: design-run.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -3219,7 +3604,7 @@ EOF
     echo "selftest: the deliver workflow does not download the bundle from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/download-artifact@v7' "$deliver_workflow" || grep -q 'actions/checkout@v7' "$deliver_workflow"; then
+  if grep -q 'actions/download-artifact@v7' "$deliver_workflow" || grep 'actions/checkout@v7' "$deliver_workflow" >/dev/null; then
     echo "selftest: design-run-deliver.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -3238,11 +3623,11 @@ EOF
     printing { print }
   ' "$deliver_workflow")"
   [ -n "$push_step" ] || { echo "selftest: could not extract the deliver push step" >&2; exit 1; }
-  printf '%s\n' "$push_step" | grep -q 'timeout-minutes: 10' || {
+  printf '%s\n' "$push_step" | grep 'timeout-minutes: 10' >/dev/null || {
     echo "selftest: the deliver push step has no timeout under the job budget" >&2
     exit 1
   }
-  printf '%s\n' "$push_step" | grep -q 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' || {
+  printf '%s\n' "$push_step" | grep 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' >/dev/null || {
     echo "selftest: the deliver push step does not hold the push PAT" >&2
     exit 1
   }
@@ -3279,11 +3664,11 @@ EOF
     echo "selftest: the deliver lock cleanup has no 3-minute timeout" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q -- '--write-bundle' || {
+  printf '%s\n' "$deliver_run" | grep -- '--write-bundle' >/dev/null || {
     echo "selftest: the bundle step does not pass --write-bundle" >&2
     exit 1
   }
-  if printf '%s\n' "$deliver_run" | grep -q 'GH_TOKEN'; then
+  if printf '%s\n' "$deliver_run" | grep 'GH_TOKEN' >/dev/null; then
     echo "selftest: the bundle step run block mentions GH_TOKEN" >&2
     exit 1
   fi
@@ -3501,7 +3886,7 @@ EOF
     exit 1
   }
   if grep -q 'START_SHA:scripts/routine-lock-cleanup.sh' "$deliver_workflow" \
-    || grep -q 'checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh' "$deliver_workflow"; then
+    || grep 'checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh' "$deliver_workflow" >/dev/null; then
     echo "selftest: lock cleanup still takes its script from START_SHA" >&2
     exit 1
   fi
@@ -3632,11 +4017,11 @@ EOF
     echo "selftest: SKILL.md still authorizes git push" >&2
     exit 1
   fi
-  if grep -q 'secrets.GH_TOKEN' "$workflow" || grep -q 'HAS_GH_TOKEN' "$workflow"; then
+  if grep -q 'secrets.GH_TOKEN' "$workflow" || grep 'HAS_GH_TOKEN' "$workflow" >/dev/null; then
     echo "selftest: the run workflow still references the push PAT" >&2
     exit 1
   fi
-  if grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$workflow" || grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$deliver_workflow"; then
+  if grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$workflow" || grep 'github_token: \${{ secrets.GH_TOKEN }}' "$deliver_workflow" >/dev/null; then
     echo "selftest: an agent step still receives the push PAT" >&2
     exit 1
   fi
@@ -3732,19 +4117,19 @@ EOF
     echo "selftest: an agent step still uses bypassPermissions" >&2
     exit 1
   fi
-  printf '%s\n' "$deliver_run" | grep -q 'reap_agent_orphans' || {
+  printf '%s\n' "$deliver_run" | grep 'reap_agent_orphans' >/dev/null || {
     echo "selftest: the bundle step does not reap detached agent processes" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'now" != "$captured"' || {
+  printf '%s\n' "$deliver_run" | grep 'now" != "$captured"' >/dev/null || {
     echo "selftest: the bundle step does not re-check the bundle after the reap" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'reap_should_kill' || {
+  printf '%s\n' "$deliver_run" | grep 'reap_should_kill' >/dev/null || {
     echo "selftest: the bundle step does not classify orphans" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'run-\*\.scope' || {
+  printf '%s\n' "$deliver_run" | grep 'run-\*\.scope' >/dev/null || {
     echo "selftest: the bundle reaper does not catch systemd-run scopes" >&2
     exit 1
   }
@@ -3811,11 +4196,11 @@ EOF
     echo "selftest: SKILL.md still subscribes to a PR the deliver job has not opened" >&2
     exit 1
   fi
-  printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' || {
+  printf '%s\n' "$deliver_run" | grep 'GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' >/dev/null || {
     echo "selftest: deliver step does not drop alternate object dirs" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'GIT_CONFIG_PARAMETERS' || {
+  printf '%s\n' "$deliver_run" | grep 'GIT_CONFIG_PARAMETERS' >/dev/null || {
     echo "selftest: deliver step does not drop GIT_CONFIG_PARAMETERS" >&2
     exit 1
   }
@@ -3823,15 +4208,15 @@ EOF
     echo "selftest: lock-cleanup restore is missing --no-replace-objects and hooksPath" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'RUNNER_TEMP' || {
+  printf '%s\n' "$deliver_run" | grep 'RUNNER_TEMP' >/dev/null || {
     echo "selftest: deliver step does not stage the script in RUNNER_TEMP" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'refusing to restore design-run-deliver' || {
+  printf '%s\n' "$deliver_run" | grep 'refusing to restore design-run-deliver' >/dev/null || {
     echo "selftest: deliver step does not refuse a symlink restore" >&2
     exit 1
   }
-  if printf '%s\n' "$deliver_run" | grep -q './scripts/design-run-deliver.sh'; then
+  if printf '%s\n' "$deliver_run" | grep './scripts/design-run-deliver.sh' >/dev/null; then
     echo "selftest: deliver step still executes the worktree script" >&2
     exit 1
   fi
@@ -3850,35 +4235,35 @@ EOF
     printing { print }
   ' "$burn")"
   [ -n "$burn_run" ] || { echo "selftest: could not extract the burn bundle run block" >&2; exit 1; }
-  printf '%s\n' "$burn_run" | grep -q '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' || {
+  printf '%s\n' "$burn_run" | grep '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' >/dev/null || {
     echo "selftest: burn bundle step does not git-show the pinned script" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'DELIVER_SHA256' || {
+  printf '%s\n' "$burn_run" | grep 'DELIVER_SHA256' >/dev/null || {
     echo "selftest: burn bundle step does not check the pre-agent sha256" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'objects/info/alternates' || {
+  printf '%s\n' "$burn_run" | grep 'objects/info/alternates' >/dev/null || {
     echo "selftest: burn bundle step does not refuse object alternates" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q -- '--routine backlog-burn --write-bundle "${RUNNER_TEMP}/backlog-burn.bundle"' || {
+  printf '%s\n' "$burn_run" | grep -- '--routine backlog-burn --write-bundle "${RUNNER_TEMP}/backlog-burn.bundle"' >/dev/null || {
     echo "selftest: burn bundle step does not write the backlog-burn bundle" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'refusing to restore design-run-deliver' || {
+  printf '%s\n' "$burn_run" | grep 'refusing to restore design-run-deliver' >/dev/null || {
     echo "selftest: burn bundle step does not refuse a symlink restore" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q './scripts/design-run-deliver.sh' && {
+  printf '%s\n' "$burn_run" | grep './scripts/design-run-deliver.sh' >/dev/null && {
     echo "selftest: burn bundle step still executes the worktree script" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'reap_agent_orphans' || {
+  printf '%s\n' "$burn_run" | grep 'reap_agent_orphans' >/dev/null || {
     echo "selftest: burn bundle step does not reap detached agent processes" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'now" != "$captured"' || {
+  printf '%s\n' "$burn_run" | grep 'now" != "$captured"' >/dev/null || {
     echo "selftest: burn bundle step does not re-check the bundle after the reap" >&2
     exit 1
   }
@@ -3898,7 +4283,7 @@ EOF
     echo "selftest: the burn artifacts are not uploaded from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/upload-artifact@v7' "$burn" || grep -q 'actions/checkout@v7' "$burn" || grep -q 'actions/setup-python@v7' "$burn"; then
+  if grep -q 'actions/upload-artifact@v7' "$burn" || grep 'actions/checkout@v7' "$burn" >/dev/null || grep -q 'actions/setup-python@v7' "$burn"; then
     echo "selftest: backlog-burn.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -3932,7 +4317,7 @@ EOF
     echo "selftest: the burn arming gate changed" >&2
     exit 1
   }
-  if grep -q 'secrets.GH_TOKEN' "$burn" || grep -q 'HAS_GH_TOKEN' "$burn"; then
+  if grep -q 'secrets.GH_TOKEN' "$burn" || grep 'HAS_GH_TOKEN' "$burn" >/dev/null; then
     echo "selftest: the burn workflow still references the push PAT" >&2
     exit 1
   fi
@@ -4042,7 +4427,7 @@ EOF
     echo "selftest: burn must invoke backlog_burn via python3 -m backlog_burn.cli" >&2
     exit 1
   }
-  if grep -vE '^[[:space:]]*#' "$burn" | grep -qE '(^|[[:space:]])backlog-burn (config|run|select|gather)'; then
+  if grep -vE '^[[:space:]]*#' "$burn" | grep -E '(^|[[:space:]])backlog-burn (config|run|select|gather)' >/dev/null; then
     echo "selftest: burn still calls the backlog-burn console script (needs install)" >&2
     exit 1
   fi
@@ -4135,7 +4520,9 @@ EOF
   # Settle START_SHA case must accept a real 40-char commit (Bugbot on #863:
   # 41 hex classes rejected every SHA and lock cleanup never ran).
   settle_job="$(awk '/^  settle:/{p=1;print;next} p && /^  [A-Za-z]/{exit} p' "$burn")"
-  settle_sha_arm="$(printf '%s\n' "$settle_job" | grep -E '\[0-9a-f\]\[0-9a-f\]' | head -1)"
+  # SIGPIPE-safe under pipefail (no `grep | head -1`).
+  settle_sha_arm="$(grep -E '\[0-9a-f\]\[0-9a-f\]' <<<"$settle_job" || true)"
+  settle_sha_arm="${settle_sha_arm%%$'\n'*}"
   [ -n "$settle_sha_arm" ] || {
     echo "selftest: settle job has no START_SHA hex case arm" >&2
     exit 1
@@ -4203,11 +4590,11 @@ EOF
     printing && /^  [A-Za-z]/ && !/^  triage:/ { exit }
     printing { print }
   ' "$burn")"
-  printf '%s\n' "$burn_triage_job" | grep -q 'uses: \./\.github/actions/provider-triage' || {
+  printf '%s\n' "$burn_triage_job" | grep 'uses: \./\.github/actions/provider-triage' >/dev/null || {
     echo "selftest: the burn triage job does not run provider-triage" >&2
     exit 1
   }
-  if printf '%s\n' "$burn_perms" | grep -q 'provider-triage'; then
+  if printf '%s\n' "$burn_perms" | grep 'provider-triage' >/dev/null; then
     echo "selftest: provider-triage still runs inside the burn agent job" >&2
     exit 1
   fi
@@ -4234,7 +4621,7 @@ EOF
     echo "selftest: the burn deliver workflow does not download the bundle from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/download-artifact@v7' "$burn_deliver" || grep -q 'actions/checkout@v7' "$burn_deliver"; then
+  if grep -q 'actions/download-artifact@v7' "$burn_deliver" || grep 'actions/checkout@v7' "$burn_deliver" >/dev/null; then
     echo "selftest: backlog-burn-deliver.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -4378,7 +4765,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: design-run accepted a scripts/ commit (exit ${rc})" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/fix.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/fix.sh' >/dev/null || {
     echo "selftest: design-run did not report the scripts/ refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -4398,7 +4785,7 @@ EOF
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/fix.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/fix.sh' >/dev/null || {
     echo "selftest: backlog-burn did not report the scripts/ refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -4414,7 +4801,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 2 ] || { echo "selftest: an unknown routine exited ${rc}, expected 2" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'unknown routine: bogus' || {
+  printf '%s\n' "$stderr" | grep 'unknown routine: bogus' >/dev/null || {
     echo "selftest: an unknown routine did not report the refusal" >&2
     exit 1
   }
@@ -4446,7 +4833,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q "$needle" || {
+    printf '%s\n' "$stderr" | grep "$needle" >/dev/null || {
       echo "selftest: backlog-burn protected ${label} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -4700,7 +5087,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q "$needle" || {
+    printf '%s\n' "$stderr" | grep "$needle" >/dev/null || {
       echo "selftest: ${routine} protected ${label} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -4882,7 +5269,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+    printf '%s\n' "$stderr" | grep 'points under a protected prefix' >/dev/null || {
       echo "selftest: ${routine} docs/hook->CLAUDE.md did not report symlink refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -4955,7 +5342,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+    printf '%s\n' "$stderr" | grep 'points under a protected prefix' >/dev/null || {
       echo "selftest: ${routine} pathspec-magic :^y did not report symlink refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -5012,7 +5399,7 @@ EOF
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'ls-tree failed for' || {
+  printf '%s\n' "$stderr" | grep 'ls-tree failed for' >/dev/null || {
     echo "selftest: ls-tree failure did not report the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1

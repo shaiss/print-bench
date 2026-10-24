@@ -1467,25 +1467,25 @@ DECOY
     [ -n "$restore_ln" ] && [ -n "$invoke_ln" ] && [ -n "$unlink_ln" ] \
       && [ "$unlink_ln" -lt "$restore_ln" ] && [ "$restore_ln" -lt "$invoke_ln" ] \
       && printf '%s\n' "$block" \
-        | grep -q 'START_SHA: \${{ steps\.start_ref\.outputs\.sha }}' \
+        | grep 'START_SHA: \${{ steps\.start_ref\.outputs\.sha }}' >/dev/null \
       && printf '%s\n' "$block" \
-        | grep -q '\[ -L scripts \]' \
+        | grep '\[ -L scripts \]' >/dev/null \
       && printf '%s\n' "$block" \
-        | grep -q 'mv -f "\$restore_tmp" scripts/routine-lock-cleanup.sh' \
+        | grep 'mv -f "\$restore_tmp" scripts/routine-lock-cleanup.sh' >/dev/null \
       && ! printf '%s\n' "$block" \
-        | grep -q '> scripts/routine-lock-cleanup.sh'
+        | grep '> scripts/routine-lock-cleanup.sh' >/dev/null
   }
   settle_in_block() {  # step-block text on stdin → 0 for the fresh-job restore
     local block
     block="$(cat)"
-    printf '%s\n' "$block" | grep -q 'show "$START_SHA:scripts/routine-lock-cleanup.sh"' \
-      && printf '%s\n' "$block" | grep -q 'script="${RUNNER_TEMP}/routine-lock-cleanup.sh"' \
-      && printf '%s\n' "$block" | grep -q '\[ -L "$script" \]' \
-      && printf '%s\n' "$block" | grep -q '"$script" --repo' \
+    printf '%s\n' "$block" | grep 'show "$START_SHA:scripts/routine-lock-cleanup.sh"' >/dev/null \
+      && printf '%s\n' "$block" | grep 'script="${RUNNER_TEMP}/routine-lock-cleanup.sh"' >/dev/null \
+      && printf '%s\n' "$block" | grep '\[ -L "$script" \]' >/dev/null \
+      && printf '%s\n' "$block" | grep '"$script" --repo' >/dev/null \
       && printf '%s\n' "$block" \
-        | grep -qE 'START_SHA: \$\{\{ needs\.(run|burn)\.outputs\.start_sha \}\}' \
-      && ! printf '%s\n' "$block" | grep -q '> scripts/routine-lock-cleanup.sh' \
-      && ! printf '%s\n' "$block" | grep -q '\./scripts/routine-lock-cleanup.sh'
+        | grep -E 'START_SHA: \$\{\{ needs\.(run|burn)\.outputs\.start_sha \}\}' >/dev/null \
+      && ! printf '%s\n' "$block" | grep '> scripts/routine-lock-cleanup.sh' >/dev/null \
+      && ! printf '%s\n' "$block" | grep '\./scripts/routine-lock-cleanup.sh' >/dev/null
   }
   capture_precedes_agent() {  # workflow file → 0 when start_sha is captured before the first agent step
     local cap_ln agent_ln
