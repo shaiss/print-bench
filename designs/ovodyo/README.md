@@ -207,9 +207,8 @@ the Ø5 path. The **ball halves have no printed pole socket yet** — the hero
 preview unions a cylinder into the shell that no printable part carries. Until
 the hub lands in [#604](https://github.com/shaiss/print-bench/issues/604), stand each assembled ball on its flat pole
 pentagon beside the base, or rest it on the rod tip without claiming a retained
-mount (there is no v0 "running feel" to tune — that fit is #604's). Stand each
-ball where a roll ends in carpet, or put a dab of museum putty under the pole
-face until #604 — the shells are light and will roll off a hard desk. The three
+mount (there is no v0 "running feel" to tune — that fit is #604's). The shells are light and will roll off a hard desk — put a dab of museum putty
+under the pole face until #604, or keep them where a fall lands soft. The three
 truss segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603);
 tape or a dab of glue holds a temporary join — place the assembly before the
 pour, and lift from the centre segment so the taped ends don't peel).
