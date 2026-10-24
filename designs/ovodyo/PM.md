@@ -35,10 +35,13 @@ gears, numerals, slot, core); a committed two-tone reveal render is [#600](https
 ## Out of scope
 
 **Deferred** (in the [#599](https://github.com/shaiss/print-bench/issues/599) backlog): the geodesic-ball lib
-(#600), true stencil numerals (#601), flat parting seam (#602), tapered
-space-frame base (#603), real bevel differential + `ci.plate` deliverable +
-**ball-side stalk hub/socket** (#604 — brass rods seat in `base-end` today; the
-hero's "reaches the ball centre" is preview-only until the hub lands).
+(#600), true stencil numerals (#601), tapered space-frame base (#603), real
+bevel differential + `ci.plate` deliverable + **ball-side stalk hub/socket**
+(#604 — brass rods seat in `base-end` today; the hero's "reaches the ball
+centre" is preview-only until the hub lands), and a printable two-tone insert
+(red inner half-shells under the seam mouth — N1-compatible, no paint; top-ranked
+unfiled #599 item, composes with #604). **#602** (flat parting seam) **shipped**
+as the captive threaded seam — v1 box 1 then waits only on #601's stencil numerals.
 
 **Never:**
 - **Painted two-tone** — the colour comes from geometry + material, not paint (N1).
@@ -51,7 +54,7 @@ hero's "reaches the ball centre" is preview-only until the hub lands).
 
 ## v1 — definition of done
 
-- [ ] Balls are true cut-through stencil numerals + a proper flat seam, gate-green.
+- [ ] Balls are true cut-through stencil numerals (#601), gate-green (captive threaded seam already ships).
 - [ ] Base is the tapered space-frame; deliverable ships as a multi-object plate.
 - [ ] A real bevel differential that the kinematics gate proves lands a face upright.
 - [ ] Product page shows the two-tone render (red reads through the cuts).
@@ -78,3 +81,6 @@ hero's "reaches the ball centre" is preview-only until the hub lands).
 | 2026-10-24 | 220×220 extents note (every part clears; coupon longest); 256 mm two-plate stays recommended | Drik customer-sense / PM triage |
 | 2026-10-24 | Slot-as-grip line on the desk-die usage path | Drik customer-sense / PM triage |
 | 2026-10-24 | #604 test note: does a bare empty ball rest pole-down on a plaque without wandering? | Drik hunch / PM decline→queue |
+| 2026-10-24 | In-situ caption: pods aren't mirrors — hours/minutes reductions differ (N2) | Drik hunch / PM triage |
+| 2026-10-24 | #601 eyetest note: when a printed half exists, photograph at reading distance (~60 cm, desk lamp) | Drik used-it / PM queue |
+| 2026-10-24 | #602 captive threaded seam marked shipped; printable red insert stays top-ranked #599 deferred | PM triage charter follow-up |
