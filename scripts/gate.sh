@@ -97,7 +97,8 @@ source scripts/lineage.sh
 # that script's --selftest exercises the very function sourced here over
 # committed fixtures — an inline copy would let the seam and its test drift
 # while every check stays green (issue #627). Sourced AFTER lineage.sh, whose
-# lineage_render_binstl the control render needs.
+# lineage_render_binstl the control render needs. scripts/scad-closure.sh
+# (issue #766 include-closure branch proof) is sourced from fusecheck-check.sh.
 # shellcheck source=scripts/fusecheck-check.sh
 source scripts/fusecheck-check.sh
 
@@ -460,13 +461,17 @@ gate_one() {
         fail=1
         continue
       fi
-      # The part must be a real DISPATCH selector in the entry .scad, not
-      # merely a quoted string anywhere in it ("deepskyblue" is a quoted
+      # The part must be a real DISPATCH selector in the include closure, not
+      # merely a quoted string anywhere in the entry ("deepskyblue" is a quoted
       # string): a part value with no dispatch branch renders as nothing,
-      # which `empty` would wave through forever — the typo IS a pass.
+      # which `empty` would wave through forever — the typo IS a pass. The
+      # scan is the closure, not the entry file alone: a variable-only
+      # derivative inherits the parent's `if (part == ...)` via include
+      # (issue #766). closure_part_branch comes from scripts/scad-closure.sh
+      # via the fusecheck-check.sh source above.
       if ! [[ "$fpart" =~ ^[A-Za-z0-9_-]+$ ]] \
-         || ! grep -Eq "part[[:space:]]*==[[:space:]]*\"${fpart}\"" "$src"; then
-        echo "FAIL  fitcheck ${name}: no 'part == \"${fpart}\"' dispatch branch in ${src} — a part with no branch renders empty and passes vacuously"
+         || ! closure_part_branch "$src" "$fpart"; then
+        echo "FAIL  fitcheck ${name}: no 'part == \"${fpart}\"' dispatch branch in the include closure of ${src} — a part with no branch renders empty and passes vacuously"
         fail=1
         continue
       fi

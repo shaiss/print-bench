@@ -9,7 +9,9 @@
 // BEST-EFFORT fetch boundary driven by a stub `fetch` so no test touches the
 // network. The negative controls matter most — a fetch that starts throwing on
 // a 404 instead of degrading to "no git events" would break every deploy, and
-// only these catch it.
+// one that reports a 403 rate limit as `empty` instead of `unavailable` would
+// pass a failed fetch off as a design with no git history (the measured
+// "history: 0 commit(s)" green build); only these catch either.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -20,6 +22,8 @@ import {
   shouldFetchHistory,
   loginHandleMap,
 } from "../lib/history.mjs";
+import { SEAM, runSeam } from "../lib/seam.mjs";
+import { historySlot, HISTORY_UNAVAILABLE } from "../lib/teams.mjs";
 
 const OWNER = "shaiss";
 const REPO = "print-bench";
@@ -120,65 +124,147 @@ test("commitsToEvents caps a very long summary and is total on junk input", () =
 
 // --- fetch boundary, driven by a stub `fetch` (never the network) ---
 
+// A route's value is the JSON body of a 200, an Error the fetch throws, or a
+// function returning the whole response (for a non-2xx or a broken body).
 function stubFetch(routes) {
   return async (url) => {
     if (!(url in routes)) return { ok: false, status: 404, json: async () => ({}) };
     const body = routes[url];
     if (body instanceof Error) throw body;
+    if (typeof body === "function") return body();
     return { ok: true, status: 200, json: async () => body };
   };
 }
+// GitHub's anonymous rate limit: a 403 with the quota spent.
+const rateLimited = () => ({
+  ok: false,
+  status: 403,
+  headers: new Map([["x-ratelimit-remaining", "0"]]),
+  json: async () => ({ message: "API rate limit exceeded" }),
+});
+// A 200 whose body is not JSON (an HTML error page from a proxy, say).
+const badJson = () => ({
+  ok: true,
+  status: 200,
+  json: async () => {
+    throw new SyntaxError("Unexpected token '<'");
+  },
+});
 
 const COMMITS_URL = `https://api.github.com/repos/${OWNER}/${REPO}/commits?path=${encodeURIComponent(
   "designs/calibration-cube"
 )}&per_page=20`;
+const CUBE = { owner: OWNER, repo: REPO, design: "calibration-cube" };
 
-test("fetchDesignCommits returns the API's commit array", async () => {
+test("fetchDesignCommits returns the API's commit array as an ok seam result", async () => {
   const commits = [commit({ date: "2026-08-06T00:00:00Z", message: "Add design: calibration-cube", login: "shaiss" })];
   const fetchImpl = stubFetch({ [COMMITS_URL]: commits });
-  const got = await fetchDesignCommits({ fetchImpl, owner: OWNER, repo: REPO, design: "calibration-cube" });
-  assert.equal(got.length, 1);
-  assert.equal(got[0].commit.message, "Add design: calibration-cube");
+  const got = await fetchDesignCommits({ fetchImpl, ...CUBE });
+  assert.equal(got.status, SEAM.OK);
+  assert.equal(got.reason, null);
+  assert.equal(got.items.length, 1);
+  assert.equal(got.items[0].commit.message, "Add design: calibration-cube");
 });
 
-test("fetchDesignCommits degrades to [] on a 404 (unknown design path)", async () => {
-  const fetchImpl = stubFetch({}); // every URL 404s
-  const got = await fetchDesignCommits({ fetchImpl, owner: OWNER, repo: REPO, design: "nope" });
-  assert.deepEqual(got, []);
+test("fetchDesignCommits: a path with no commits (200 []) is empty, not unavailable", async () => {
+  const got = await fetchDesignCommits({ fetchImpl: stubFetch({ [COMMITS_URL]: [] }), ...CUBE });
+  assert.deepEqual(got, { status: SEAM.EMPTY, items: [], reason: null });
 });
 
-test("fetchDesignCommits degrades to [] on a network error", async () => {
+test("fetchDesignCommits: a 403 rate limit is unavailable, never empty", async () => {
+  // The measured failure: an anonymous rate-limited deploy logged
+  // "history: 0 commit(s)" and built green. It must be told apart from empty.
+  const got = await fetchDesignCommits({ fetchImpl: stubFetch({ [COMMITS_URL]: rateLimited }), ...CUBE });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "HTTP 403, rate limited");
+  assert.deepEqual(got.items, [], "still no commits — the best-effort contract holds");
+});
+
+test("fetchDesignCommits: a 404 means the repo is missing, so unavailable", async () => {
+  const got = await fetchDesignCommits({ fetchImpl: stubFetch({}), ...CUBE }); // every URL 404s
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "HTTP 404");
+});
+
+test("fetchDesignCommits: a network error is unavailable", async () => {
   const fetchImpl = stubFetch({ [COMMITS_URL]: new Error("getaddrinfo ENOTFOUND") });
-  const got = await fetchDesignCommits({ fetchImpl, owner: OWNER, repo: REPO, design: "calibration-cube" });
-  assert.deepEqual(got, []);
+  const got = await fetchDesignCommits({ fetchImpl, ...CUBE });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.match(got.reason, /^network error: /);
+  assert.deepEqual(got.items, []);
 });
 
-test("fetchDesignCommits degrades to [] when the body is not an array", async () => {
+test("fetchDesignCommits: an unparseable body is unavailable", async () => {
+  const got = await fetchDesignCommits({ fetchImpl: stubFetch({ [COMMITS_URL]: badJson }), ...CUBE });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "unparseable JSON body");
+});
+
+test("fetchDesignCommits: a 200 that is not a commit list is unavailable", async () => {
   const fetchImpl = stubFetch({ [COMMITS_URL]: { message: "API rate limit exceeded" } });
-  const got = await fetchDesignCommits({ fetchImpl, owner: OWNER, repo: REPO, design: "calibration-cube" });
-  assert.deepEqual(got, []);
+  const got = await fetchDesignCommits({ fetchImpl, ...CUBE });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "unexpected response body");
 });
 
-test("fetchDesignCommits aborts a hung request after the timeout and returns []", async () => {
+test("fetchDesignCommits aborts a hung request after the timeout: unavailable", async () => {
   // A fetch that never resolves on its own, but honors the abort signal the
   // way the platform fetch does — the bounded timeout must unstick the build.
   const hung = (_url, { signal } = {}) =>
     new Promise((_resolve, reject) => {
       signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
     });
-  const got = await fetchDesignCommits({
-    fetchImpl: hung,
-    owner: OWNER,
-    repo: REPO,
-    design: "calibration-cube",
-    timeoutMs: 20,
-  });
-  assert.deepEqual(got, []);
+  const got = await fetchDesignCommits({ fetchImpl: hung, ...CUBE, timeoutMs: 20 });
+  assert.equal(got.status, SEAM.UNAVAILABLE);
+  assert.equal(got.reason, "timeout after 20 ms");
 });
 
-test("fetchDesignCommits returns [] without a design or a fetch impl", async () => {
-  assert.deepEqual(await fetchDesignCommits({ fetchImpl: stubFetch({}), owner: OWNER, repo: REPO }), []);
-  assert.deepEqual(await fetchDesignCommits({ fetchImpl: null, owner: OWNER, repo: REPO, design: "x" }), []);
+test("fetchDesignCommits without a design or a fetch impl is unavailable, not a throw", async () => {
+  const noDesign = await fetchDesignCommits({ fetchImpl: stubFetch({}), owner: OWNER, repo: REPO });
+  assert.equal(noDesign.status, SEAM.UNAVAILABLE);
+  assert.deepEqual(noDesign.items, []);
+  const noFetch = await fetchDesignCommits({ fetchImpl: null, owner: OWNER, repo: REPO, design: "x" });
+  assert.equal(noFetch.status, SEAM.UNAVAILABLE);
+  assert.deepEqual(noFetch.items, []);
+});
+
+test("history disabled (the local/CI default) is off, and nothing is fetched", async () => {
+  let fetched = false;
+  const fetchImpl = async () => {
+    fetched = true;
+    return { ok: true, status: 200, json: async () => [] };
+  };
+  const got = await runSeam(shouldFetchHistory({}), () => fetchDesignCommits({ fetchImpl, ...CUBE }));
+  assert.equal(got.status, SEAM.OFF);
+  assert.equal(fetched, false);
+});
+
+// --- the History tab as it renders each status ---
+
+const EVENT = { date: "2026-08-08", source: "decision-log", sourceTag: "decision · PM.md", text: "a committed decision", detail: "", handle: null };
+
+test("historySlot: an unavailable git fetch shows the note, and committed events still render", () => {
+  const html = historySlot("calibration-cube", { events: [EVENT], gitStatus: SEAM.UNAVAILABLE });
+  assert.ok(html.includes(HISTORY_UNAVAILABLE), "the couldn't-load note is shown");
+  assert.equal(
+    HISTORY_UNAVAILABLE,
+    "Git history couldn't be loaded for this deploy; the next deploy retries."
+  );
+  assert.match(html, /<ol class="timeline">/, "the committed timeline is still there");
+  assert.match(html, /a committed decision/);
+  // and with nothing committed either, the note sits beside the empty state
+  const bare = historySlot("calibration-cube", { events: [], gitStatus: SEAM.UNAVAILABLE });
+  assert.ok(bare.includes(HISTORY_UNAVAILABLE));
+  assert.match(bare, /class="history-empty/);
+});
+
+test("historySlot: off / ok / empty render exactly as before — no note", () => {
+  const before = historySlot("calibration-cube", { events: [EVENT] }); // pre-seam call shape
+  for (const gitStatus of [SEAM.OFF, SEAM.OK, SEAM.EMPTY]) {
+    const html = historySlot("calibration-cube", { events: [EVENT], gitStatus });
+    assert.equal(html, before, `${gitStatus} is byte-identical to the default render`);
+    assert.ok(!html.includes(HISTORY_UNAVAILABLE));
+  }
 });
 
 test("shouldFetchHistory: on for Vercel or explicit opt-in, off otherwise", () => {

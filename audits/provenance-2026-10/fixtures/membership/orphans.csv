@@ -1,0 +1,33 @@
+kind,number,state,design_key,title,via
+issue,34,closed/not_planned,(see note),"N.U.G.G.S. — interlocking 80 mm hamster tunnel bridging two enclosures (genderless quarter-turn port, welfare limits as ",design request
+issue,80,closed/not_planned,(see note),"nuggs-yard: rebuild on the shared port as open modules (tube-with-a-window, arc floor)",design request
+issue,704,open,battery-caddy,Design brief: battery-caddy — a spring-retained AA/AAA cell caddy (the cell storage the everyday shelf doesn't have),S1_shiplock
+pr,716,open,battery-caddy,Add design: battery-caddy — spring-retained AA/AAA wall rail,PR
+issue,392,open,bistable-snap-box,Design brief: bistable-snap-box — Tier 3 reference design (living-hinge box with bistable latch),S1_shiplock
+issue,630,open,cross-axis-flexure-pivot,Design brief: cross-axis-flexure-pivot — Tier 2 reference (near-fixed virtual center flexure),S1_shiplock
+pr,644,open,cross-axis-flexure-pivot,Add design: cross-axis-flexure-pivot — pinless hinge on a near-fixed virtual center,PR
+issue,669,open,extrusion-spool-holder,Design brief: extrusion-spool-holder — a filament spool peg for 2020 T-slot extrusion,S1_shiplock
+pr,677,open,extrusion-spool-holder,Add design: extrusion-spool-holder — 2020 T-slot filament spool peg,PR
+issue,514,open,nuggs-port-gauge,Design brief: nuggs-port-gauge — the port-tolerance ladder that turns one guess into one measurement,S1_shiplock
+pr,841,open,nuggs-port-gauge,Add design: nuggs-port-gauge — port-tolerance ladder (closes #514),PR
+issue,732,open,nuggs-probe-cap,Design brief: nuggs-probe-cap — a sealed sensor end-cap (the probe pass-through the NUGGS ecosystem names but doesn't ha,S1_shiplock
+pr,737,open,nuggs-probe-cap,Add design: nuggs-probe-cap — sealed sensor end-cap for NUGGS tubes,PR
+issue,667,open,nuggs-sand-bath,Design brief: nuggs-sand-bath — a grooming module (the sand bath the NUGGS ecosystem doesn't have),S1_shiplock
+pr,674,open,nuggs-sand-bath,Add design: nuggs-sand-bath — the NUGGS grooming module (sand bath),PR
+issue,835,open,nuggs-sand-sieve,Design brief: nuggs-sand-sieve — a maintenance end-cap that sifts bathing sand (the filter body the NUGGS ecosystem name,S2_briefslug
+pr,840,open,nuggs-sand-sieve,Add design: nuggs-sand-sieve — bathing-sand sieve end-cap (closes #835),PR
+issue,834,open,nuggs-wheel,Design brief: nuggs-wheel — the exercise module (a segmented rim wheel on a NUGGS-port-anchored stand),S1_shiplock
+pr,839,open,nuggs-wheel,Add design: nuggs-wheel — segmented rim exercise module on a NUGGS stand,PR
+issue,396,open,pegboard-hooks,"Design brief: pegboard hook set — quarter-inch pegboard, tuned snap-fit hooks",S1_shiplock
+issue,593,open,pip-ball-socket-head,Design brief: pip-ball-socket-head — a print-in-place ball-and-socket positioner (the spherical joint the PIP shelf does,S1_shiplock
+pr,811,open,pip-ball-socket-head,Add design: pip-ball-socket-head — print-in-place ball-and-socket positioner,PR
+issue,705,open,pip-cable-chain,Design brief: pip-cable-chain — a print-in-place articulated drag chain (the chain-link captive joint the catalog names ,S1_shiplock
+pr,717,open,pip-cable-chain,"Add design: pip-cable-chain — a print-in-place articulated drag chain (±45° stops, no supports)",PR
+issue,516,open,pip-micrometer-vice,"Design brief: pip-micrometer-vice — a print-in-place screw-driven bench vice (rotary→linear, zero assembly)",S1_shiplock
+pr,533,closed,pip-micrometer-vice,Add design: pip-micrometer-vice — print-in-place bench vice with a printed screw drivetrain,PR
+issue,675,open,pip-ratchet-pla,pip-ratchet: PLA variant of the pawl beams (deferred from #668),S1_shiplock
+pr,767,open,pip-ratchet-pla,"Add design: pip-ratchet-pla — pip-ratchet re-sectioned for PLA (force-matched 1.0 mm pawls, coupon-first qualification)",PR
+issue,703,open,pip-thrust-turntable,Design brief: pip-thrust-turntable — a print-in-place thrust-bearing turntable (the bearing race the PIP shelf doesn't h,S1_shiplock
+issue,734,open,spring-rate-ladder,Design brief: spring-rate-ladder — printed helical compression springs with derived k (the coil spring the compliant she,S1_shiplock
+pr,739,open,spring-rate-ladder,Add spring-rate-ladder: printed spring-rate ladder with a measuring coupon,PR
+issue,836,open,tslot-cable-clip,Design brief: tslot-cable-clip — snap-in 2020-rail clips that route common cables (the cable routing the everyday shelf ,S2_briefslug

@@ -1,0 +1,3 @@
+# Deliberate 256³ — family-consistent with every NUGGS module (PM.md B4 / #673).
+# The 200 mm slicer ceiling is this design's own assert, not printcheck's job.
+--build-volume 256x256x256

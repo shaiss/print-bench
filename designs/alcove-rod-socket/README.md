@@ -39,7 +39,8 @@ Printed **in pairs** (one holder per wall, one pair per rod):
 - `thread-coupon-25` / `bore-coupon-25` — the "print this first" fit checks at
   the **25 mm** reference (CI-gated; not field-tested on a real rod yet).
 - `boss-25` / `collar-25` / `collar-shallow-25` — the production holders at
-  **25.0 mm** barrel (CI-gated; same field-test status). Wrappers:
+  **25.0 mm** barrel (CI-gated; same field-test status; collar about
+  **Ø39 mm** OD at 25 mm). Wrappers:
   `alcove-rod-socket-boss-25.scad`, `alcove-rod-socket-collar-25.scad`,
   `alcove-rod-socket-collar-shallow-25.scad`. No 25 mm plate — mirror the 40 mm
   policy: the gated plate stays `boss` + `collar` only; shallow is a separate
@@ -51,24 +52,29 @@ slicer. STL carries no object separation, so exporting the two into a *single*
 STL imports as one fused body and welds them together — v1's field-test failure
 (NOTES.md). Two ways to get the parts, both give the separation:
 
-- **Downloaded a Release:** you get `boss`, `collar`, and `collar-shallow` —
-  or the gated **`boss-25`**, **`collar-25`**, and **`collar-shallow-25`**
-  trio for a **25.0 mm** reference rod — import what you need and keep them
-  as separate objects. (No v2 Release is
-  tagged yet — releases are cut on a tag, not on merge — so until one exists,
-  use the clone path below.) The plate is still the default-depth holder pair
-  (`boss` + `collar`); grab `collar-shallow` from the Release for the far side
-  of the push-in-deep / drop-in-shallow install.
-- **Cloned the repo:** `./scripts/plate.sh alcove-rod-socket` bundles the two
-  default-depth parts into one multi-object 3MF
+- **Downloaded a Release (the usual path):** [v2.0](https://github.com/shaiss/print-bench/releases/tag/v2.0)
+  ships the gated per-part STLs — `alcove-rod-socket-boss.stl`,
+  `alcove-rod-socket-collar.stl`, `alcove-rod-socket-collar-shallow.stl`, plus
+  the two coupons (`alcove-rod-socket-coupon.stl`,
+  `alcove-rod-socket-bore-coupon.stl`), a zip, and a checksum manifest. Import
+  what you need and keep them as **separate objects**. The plate is still the
+  default-depth holder pair (`boss` + `collar`); grab `collar-shallow` from
+  the same Release for the far side of the push-in-deep / drop-in-shallow
+  install. The gated **25.0 mm** reference trio (`boss-25`, `collar-25`,
+  `collar-shallow-25`) is **not** on v2.0 — it lands on the next tagged
+  Release; until then take those STLs from the clone path below. There is
+  **no** multi-object plate `.3mf` on that Release (only
+  STLs / zip / manifest) — the plate stays a local build artifact (see the
+  clone path below). That is a tracked follow-up: the platform release-bundle
+  does not upload the multi-object plate 3MF today.
+- **Cloned the repo (advanced / local):** `./scripts/plate.sh alcove-rod-socket`
+  bundles the two default-depth parts into one multi-object 3MF
   (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
   For the far-side shallow collar, run `./scripts/gate.sh alcove-rod-socket`
   (or `--slice`) and take the gated STL at
   `build/alcove-rod-socket-collar-shallow.stl` — that is the printcheck'd
   artifact, not a hand-render. Advanced override only: `-D 'part="collar-shallow"'`
-  if you need to re-export outside the gate. (The 3MF is a local build
-  artifact; it isn't attached to the GitHub Release yet — that's a tracked
-  follow-up.)
+  if you need to re-export outside the gate.
 
 Either way, saving bed space is fine — lay the two parts **side by side and
 flat** (the plate's `--merge` does exactly that). Don't stack them **one on top
@@ -81,10 +87,12 @@ the two holders share the **same boss**; only the far holder's collar differs �
 use `collar-shallow` (`engagement_depth=12`). So a deep+shallow pair is two
 bosses + one default collar + one shallow collar.
 
-**Twice can be one print.** Import both plate objects (or the plate), select
-both → right-click → **Add Duplicate**, then swap one of the two collars for
-`collar-shallow` — so the run is boss ×2, one default collar, one shallow.
-Two such plates fit the 256 × 256 mm P2S bed.
+**Twice can be one print.** Import the boss and default collar STLs from the
+Release (or both objects from a local `plate.sh` 3MF), select both →
+right-click → **Add Duplicate**, then swap one of the two collars for
+`collar-shallow` from the same Release — so the run is boss ×2, one default
+collar, one shallow. One pair (~113 × 59 mm of bed for a boss beside a
+collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
 
 ![The collar in its print orientation](previews/collar-print.png)
 
@@ -117,7 +125,9 @@ Two such plates fit the 256 × 256 mm P2S bed.
   bridges. (Brim the *whole plate* instead and the two brims may meet in one
   web; it should peel clean, but that is **untested** — predicted, not
   observed, and the proving print is what confirms it. Per-object avoids the
-  question.)
+  question.) Trim the collar's brim tabs flush and set it on a flat surface
+  to confirm the rim sits flat before threading it onto the boss — the rim
+  is both the bed-contact face and the seating face on the flange.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   (and collar-shallow) rod-mouth-down (the internal thread prints at the top
   of the collar, never on the first layer). Never flip the collar
@@ -137,8 +147,9 @@ Two such plates fit the 256 × 256 mm P2S bed.
 (0.6). If you tuned either coupon away from those values, export plain
 **`boss`** / **`collar`** / **`collar-shallow`** with `rod_d = 25` (or your
 measured barrel) and your tuned tolerances — same separable-object rules as the
-40 mm parts. When defaults match, download **`boss-25`**, **`collar-25`**
-(and **`collar-shallow-25`** for the deep+shallow install). Grip auto-caps to
+40 mm parts. When defaults match, use the gated **`boss-25`**, **`collar-25`**
+(and **`collar-shallow-25`** for the deep+shallow install) — from the clone
+path until a Release after v2.0 carries them. Grip auto-caps to
 **32** flutes at this collar OD. **`boss-25`** is **`screw_count=1`** only;
 heavier closet loads want plain **`boss`** with `rod_d = 25` and
 `screw_count = 2` (or screw into a stud).
@@ -204,8 +215,11 @@ exports (`rod_d = 25.4` or your measured barrel) — the holder bore follows
 3. Thread each collar onto its boss until the rim seats on the plate. For a
    rigid rod between two fixed walls: use one default `collar` (deep) and one
    `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Cut the rod ≈ **18–20 mm short of the mouth-to-mouth
-   span** (28 mm deep − 12 mm shallow + each mouth's lead-in).
+   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
+   shorter** (38–42 mm is the safe band): each end bottoms on its collar
+   shoulder 19 mm from that wall, so the seated rod spans nearly
+   wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
+   into their collars).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the
