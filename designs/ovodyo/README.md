@@ -9,8 +9,8 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 
 > **v0 — a working substrate, not the finished clock.** The geometry renders,
 > gates and slices, and the signature look is here: chunky faceted dice-balls
-> (chamfered dodecahedra — twelve flush pentagon faces plus triangular corner
-> facets), **bold numerals cut clean through** each shell to a red interior
+> (chamfered dodecahedra — twelve flush pentagon faces plus hexagonal corner
+> facets at the default `facet`), **bold numerals cut clean through** each shell to a red interior
 > (stencilised so no counter drops out), and the reference's **exposed gearing in
 > the base** — a geared stepper and reduction gear-train at each pod, a bevel
 > take-off up each stalk, and a central electronics bay. The base drivetrain and
@@ -127,9 +127,14 @@ Customizer sections; override with `-D 'name=value'`):
 | `tip_d` | 5.6 mm | round nose at each wing tip (2 × `strut_d`) |
 | `foot_recess_d` | 4.9 mm | foot-pad recess, sized to a Ø5 mm stick-on bumper |
 
-The ball's faceting is `facet` in `ovodyo.scad` (default 1.05):
-1.0 gives the biggest triangular corner facets (≈ an icosidodecahedron), ≥1.12
-a plain dodecahedron with clean corners.
+The ball's faceting is `facet` in `ovodyo.scad` (default 1.05). Measured on the
+corrected corner normals ([#768](https://github.com/shaiss/print-bench/issues/768)):
+**1.0** → deepest cut (12 pentagons + 20 hexagons, max radius ≈ 42.3 mm at
+`ball_d=78`); **1.05** (default) → dominant pentagon plaques with hexagonal
+corners (max radius ≈ 44.0 mm); **≈1.098** → regular icosidodecahedron (12
+pentagons + 20 triangles); **>1.098** → truncated dodecahedron (decagon plaques
+— avoid, the numerals lose their pentagon face); **≥1.2584** → plain
+dodecahedron.
 
 ## Assembly & use
 

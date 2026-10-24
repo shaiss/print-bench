@@ -21,12 +21,17 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
 
 - **Ball geometry:** a **chamfered dodecahedron** — 12 big FLUSH pentagon
   number-faces (the reference's headline: bold numbers on the outermost faces)
-  with the 20 dodecahedron vertices shaved into triangular corner facets, so it
-  reads as a chunky faceted dice-ball. Built (in `geodesic-ball.scad`,
-  `gb_faceted_ball`) as the intersection of 12 pentagon half-spaces at radius
-  `d/2` and 20 triangle half-spaces at `tri_k·d/2`; `tri_k` (default 1.05) sets
-  how deep the corner triangles cut — 1.0 ≈ a full icosidodecahedron (biggest
-  triangles), ≥1.12 collapses to a plain dodecahedron (no visible chamfer). The
+  with the 20 dodecahedron vertices shaved into corner facets, so it reads as a
+  chunky faceted dice-ball. Built (in `geodesic-ball.scad`, `gb_faceted_ball`)
+  as the intersection of 12 pentagon half-spaces at radius `d/2` and 20 corner
+  half-spaces at `tri_k·d/2`. The corner normals are the true icosahedral-face
+  centres `((0,±φ,±1/φ), (±φ,±1/φ,0), (±1/φ,0,±φ))` — verified against
+  `gb_icosa_verts()` face centres (#768); the swapped cyclic order that shipped
+  from #605 produced 9-gon plaques and a 47.7 mm max radius at the defaults.
+  With the corrected normals at `d=78`, `tri_k=1.05`: **5-sided plaques, 6-sided
+  corners, max radius ≈ 44.0 mm**. See **Facet retune (#768)** below for the
+  full measured curve (the pre-#768 "1.0 ≈ icosidodecahedron / ≥1.12 plain
+  dodecahedron" notes were taken on the mirrored normals and do not hold). The
   pentagons at `d/2` are the outermost faces, so the numerals read face-on.
   **Two earlier constructions were wrong and are recorded so they aren't
   retried:** (a) a geodesic icosphere clipped into pentagon *plaques* recessed
@@ -39,6 +44,11 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   numbered pentagons *outermost*, which is the whole point. Generator is
   **design-local for now** — issue #600 promotes it to `lib/geodesic-ball.scad`
   with demo/guards/mates.
+- **Helical slot outer bound (#768):** `gb_slot` clips to the dodecahedron
+  circumradius `1.2584·r` plus a margin (and extends the swept blade to match).
+  The pre-#768 clip at `r+2` / blade end at `1.1·r` left solid bridges wherever
+  the helix crossed a corner (15 pieces remaining under the issue's
+  shell-inside-swept-blade − `gb_slot` measurement).
 - **Numerals:** **cut clean through** the shell to the red interior (the
   reference's read-through red numbers), stencilised so no enclosed counter
   (0/4/6/8/9, and 0/6/8/9 offset from centre in a two-digit "10"/"00") drops
@@ -492,3 +502,24 @@ faceting is `facet` in `ovodyo.scad` (passed as `tri_k`; `_GB_TRI_K` in
 design because the ball's rotated half-space cubes fatten OpenSCAD's preview
 bbox — render scratch shots with an explicit camera `dist`; the committed
 previews use explicit cameras so they are unaffected.
+
+## Facet retune (#768)
+
+The pre-#768 tuning notes ("1.0 ≈ icosidodecahedron, ≥1.12 plain dodecahedron")
+were measured on the **mirrored** corner normals and do not describe the
+corrected solid. Re-derived by intersecting the 12 + 20 half-spaces at
+`d = 78` (same method as the issue), with the true face-centre normals:
+
+| `tri_k` | plaque sides | corner sides | max radius (mm) | reading |
+|---|---|---|---|---|
+| 1.00 | 5 | 6 | 42.27 | deepest cut (truncated-icosa family) |
+| **1.05** (default, kept) | **5** | **6** | **43.96** | dominant pentagons, hexagonal corners |
+| ≈1.0982 | 5 | 3 | 45.85 | regular icosidodecahedron |
+| 1.10 | 10 | 3 | 45.85 | truncated dodeca — plaques no longer pentagons |
+| ≥1.2584 | 5 | — | 49.08 | plain dodecahedron (chamfer clears vertices) |
+
+Default stays **1.05**: it is the only shipped value whose corrected geometry
+matches the issue's expected table (5-gon plaques, 6-gon corners, ~44 mm), and
+raising it past ≈1.098 to chase triangular corners would turn the number
+plaques into decagons. Triangular corners with pentagon plaques exist only at
+the exact icosidodecahedron point (`tri_k ≈ 1.0982`).

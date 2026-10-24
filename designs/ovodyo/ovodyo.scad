@@ -35,11 +35,13 @@ ball_spacing = 200;
 ball_center_z = 124;
 
 /* [Ball surface] */
-// Faceting: how far out the 20 triangle-corner-chamfer planes sit (× ball
-// radius). 1.0 = biggest triangular facets (≈ an icosidodecahedron); 1.05 =
-// dominant pentagon number-faces with crisp corners (the reference); >=1.12 = a
-// plain dodecahedron with clean corners. The 12 numbered pentagons stay flush at
-// the ball radius regardless.
+// Faceting: how far out the 20 corner-chamfer planes sit (× ball radius).
+// Measured on the true icosahedral-face-centre normals (#768): 1.0 = deepest
+// cut (pentagons + hexagons); 1.05 = dominant pentagon plaques with hexagonal
+// corners (default); ≈1.098 = icosidodecahedron (pentagons + triangles);
+// >1.098 = truncated dodeca (decagon plaques — avoid); ≥1.2584 = plain
+// dodecahedron. The 12 numbered pentagons stay flush at the ball radius for
+// facet ≤ ≈1.098.
 facet = 1.05;
 // Shell wall (mm) — keep >= 1.2
 wall = 2.2;
