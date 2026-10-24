@@ -49,7 +49,9 @@ concurrency:
 jobs:
   release:
     name: Build gated STL bundles and publish a GitHub Release
-    runs-on: ubuntu-latest
+    # Same pin as ci.yml render-gate: prusa-slicer --merge is broken on the
+    # 2.9.x package ubuntu-26.04 ships (issue #916 / upstream #14632).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:

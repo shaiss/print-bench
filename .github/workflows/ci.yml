@@ -1316,7 +1316,11 @@ jobs:
     name: Render designs, gate STLs, test-slice
     needs: changes
     if: needs.changes.outputs.gate == 'true'
-    runs-on: ubuntu-latest
+    # Pin 24.04: ubuntu-latest has rolled to 26.04, whose prusa-slicer 2.9.4
+    # breaks `prusa-slicer --merge --export-3mf` (upstream #14632) used by
+    # plate.sh. 24.04 still ships the 2.7.x build the plate gate was written
+    # against. OpenSCAD nightly follows VERSION_ID via setup-openscad-nightly.
+    runs-on: ubuntu-24.04
     permissions:
       # contents:write only for the telemetry roll-up on default-branch
       # pushes (the checkout itself is persist-credentials: false, so the
