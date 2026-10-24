@@ -183,7 +183,10 @@ module gb_numbers(d = 78, nums = [], glyph_h = 11, depth = 0.8, through = false,
 // corner for any tri_k (clipping to r+2 left solid bridges over the corners;
 // see issue #768). `inner_r` is the cavity radius so the clip spans the whole
 // wall including the recessed pentagon faces.
-_GB_DODECA_CIRCUM = sqrt(3) / PHI;   // ≈ 1.2584086 — circumradius / face-inradius
+// Circumradius / face-inradius of a regular dodecahedron (≈ 1.2584086).
+// Equivalent closed forms: wiki R/r, or √3 · √(φ²+1) / (φ+1). Not √3/φ (≈1.07),
+// which is R/ρ (circum/mid) and undershoots the corners.
+_GB_DODECA_CIRCUM = sqrt(3) * sqrt(PHI * PHI + 1) / (PHI + 1);
 module gb_slot(d = 78, width = 7, turns = 0.5, starts = 1, inner_r = 0) {
   r  = d / 2;
   ir = (inner_r > 0) ? inner_r - 0.5 : r * 0.78;  // clip below the innermost face
