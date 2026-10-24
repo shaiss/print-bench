@@ -1,8 +1,8 @@
 name: Install OpenSCAD nightly (cached)
 description: >
   Install openscad-nightly from the OBS home:t-paul repository, caching the
-  downloaded .deb packages between runs. Five jobs need the nightly engine and
-  each used to pay the OBS repo add + apt update + download on every run
+  OBS .deb packages between runs. Five jobs need the nightly engine and each
+  used to pay the OBS repo add + apt update + download on every run
   (~30s-2min per job); on a cache hit this installs from the cached packages
   without touching the OBS repo at all. The cache key pins the package set
   until `cache-version` is bumped — the same convention as ci.yml's apt cache
@@ -19,36 +19,63 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Detect Ubuntu version for OBS suite
+      id: os
+      shell: bash
+      run: |
+        set -euo pipefail
+        # ubuntu-latest is migrating 24.04 → 26.04; OBS publishes a matching
+        # xUbuntu_<VERSION_ID> suite per release. Hardcoding 24.04 (issue #916)
+        # made apt refuse openscad-nightly on resolute (libpython3.12t64 gone).
+        . /etc/os-release
+        if [ -z "${VERSION_ID:-}" ]; then
+          echo "::error::could not read VERSION_ID from /etc/os-release"
+          exit 1
+        fi
+        suite="xUbuntu_${VERSION_ID}"
+        echo "version_id=${VERSION_ID}" >> "$GITHUB_OUTPUT"
+        echo "obs_suite=${suite}" >> "$GITHUB_OUTPUT"
+        echo "OBS suite: ${suite} (runner ${PRETTY_NAME:-$VERSION_ID})"
     - name: Restore cached openscad-nightly packages
       id: debs
       uses: actions/cache@v4
       with:
         path: ~/.cache/openscad-nightly-debs
         # No restore-keys on purpose: a partial match could mix packages from
-        # two different OBS snapshots, and dpkg would install the pair without
-        # complaint.
-        key: openscad-nightly-debs-${{ runner.os }}-${{ inputs.cache-version }}
+        # two different OBS snapshots / Ubuntu suites.
+        # VERSION_ID is in the key so a 24.04-built nightly never lands on a
+        # 26.04 runner (different SONAME deps: libpython3.12 vs 3.14, …).
+        key: openscad-nightly-debs-${{ runner.os }}-${{ steps.os.outputs.version_id }}-${{ inputs.cache-version }}
     - name: Download openscad-nightly from OBS (cache miss)
       if: steps.debs.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        OBS_SUITE: ${{ steps.os.outputs.obs_suite }}
       run: |
         set -euo pipefail
+        cache_dir="$HOME/.cache/openscad-nightly-debs"
+        mkdir -p "$cache_dir"
         # signed-by binds the OBS key to this one repository — a key dropped
         # into trusted.gpg.d would be trusted for every configured repo.
-        curl -fsSL 'https://download.opensuse.org/repositories/home:/t-paul/xUbuntu_24.04/Release.key' \
+        curl -fsSL "https://download.opensuse.org/repositories/home:/t-paul/${OBS_SUITE}/Release.key" \
           | sudo gpg --dearmor -o /usr/share/keyrings/openscad-nightly.gpg
-        echo 'deb [signed-by=/usr/share/keyrings/openscad-nightly.gpg] https://download.opensuse.org/repositories/home:/t-paul/xUbuntu_24.04/ /' \
+        echo "deb [signed-by=/usr/share/keyrings/openscad-nightly.gpg] https://download.opensuse.org/repositories/home:/t-paul/${OBS_SUITE}/ /" \
           | sudo tee /etc/apt/sources.list.d/openscad-nightly.list
         sudo apt-get update
-        # --download-only into the cache dir: this fetches openscad-nightly
-        # AND every dependency the runner image is missing, so the install
-        # step below can work from the cache alone on the next run.
-        mkdir -p "$HOME/.cache/openscad-nightly-debs/partial"
-        sudo apt-get install -y --download-only \
-          -o "Dir::Cache::archives=$HOME/.cache/openscad-nightly-debs" \
-          openscad-nightly
-        # apt downloads as root; the cache action tars as the runner user.
-        sudo chown -R "$(id -u):$(id -g)" "$HOME/.cache/openscad-nightly-debs"
+        # Download ONLY the OBS packages (openscad-nightly + its OBS-only
+        # lib3mf). Do NOT --download-only the full dependency tree: that used
+        # to cache Ubuntu library .debs, and a later runner image then saw
+        # dpkg -i downgrade them (issue #916). Ubuntu deps are resolved at
+        # install time from the runner's current archives instead.
+        #
+        # apt-get download writes to cwd and does not require the Depends
+        # graph to be installable against this apt configuration — it just
+        # fetches the named .debs from the configured repos.
+        rm -f "$cache_dir"/*.deb
+        (
+          cd "$cache_dir"
+          apt-get download openscad-nightly lib3mf-v2-dev
+        )
         # The debs are downloaded; drop the repo entry so any later apt step
         # in the same job resolves against the stock Ubuntu archives only —
         # matching what a cache-hit run sees, where OBS is never added.
@@ -57,7 +84,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Guarded glob: a restored-but-empty cache would otherwise hand dpkg
+        # Guarded glob: a restored-but-empty cache would otherwise hand apt
         # the literal '*.deb' and fail with a message pointing nowhere near
         # the actual problem.
         shopt -s nullglob
@@ -66,13 +93,12 @@ runs:
           echo "::error::the openscad-nightly deb cache restored empty — bump the cache-version input (ci.yml passes it) to force a fresh OBS download"
           exit 1
         fi
-        # dpkg -i over the whole set resolves the install order itself; the
-        # apt -f fallback pulls any residual dependency from the stock Ubuntu
-        # archives (never from OBS, which on a cache hit was never added).
-        # apt-get update first: on a cache hit nothing has refreshed the
-        # package lists this job, and -f resolution needs current ones.
-        if ! sudo dpkg -i "${debs[@]}"; then
-          sudo apt-get update
-          sudo apt-get install -y -f
-        fi
+        # apt-get install on local .debs resolves Depends against the runner's
+        # current Ubuntu archives (never downgrades via raw dpkg -i). apt-get
+        # update first: on a cache hit nothing has refreshed the package lists
+        # this job, and resolution needs current ones. OBS is not configured
+        # here — only the two cached OBS .debs are local; everything else
+        # comes from Ubuntu.
+        sudo apt-get update
+        sudo apt-get install -y "${debs[@]}"
         openscad-nightly --version

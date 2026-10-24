@@ -421,8 +421,7 @@ jobs:
         # the default branch.
         uses: ./.github/actions/setup-openscad-nightly
         with:
-          # Bump when the cached OBS debs conflict with the runner image
-          # (issue #916: 2026-08 downgraded libhwy1t64 / librsvg2-2).
+          # Bump when the OBS package set must be re-fetched (issue #916).
           cache-version: "2026-10"
       - name: Install the render toolchain (xvfb, ImageMagick, gifsicle)
         if: steps.plan.outputs.render == 'true'
