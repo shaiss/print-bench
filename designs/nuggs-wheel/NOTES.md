@@ -109,20 +109,20 @@ two coupons).
 
 | Brief row | Parameter | Measured |
 |---|---|---|
-| bore 80 / port_tol 0.30 / port_proj 10 / n_lug 3 | `nuggs_cfg()` defaults | `mates` fitcheck empty (0 facets); `mates-ctrl` 1060 facets |
+| bore 80 / port_tol 0.30 / port_proj 10 / n_lug 3 | `nuggs_cfg()` defaults | `mates` fitcheck empty (0 facets); `mates-ctrl` 1714 facets |
 | Wheel Ø 280, width 90 | `wheel_d` / `wheel_w` | Rim segment AABB height (tread) **92.40 mm** = 90 + back_t; 8× segments close the circle by construction (`n_seg`/`seg_ang`) |
 | Max part bound ≤ 180 | — | rim-segment max **129.5**; hub **48**; stand **178.0** (print Z); axle **126**; coupon **149** — all ≤ 180. Stand bed XY **164 × 100** (brace in X–Z; printcheck `--build-volume 180³`) |
 | Joint step ≤ 0.25 | `joint_lip=1.0`, `joint_step=0.20` | `joint-fit` empty (mated shingle); `joint-fit-ctrl` interferes |
 | Axle Ø 8 + clearance | `axle_d=8`, `axle_clear=0.35` → bore 8.70 | `axle-fit` empty; `axle-fit-ctrl` interferes; axle AABB Ø **8.00** |
-| Stand footprint ≥ 0.6×Ø | `stand_depth_mult=0.60` → 168 | Foot depth in use frame 168; `ci.cog` STABLE, margin **25.71 mm** (> 2.0) after F2 (`axle_z=155`) |
+| Stand footprint ≥ 0.6×Ø | `stand_depth_mult=0.60` → 168 | Foot depth in use frame 168; `ci.cog` STABLE, margin **23.81 mm** (> 2.0) with printed-part mass 383 g at axle |
 | Lip vs footplate ≥ 5 | `wheel_floor_clear=15` → `axle_z=155` | Lip OD 145.4; lip underside 9.6; footplate top 3.6; clearance **6.0 mm**. Use height ~164 mm |
 | Back closed | blind pockets + back-pie shingle (`back_clear_ang=0.25`, `back_z_clear=0.20`) | `back-closed` fitcheck empty (seam probes at z≈0.05–0.20); `back-closed-ctrl` interferes; pockets only above z≈1.4 |
 
 Gate scores (local Manifold nightly, `gate.sh --slice`, post back-shingle):
 rim-segment **84**/100 (caveats: thin-wall + overhang samples), hub **100**,
 stand **84** (overhang + small bed contact on port-down pose), axle **100**,
-coupon **92**. CoG uses printed-part mass **368 g** at the axle (was 180 g)
-— STABLE, margin **24.06 mm**. Plate 4 objects (one of each; clone segment
+coupon **92**. CoG uses printed-part mass **383 g** at the axle (was 180 g)
+— STABLE, margin **23.81 mm**. Plate 4 objects (one of each; clone segment
 ×8 + spare). Fitchecks: `mates` / `axle-fit` / `joint-fit` / `back-closed`
 empty; all `*-ctrl` interfere.
 
