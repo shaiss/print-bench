@@ -28,6 +28,10 @@ inputs:
     description: ANTHROPIC_API_KEY value (empty when the run holds no Anthropic key).
     required: false
     default: ""
+  openrouter-key:
+    description: OPENROUTER_API_KEY value (empty when the run holds no OpenRouter key).
+    required: false
+    default: ""
   github-token:
     description: A token with issues:write, for filing the escalation issue.
     required: true
@@ -72,12 +76,22 @@ runs:
       shell: bash
       env:
         PYTHONPATH: tools/model-registry/src
+        PYTHONSAFEPATH: "1"
+        PYTHONNOUSERSITE: "1"
+        PATH: /usr/bin:/bin
+        LD_PRELOAD: ""
+        LD_LIBRARY_PATH: ""
+        LD_AUDIT: ""
+        BASH_ENV: ""
+        ENV: ""
+        NODE_OPTIONS: ""
         CHAIN: ${{ inputs.chain }}
         ZAI_KEY: ${{ inputs.zai-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-key }}
+        OPENROUTER_API_KEY: ${{ inputs.openrouter-key }}
       run: |
         set -uo pipefail
-        python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"
+        /usr/bin/python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"
 
     # needs-human — the account/config problem CI cannot fix (out of credit, out
     # of tokens, or a bad/missing key). Raise it through the decision gate as
@@ -97,6 +111,15 @@ runs:
       shell: bash
       env:
         PYTHONPATH: tools/model-registry/src
+        PYTHONSAFEPATH: "1"
+        PYTHONNOUSERSITE: "1"
+        PATH: /usr/bin:/bin
+        LD_PRELOAD: ""
+        LD_LIBRARY_PATH: ""
+        LD_AUDIT: ""
+        BASH_ENV: ""
+        ENV: ""
+        NODE_OPTIONS: ""
         ESCALATION_TOKEN: ${{ inputs.github-token }}
         CHAIN: ${{ inputs.chain }}
         REASON: ${{ steps.classify.outputs.reason }}
@@ -109,6 +132,6 @@ runs:
         if [ -n "${RESET:-}" ]; then
           extra+=(--reset "$RESET")
         fi
-        python3 -m model_registry escalate "$CHAIN" \
+        /usr/bin/python3 -m model_registry escalate "$CHAIN" \
           --reason "$REASON" --context "$CONTEXT" --repo "$REPO" \
           --token-env ESCALATION_TOKEN "${extra[@]}"

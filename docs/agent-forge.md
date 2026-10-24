@@ -183,6 +183,36 @@ Shipped fully disarmed. To turn the autopilot on:
   sign-off is explicitly instructed to decline on N6 — the machinery that
   guards against machinery-for-its-own-sake is the machinery's own judge.
 
+## GitHub mention hygiene (agent display names)
+
+The forge's generative half is registered as **Wright** (`people/wright.md`,
+skill `/wright`). That display name collides with a real, unrelated GitHub
+login — [github.com/wright](https://github.com/wright) (Ted Wright) — who is
+**not affiliated** with this project (incident tracked in issue #822; first
+seen on PR #559, 2026-10-06).
+
+**Standing rule for every GitHub issue/PR comment** (humans, scheduled
+routines, and any out-of-repo bot that writes here):
+
+1. Never `@`-mention an agent display name that collides with a real login.
+   Deny-list starts with **`wright`** (case-insensitive — `@Wright`,
+   `@wright`, and GitHub's other mention spellings all subscribe the same
+   human).
+2. Prefer role / routing language over bare colliding display names in
+   public GitHub prose. On issues and PRs say **toolwright**, **`/wright`**,
+   **platform SA burn-down**, or **eng prioritizer** — and route eng SA
+   work privately or through agent channels rather than naming the colliding
+   display name on-PR.
+3. Editing a comment does **not** unsubscribe someone GitHub already
+   notified. There is no API to unsubscribe another user; only they can
+   click Unsubscribe. Prevention is the fix.
+
+In-repo docs, skill text, and `people/` profiles may still use the registered
+agent name — that is not a notification surface. Public GitHub comments are.
+
+When another agent display name is found to collide with a real login, add it
+to this deny-list in the same PR that documents the incident.
+
 ## Future work (deliberately not in v1)
 
 - **Cross-vendor sign-off head** (judge on the vendor the proposer didn't use

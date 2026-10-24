@@ -20,6 +20,14 @@ the Oracle reviews it cross-vendor, and a human still merges every PR
 
 ## Run this — the exact procedure (do every step)
 
+**GitHub mention hygiene (issue #822):** never `@`-mention the display name
+"Wright" (any capitalization) in issue or PR comments — that login belongs to
+an unrelated human ([github.com/wright](https://github.com/wright)), not this
+agent. On GitHub prose prefer **toolwright**, **`/wright`**, **platform SA
+burn-down**, or **eng prioritizer**. In-repo docs and this skill may still
+use the registered name. Full rule: `docs/agent-forge.md` § GitHub mention
+hygiene.
+
 You have exactly two GitHub surfaces, split by direction:
 
 - **Reading** goes through the wrapper `.claude/skills/wright/wright-helper.sh`

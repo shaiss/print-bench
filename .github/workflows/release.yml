@@ -49,7 +49,9 @@ concurrency:
 jobs:
   release:
     name: Build gated STL bundles and publish a GitHub Release
-    runs-on: ubuntu-latest
+    # Same pin as ci.yml render-gate: prusa-slicer --merge is broken on the
+    # 2.9.x package ubuntu-26.04 ships (issue #916 / upstream #14632).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -64,19 +66,21 @@ jobs:
                 && github.event.repository.default_branch
                 || github.ref }}
 
-      - name: Install xvfb and PrusaSlicer (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
-        with:
-          # Postinst-free packages only (docs-check.sh enforces the allowlist):
-          # a cache restore skips postinst, so alternatives-managed binaries
-          # would come back dangling (issue #85).
-          packages: xvfb prusa-slicer
-          version: "2026-08"
+      - name: Install xvfb and PrusaSlicer
+        # Plain apt-get — same reason as ci.yml render-gate (issue #916):
+        # cache-apt-pkgs-action on ubuntu-26.04 can report success after a
+        # failed fetch and leave prusa-slicer off PATH.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb prusa-slicer
+          command -v prusa-slicer
 
       - name: Install OpenSCAD nightly (cached)
         # The Manifold backend — the same engine render-gate uses, an order of
         # magnitude faster than 2021.01's CGAL on these models.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10-24"
 
       - uses: actions/setup-python@v7
         with:

@@ -107,11 +107,14 @@ def _issue_comments(repo: str, number: int, token: str) -> list[dict[str, str]]:
     reply as machine noise would wrongly hold the cooldown.
     """
     comments = _paginate(f"/repos/{repo}/issues/{number}/comments", token)
+    owner_login = repo.split("/", 1)[0] if "/" in repo else ""
     return [
         {
             "body": c.get("body", ""),
             "createdAt": c.get("created_at", ""),
             "authorType": (c.get("user") or {}).get("type", ""),
+            "authorLogin": (c.get("user") or {}).get("login", ""),
+            "ownerLogin": owner_login,
         }
         for c in comments
     ]
