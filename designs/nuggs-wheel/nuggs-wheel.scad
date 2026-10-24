@@ -28,7 +28,7 @@ use <nuggs-coupling.scad>
 // coupon = port stub + segment-joint pair + axle-in-bore;
 // assembled / cutaway = review previews (never the sliceable deliverable);
 // mates* / axle-fit* / joint-fit* = ci.fitchecks booleans (never printed)
-part = "assembled"; // [rim-segment, hub, stand, axle, coupon, assembled, cutaway, mates, mates-ctrl, axle-fit, axle-fit-ctrl, joint-fit, joint-fit-ctrl]
+part = "assembled"; // [rim-segment, hub, stand, axle, coupon, assembled, cutaway, mates, mates-ctrl, axle-fit, axle-fit-ctrl, joint-fit, joint-fit-ctrl, back-closed, back-closed-ctrl]
 
 /* [The NUGGS standard - change these and nothing you already printed fits] */
 // Internal bore (mm) — the headline number. Asserted >= min_bore_mm by the lib
@@ -165,6 +165,11 @@ rim_foot_clear_min = 5.0;
 // Blind lightening pocket depth in the back pie (mm). Must leave a floor —
 // through-slots violated N3 (Drik F1).
 back_pocket_d = 1.0;
+// Back-pie shingle (N3): circumferential half-thickness lap so assembled
+// pies leave zero angular gap. A prior back_half = seg_ang/2 − lap/2 − 0.5
+// left ~4.27° sunburst through-slots (Bugbot / CodeRabbit / Drik R4).
+back_clear_ang = 0.25;          // angular assembly clearance in the lap (deg)
+back_z_clear   = 0.20;          // vertical clearance in the half-thickness lap
 // Post circle — inset from the flange OD so posts fully union into the hub
 r_post      = r_hub - hub_post_d;
 // Inner radius of the back pie — reaches inside the post circle so the
@@ -240,6 +245,11 @@ assert(lip_foot_clear >= rim_foot_clear_min, str(
 assert(back_pocket_d > 0 && back_pocket_d < back_t - 0.8, str(
     "BACK POCKET: back_pocket_d = ", back_pocket_d, " mm must leave ≥ 0.8 mm",
     " of closed floor in back_t = ", back_t, " mm (N3 — no through-openings)."));
+// Back-pie shingle: half-thickness lap must leave a printable floor on each
+// side and a positive vertical clearance so mated pies do not weld.
+assert(back_t >= 2.0, str(
+    "BACK SHINGLE: back_t = ", back_t, " mm is under 2.0 — need room for a",
+    " half-thickness lap with ≥ 0.8 mm on each side (N3 closed disc)."));
 
 // ---------------------------------------------------------------------------
 // Rim segment — back flat on the bed, running surface extruded in +Z
@@ -270,8 +280,16 @@ module rim_segment() {
     // Lip stays on the non-tongue core (no hang over the lap)
     a_lip1 = a1 - lap_ang - 0.4;
     ov = 0.4;  // union bite — coplanar stacks export as separate volumes
-    // Back pie stops short of the neighbour rim's start angle
-    back_half = seg_ang / 2 - lap_ang / 2 - 0.5;
+    // Back-pie shingle: full-thickness core stops short of the pitch plane;
+    // a separate half-thickness male tongue covers the kerf under the
+    // neighbour's female recess. Additive (not cut-back) so joint-fit cannot
+    // pick up a coplanar kiss at θ = seg_ang/2. Reuses the tread lap angle.
+    back_lap_ang = lap_ang;
+    a_back0 = -seg_ang / 2;
+    a_back_core1 = seg_ang / 2 - back_clear_ang;
+    a_back_tongue1 = seg_ang / 2 + back_lap_ang - back_clear_ang;
+    back_tongue_h = back_t / 2 - back_z_clear / 2;
+    back_recess_h = back_t / 2 + back_z_clear / 2;
     // Female / male cuts span the wall's downward ov bite (z = back_t-ov)
     // as well as the tread — otherwise adjacent walls intersect in that
     // buried band and joint-fit reports a few dozen interference facets.
@@ -283,11 +301,16 @@ module rim_segment() {
     union() {
         difference() {
             union() {
-                // Closed back pie — out to the running surface only (the tread
-                // wall owns r ≥ r_run).
+                // Closed back pie core — out to the running surface only
+                // (the tread wall owns r ≥ r_run). Stops short of +seg_ang/2.
                 linear_extrude(height = back_t)
                     annular_sector_2d(r_pie_in, r_run + ov,
-                                      -back_half, back_half);
+                                      a_back0, a_back_core1);
+                // Male back-lap tongue — bottom half only, covers the kerf
+                // and seats under the neighbour's female recess.
+                linear_extrude(height = back_tongue_h)
+                    annular_sector_2d(r_pie_in, r_run + ov,
+                                      a_back_core1 - 0.05, a_back_tongue1);
                 // Continuous running-surface wall (core + tongue span)
                 translate([0, 0, back_t - ov])
                     linear_extrude(height = wheel_w + ov)
@@ -304,6 +327,12 @@ module rim_segment() {
                             cylinder(d = hub_post_d + 2.4,
                                      h = back_t + hub_post_h);
             }
+            // Female back-lap recess (bottom half) — neighbour tongue seats here
+            translate([0, 0, -0.01])
+                linear_extrude(height = back_recess_h + 0.01)
+                    annular_sector_2d(r_pie_in - 0.01, r_run + ov + 0.01,
+                                      a_back0 - 0.05,
+                                      a_back0 + back_lap_ang);
             // Female pocket: starts behind the printable lip land (joint_lip).
             // Slightly oversize vs the tongue for assembly clearance.
             translate([0, 0, cut_z0])
@@ -421,12 +450,15 @@ module stand_arm() {
     upright_h = axle_z + stand_boss_od / 2;
     translate([arm_x - arm_t / 2, arm_y - stand_wall, 0])
         cube([arm_t, stand_wall, upright_h]);
-    // 45° brace in the X–Z plane
+    // 45° brace in the X–Z plane under the upright (toward −X / port).
+    // rotate([90,0,0]) maps local XY → world XZ and extrudes along −Y
+    // through the upright wall; the old rotate([0,-90,0]) left Y unchanged
+    // and fanned a lateral fin past the footplate (Bugbot).
     brace = axle_z * 0.50;
-    translate([arm_x - arm_t / 2, arm_y - stand_wall, stand_base_t])
-        rotate([0, -90, 0])
-            linear_extrude(height = arm_t)
-                polygon([[0, 0], [0, brace], [brace, 0]]);
+    translate([arm_x - arm_t / 2, arm_y, stand_base_t])
+        rotate([90, 0, 0])
+            linear_extrude(height = stand_wall)
+                polygon([[0, 0], [-brace, 0], [0, brace]]);
     translate([arm_x, arm_y - stand_wall, axle_z])
         rotate([90, 0, 0])
             difference() {
@@ -523,13 +555,14 @@ module coupon_axle_bore() {
 }
 
 module wheel_coupon() {
-    // Port stub at the origin (sector tips on the bed — family pose)
+    // Family bed plane = sector tips at nuggs_z_tip (negative). Port sits
+    // there by construction; axle sample and joint pair must share that
+    // plane or they print in mid-air (Bugbot).
+    tip = nuggs_z_tip(cfg_d());
     nuggs_neck(cfg_d(), z_top + 8);
-    // Axle / bore pair just outside the coupling ring
-    translate([r_out + stand_boss_od + 8, 0, 0])
+    translate([r_out + stand_boss_od + 8, 0, tip])
         coupon_axle_bore();
-    // Segment-joint pair further out on the same bed plane as the sector tips
-    translate([r_out + 8, r_out + 10, -nuggs_z_tip(cfg_d())])
+    translate([r_out + 8, r_out + 10, tip])
         coupon_joint_pair();
 }
 
@@ -640,6 +673,38 @@ module fit_joint_ctrl() {
     }
 }
 
+// Thin radial probes at each segment pitch plane through the closed floor
+// (z ≈ 0.05–0.20, below the blind pockets; mid-radius so hub post holes
+// are outside the probe). Empty iff no angular through-gap remains between
+// pies — the check the old single-pie z=0.05 section missed.
+module back_seam_probes() {
+    union() {
+        for (i = [0 : n_seg - 1])
+            rotate([0, 0, i * seg_ang + seg_ang / 2])
+                translate([0, 0, 0.05])
+                    linear_extrude(height = 0.15)
+                        annular_sector_2d(r_pie_in + 4, r_run - 2,
+                                          -0.30, 0.30);
+    }
+}
+
+module fit_back_closed() {
+    difference() {
+        back_seam_probes();
+        wheel_assembled_rim();
+    }
+}
+
+// Negative control: drop one segment — at least one seam probe remains
+module fit_back_closed_ctrl() {
+    difference() {
+        back_seam_probes();
+        for (i = [0 : n_seg - 2])
+            rotate([0, 0, i * seg_ang])
+                rim_segment();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -656,4 +721,6 @@ else if (part == "axle-fit") fit_axle();
 else if (part == "axle-fit-ctrl") fit_axle_ctrl();
 else if (part == "joint-fit") fit_joint();
 else if (part == "joint-fit-ctrl") fit_joint_ctrl();
+else if (part == "back-closed") fit_back_closed();
+else if (part == "back-closed-ctrl") fit_back_closed_ctrl();
 else assert(false, str("nuggs-wheel: unknown part '", part, "'"));

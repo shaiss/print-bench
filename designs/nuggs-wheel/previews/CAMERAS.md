@@ -8,4 +8,5 @@ Cameras are fixed across review rounds. New region → new `cameras.conf` line.
 | `hero` | Assembled wheel on stand, three-quarter, open front toward camera |
 | `segment` | One rim segment as printed — shingle tongue, closed back pie, hub pads |
 | `stand` | Stand in print pose — port-down on sector tips; foot and axle arm upright |
-| `cutaway` | Section through axle / hub / stand arm |
+| `cutaway` | Half-section of the assembled wheel — rim wall, closed back pies, footplate (the cut at `stand_w/2` removes the axle / hub / arm from this view) |
+| `coupon` | Fit coupon as printed — port stub, flat joint pair, and axle/bore sample on the sector-tip bed plane |

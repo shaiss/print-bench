@@ -36,6 +36,12 @@ Syrian-scale Ø280 mm wheel exceeds the gate's 200 mm test-slice ceiling (#673).
   a flat stand-in; `joint-fit` gates the real curved pair.
 - **Back pie lightening is blind** (`back_pocket_d = 1.0` mm from the inside
   face). Through-slots violated N3 (Drik F1); closed floor remains.
+- **Back pies shingle** with a half-thickness circumferential lap
+  (`back_clear_ang = 0.25°`, `back_z_clear = 0.20` mm, lap = tread
+  `joint_lap` angle). A prior `back_half = seg_ang/2 − lap/2 − 0.5` left
+  ~4.27° sunburst through-slots (~1.3 mm near the hub to ~10.4 mm at the
+  tread). `back-closed` fitcheck (seam-wedge probes at z≈0.05–0.20 minus
+  the assembled rim) must stay empty; ctrl omits one segment.
 - **Rim-to-floor clearance** via `wheel_floor_clear = 15` (Drik F2). Axle at
   155 mm; use height (axle + boss/2) ~164 mm; lip underside ~6 mm above the
   footplate top. As-printed stand Z stays ~178 mm (driven by foot depth +
@@ -49,9 +55,10 @@ Syrian-scale Ø280 mm wheel exceeds the gate's 200 mm test-slice ceiling (#673).
 - **Stand AABB ~178 mm vs 180 mm bound is intentional** (2 mm mesh headroom
   under #673). Measured on the print-pose export: **178 mm is Z (height)** —
   port-down, foot vertical — so a slicer brim never affects it; bed XY is
-  about 153 × 166 mm (room for a normal brim on a 200 mm bed). The 180 mm
-  bound is the CI/printcheck envelope, not the keeper's bed. Do not shrink
-  geometry for that margin. (Drik R2 finding 8; R3 finding 4 axis clarify.)
+  **164 × 100 mm** (a prior 45° brace rotated into +Y and inflated bed Y to
+  ~172 mm — fixed to the X–Z plane). Room for a normal brim on a 200 mm bed.
+  The 180 mm bound is the CI/printcheck envelope, not the keeper's bed. Do
+  not shrink geometry for that margin. (Drik R2 finding 8; R3 finding 4.)
 - **Style: none.** Port geometry is the look.
 - **ci.cog adopted** for the stand + wheel point-mass at the axle (advisory).
 
@@ -73,11 +80,17 @@ bore-through mid-run module.
 Print `nuggs-wheel-coupon.scad` (or `-D 'part="coupon"'`) before the full set:
 
 1. **Port** — push the stub onto any NUGGS face; twist. If tight/loose, step
-   `port_tol` by ±0.05 (lib default 0.30 is unmeasured).
+   `port_tol` by ±0.05 (lib default 0.30 is unmeasured). Bed-side faces lose
+   ~0.1–0.2 mm to first-layer squish — if the coupon port feels tight, raise
+   `port_tol` before blaming the nominal.
 2. **Axle / bore** — spin the sample shaft in the sleeve. Rattle → drop
    `axle_clear` 0.05; bind → raise 0.05. Quiet running is the product bar.
+   **Listen on the first spins** — rattle or bind is what the coupon exists
+   to catch; sound is the owner's only telemetry once the farm is printed.
 3. **Joint** — dry-fit the flat male/female pair; caliper the step (≤ 0.25 mm)
-   and peg fit. Then trust `joint-fit` on the curved production geometry.
+   and peg fit. Run a fingernail across the female lip — it should feel like
+   a real wall, not a hairline. Then trust `joint-fit` on the curved
+   production geometry.
 
 Same filament for coupon and production parts (PETG rim vs PLA stand may use
 two coupons).
@@ -98,24 +111,25 @@ two coupons).
 |---|---|---|
 | bore 80 / port_tol 0.30 / port_proj 10 / n_lug 3 | `nuggs_cfg()` defaults | `mates` fitcheck empty (0 facets); `mates-ctrl` 1060 facets |
 | Wheel Ø 280, width 90 | `wheel_d` / `wheel_w` | Rim segment AABB height (tread) **92.40 mm** = 90 + back_t; 8× segments close the circle by construction (`n_seg`/`seg_ang`) |
-| Max part bound ≤ 180 | — | rim-segment max **128.9**; hub **48**; stand **178.0** (print Z); axle **126**; coupon **149** — all ≤ 180. Stand bed XY **164.0 × 171.9** after F2 (use-H maps to print X) |
+| Max part bound ≤ 180 | — | rim-segment max **129.5**; hub **48**; stand **178.0** (print Z); axle **126**; coupon **149** — all ≤ 180. Stand bed XY **164 × 100** (brace in X–Z; printcheck `--build-volume 180³`) |
 | Joint step ≤ 0.25 | `joint_lip=1.0`, `joint_step=0.20` | `joint-fit` empty (mated shingle); `joint-fit-ctrl` interferes |
 | Axle Ø 8 + clearance | `axle_d=8`, `axle_clear=0.35` → bore 8.70 | `axle-fit` empty; `axle-fit-ctrl` interferes; axle AABB Ø **8.00** |
 | Stand footprint ≥ 0.6×Ø | `stand_depth_mult=0.60` → 168 | Foot depth in use frame 168; `ci.cog` STABLE, margin **25.71 mm** (> 2.0) after F2 (`axle_z=155`) |
 | Lip vs footplate ≥ 5 | `wheel_floor_clear=15` → `axle_z=155` | Lip OD 145.4; lip underside 9.6; footplate top 3.6; clearance **6.0 mm**. Use height ~164 mm |
-| Back closed | blind pockets, `back_pocket_d=1.0` | No through-openings; section at z=0.05 solid pie, pockets only above z≈1.4 |
+| Back closed | blind pockets + back-pie shingle (`back_clear_ang=0.25`, `back_z_clear=0.20`) | `back-closed` fitcheck empty (seam probes at z≈0.05–0.20); `back-closed-ctrl` interferes; pockets only above z≈1.4 |
 
-Gate scores (local Manifold nightly, `gate.sh --slice`, post F1/F2/Jane-lip):
-rim-segment **92**/100 (PRINTABLE WITH CAVEATS — 1 thin-wall warning remains at
-edge samples), hub **100**, stand **84** (2 warnings: overhang + small bed
-contact on port-down pose), axle **100**, coupon **84**. CoG clears footprint
-by 25.71 mm. Plate 4 objects. All fitchecks ok (including `joint-fit` empty
-both ways).
+Gate scores (local Manifold nightly, `gate.sh --slice`, post back-shingle):
+rim-segment **84**/100 (caveats: thin-wall + overhang samples), hub **100**,
+stand **84** (overhang + small bed contact on port-down pose), axle **100**,
+coupon **92**. CoG uses printed-part mass **368 g** at the axle (was 180 g)
+— STABLE, margin **24.06 mm**. Plate 4 objects (one of each; clone segment
+×8 + spare). Fitchecks: `mates` / `axle-fit` / `joint-fit` / `back-closed`
+empty; all `*-ctrl` interfere.
 
-Slice estimates (same run): rim-segment **3h 28m / 43.9 g** (×8 ≈ 27h 45m /
-351 g), hub **1h 4m / 12.0 g**, stand **8h 51m / 120.3 g**, axle **22m /
-4.8 g**, coupon **3h 9m / 35.9 g**. Full set (8× rim + hub + stand + axle)
-≈ **38h / 488 g** before the coupon.
+Slice estimates (same run): rim-segment **3h 52m / 45.8 g** (×8 ≈ 31h /
+366 g), hub **1h 4m / 12.0 g**, stand **8h 27m / 117.5 g**, axle **22m /
+4.8 g**, coupon **3h 7m / 35.9 g**. Full set (8× rim + hub + stand + axle)
+≈ **41h / 501 g** before the coupon.
 
 ## Field test log
 

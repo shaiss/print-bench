@@ -6,3 +6,7 @@ axle-fit        empty
 axle-fit-ctrl   interferes
 joint-fit       empty
 joint-fit-ctrl  interferes
+# Assembled back disc: thin annulus through the closed floor must be empty
+# (N3 — no angular through-gap between pies). Ctrl omits one segment.
+back-closed      empty
+back-closed-ctrl interferes
