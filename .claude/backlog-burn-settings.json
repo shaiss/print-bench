@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push)",
+      "Bash(git push:*)",
+      "Bash(git push*)",
+      "Bash(/usr/bin/git push)",
+      "Bash(/usr/bin/git push:*)",
+      "Bash(/usr/bin/git push*)",
+      "Bash(gh pr create)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr create*)",
+      "Bash(gh issue create*autonomy-ok*)",
+      "Bash(gh issue create*design-brief*)",
+      "Bash(gh pr create*autonomy-ok*)",
+      "Bash(gh pr create*design-brief*)",
+      "Bash(gh issue edit*autonomy-ok*)",
+      "Bash(gh issue edit*design-brief*)",
+      "Bash(gh pr edit*autonomy-ok*)",
+      "Bash(gh pr edit*design-brief*)",
+      "Bash(gh label create*autonomy-ok*)",
+      "Bash(gh label create*design-brief*)",
+      "Bash(gh api*autonomy-ok*)",
+      "Bash(gh api*design-brief*)",
+      "Bash(curl*autonomy-ok*)",
+      "Bash(curl*design-brief*)"
+    ]
+  }
+}

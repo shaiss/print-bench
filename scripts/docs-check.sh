@@ -61,6 +61,9 @@ done
 #    longer name (e.g. /resume-design) can't satisfy a shorter one.
 for skill in .claude/skills/*/; do
   s="$(basename "$skill")"
+  # Skip __pycache__ (gitignored; appears after MCP selftests import a
+  # shared helper under .claude/skills/ — same nonsense as scripts/).
+  [[ "$s" == "__pycache__" ]] && continue
   grep -qE "/${s}([^a-z0-9-]|\$)" CLAUDE.md \
     || err "skill .claude/skills/${s} not mentioned in CLAUDE.md"
 done

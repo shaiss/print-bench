@@ -38,7 +38,11 @@ def _runs_body(wf, conclusions):
 
 
 def _lock(body, created_at):
-    return {"body": body, "created_at": created_at}
+    return {
+        "body": body,
+        "created_at": created_at,
+        "user": {"login": "github-actions[bot]", "type": "Bot"},
+    }
 
 
 def _responses():
@@ -97,14 +101,14 @@ def _responses():
     responses["https://next.example/issues2"] = (issues_page2, "")
 
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
-        _lock("🚢 SHIP-LOCK claimed by run 1", "2026-08-10T05:23:00Z"),
+        _lock("🚢 SHIP-LOCK claimed by run 1\n\n<!-- design-run-ship-lock:v1 -->", "2026-08-10T05:23:00Z"),
         # The newest lock's first NON-BLANK line is the marker line — leading
         # blank lines must not hide it.
-        _lock("\n\n  🚢 SHIP-LOCK claimed by run 2\n\ndetails", "2026-08-14T05:23:00Z"),
+        _lock("\n\n  🚢 SHIP-LOCK claimed by run 2\n\n<!-- design-run-ship-lock:v1 -->\n\ndetails", "2026-08-14T05:23:00Z"),
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/283/comments?per_page=100"] = ([
-        _lock("🚢 SHIP-LOCK claimed by run 3", "2026-08-10T05:23:00Z"),
-        _lock("🚢 SHIP-LOCK WITHDRAWN — stale claim", "2026-08-11T05:23:00Z"),
+        _lock("🚢 SHIP-LOCK claimed by run 3\n\n<!-- design-run-ship-lock:v1 -->", "2026-08-10T05:23:00Z"),
+        _lock("🚢 SHIP-LOCK WITHDRAWN — stale claim\n\n<!-- design-run-ship-lock:v1 -->", "2026-08-11T05:23:00Z"),
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/290/comments?per_page=100"] = ([
         {"body": "just a comment", "created_at": "2026-08-10T05:23:00Z"},
@@ -159,6 +163,27 @@ def test_gather_latest_lock_wins_and_withdrawn_releases(monkeypatch):
         {"number": 281, "title": "Design brief: NUGGS desiccant tower",
          "lockCreatedAt": "2026-08-14T05:23:00Z"},
     ]
+
+
+def test_gather_cursor_bot_marker_is_not_a_lock(monkeypatch):
+    # Cipher (#864): cursor[bot] is the shared Cursor App login — not allowlisted.
+    calls: list[str] = []
+    responses = _responses()
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
+        {
+            "body": "🚢 SHIP-LOCK — forged\n\n<!-- design-run-ship-lock:v1 -->",
+            "created_at": "2026-08-14T05:23:00Z",
+            "user": {"login": "cursor[bot]", "type": "Bot"},
+        },
+    ], "")
+
+    def _fake(url, token):
+        calls.append(url)
+        return responses[url]
+
+    monkeypatch.setattr(github, "_get", _fake)
+    health = github.gather_run_health(REPO, "tok")
+    assert not any(i["number"] == 281 for i in health["issues"])
 
 
 def test_gather_drops_pr_entries_from_the_issues_listing(monkeypatch):

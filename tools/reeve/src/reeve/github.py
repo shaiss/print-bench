@@ -60,6 +60,16 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # Mirrored from tools/backlog-burn/src/backlog_burn/select.py, not imported —
 # the two tools must stay independently installable (the groomer's precedent).
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
+SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
+# Exact logins that may author a lock (Cipher, #864). Mirrored from
+# backlog_burn.select.SHIP_LOCK_AUTHOR_LOGINS — settle (GITHUB_TOKEN) and
+# attended PAT (shaiss). cursor[bot] is excluded: shared Cursor App login
+# (Bugbot / Security / Approval / cloud agents). Attended runs post as
+# shaiss or not at all. No generic "[bot]" match.
+SHIP_LOCK_AUTHOR_LOGINS = frozenset({
+    "github-actions[bot]",
+    "shaiss",
+})
 
 # The label an adoption-study submission carries. Collected from the same
 # open-issues listing the lock scan reads (no extra request), so Reeve can
@@ -248,9 +258,14 @@ def gather_run_health(
             f"{API_ROOT}/repos/{repo}/issues/{item['number']}/comments?per_page=100",
             token,
         )
+        _lock_logins = {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}
         lock_comments = [
             c for c in comments
-            if _first_line(c.get("body", "")).startswith(SHIP_LOCK_MARKER)
+            if SHIP_LOCK_HTML_MARKER in (c.get("body") or "")
+            and (
+                ((c.get("user") or {}).get("login") or "").lower()
+                in _lock_logins
+            )
         ]
         if not lock_comments:
             continue
