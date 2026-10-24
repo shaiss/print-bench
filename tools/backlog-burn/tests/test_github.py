@@ -1,13 +1,19 @@
 """Tests for the live GitHub snapshot layer.
 
 The policy tests in ``test_select.py`` cover the pure selector; these cover the
-I/O contract around it — pagination, the fail-loud page cap, and the snapshot
+I/O contract around it — pagination, the fail-loud page cap, the snapshot
 normalisation (dropping PRs from the issues list, keeping whole comment
-threads: body, createdAt, authorType). ``_get`` is the single network seam, so
-every test here monkeypatches it and no request leaves the process.
+threads: body, createdAt, authorType), and ``_get``'s bounded retry on
+transient failures. Higher-level tests monkeypatch ``_get`` so no request
+leaves the process; the retry cases drive ``urlopen`` directly and patch
+``_sleep`` so the suite never waits on the wall clock.
 """
 
 from __future__ import annotations
+
+import http.client
+import io
+import urllib.error
 
 import pytest
 
@@ -22,6 +28,152 @@ def _fake_get(pages_by_url):
                 return body, headers
         raise AssertionError(f"unexpected URL: {url}")
     return _get
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("u", code, "err", {}, io.BytesIO(b""))
+
+
+class _JsonResp:
+    """Minimal urlopen context-manager response returning a JSON body."""
+
+    def __init__(self, payload: bytes = b'{"ok": true}'):
+        self._payload = payload
+        self.headers = {"Content-Type": "application/json"}
+
+    def read(self):
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+# --------------------------------------------------------------------------
+# _get retry (transient 5xx / connection errors)
+# --------------------------------------------------------------------------
+
+def test_get_retries_502_then_succeeds(monkeypatch):
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise _http_error(502)
+        return _JsonResp(b'{"ok": true}')
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(github, "_sleep", sleeps.append)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    body, headers = github._get("https://api.github.com/x", "t")
+    assert body == {"ok": True}
+    assert headers["content-type"] == "application/json"
+    assert attempts["n"] == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == github._GET_BACKOFF_BASE_S
+
+
+def test_get_persistent_5xx_raises_after_bounded_tries(monkeypatch):
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def always_502(req, timeout=None):
+        attempts["n"] += 1
+        raise _http_error(502)
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", always_502)
+    monkeypatch.setattr(github, "_sleep", sleeps.append)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        github._get("https://api.github.com/x", "t")
+    assert caught.value.code == 502
+    assert attempts["n"] == github._GET_ATTEMPTS
+    assert len(sleeps) == github._GET_ATTEMPTS - 1
+
+
+def test_get_4xx_is_not_retried(monkeypatch):
+    attempts = {"n": 0}
+
+    def not_found(req, timeout=None):
+        attempts["n"] += 1
+        raise _http_error(404)
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", not_found)
+    monkeypatch.setattr(github, "_sleep", lambda s: (_ for _ in ()).throw(
+        AssertionError(f"4xx must not sleep; got {s}")
+    ))
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        github._get("https://api.github.com/x", "t")
+    assert caught.value.code == 404
+    assert attempts["n"] == 1
+
+
+def test_get_connection_error_is_retried(monkeypatch):
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise urllib.error.URLError("connection reset")
+        return _JsonResp(b'{"ok": true}')
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(github, "_sleep", sleeps.append)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    body, _ = github._get("https://api.github.com/x", "t")
+    assert body == {"ok": True}
+    assert attempts["n"] == 2
+    assert len(sleeps) == 1
+
+
+def test_get_incomplete_read_is_retried(monkeypatch):
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise http.client.IncompleteRead(b"partial")
+        return _JsonResp(b'{"ok": true}')
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(github, "_sleep", sleeps.append)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    body, _ = github._get("https://api.github.com/x", "t")
+    assert body == {"ok": True}
+    assert attempts["n"] == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == github._GET_BACKOFF_BASE_S
+
+
+def test_get_bad_status_line_is_retried(monkeypatch):
+    attempts = {"n": 0}
+    sleeps: list[float] = []
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise http.client.BadStatusLine("")
+        return _JsonResp(b'{"ok": true}')
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(github, "_sleep", sleeps.append)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    body, _ = github._get("https://api.github.com/x", "t")
+    assert body == {"ok": True}
+    assert attempts["n"] == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == github._GET_BACKOFF_BASE_S
 
 
 # --------------------------------------------------------------------------
