@@ -178,7 +178,12 @@ jobs:
     # time, never correctness.
     name: Regenerate previews and product pages
     needs: [changes, trust]
-    runs-on: ubuntu-latest
+    # Pin 24.04 with every other setup-openscad-nightly job (issue #916
+    # reopen): ubuntu-latest is 26.04, and a cache-miss install of the
+    # xUbuntu_24.04 OBS nightly (or any cross-suite mix) dies on
+    # libpython3.12t64, which resolute does not ship. Same pin as
+    # render-gate / release for PrusaSlicer --merge.
+    runs-on: ubuntu-24.04
     permissions:
       # The one job in this workflow that writes.
       contents: write
@@ -422,7 +427,9 @@ jobs:
         uses: ./.github/actions/setup-openscad-nightly
         with:
           # Bump when the OBS package set must be re-fetched (issue #916).
-          cache-version: "2026-10"
+          # 2026-10-24 salts the key so this PR proves a cache-miss install
+          # on ubuntu-24.04 (VERSION_ID is also in the action's cache key).
+          cache-version: "2026-10-24"
       - name: Install the render toolchain (xvfb, ImageMagick, gifsicle)
         if: steps.plan.outputs.render == 'true'
         # Deliberately plain apt-get rather than awalsh128/cache-apt-pkgs-action,
@@ -1120,7 +1127,9 @@ jobs:
     name: Style packs and conformance
     needs: changes
     if: needs.changes.outputs.styles == 'true'
-    runs-on: ubuntu-latest
+    # Same 24.04 pin as render-gate / regen (issue #916 reopen) — shares
+    # the openscad-nightly OBS cache with the other nightly jobs.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1140,7 +1149,7 @@ jobs:
         # it does in the gate that judges the printable parts.
         uses: ./.github/actions/setup-openscad-nightly
         with:
-          cache-version: "2026-10"
+          cache-version: "2026-10-24"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -1281,7 +1290,8 @@ jobs:
     # Same regen decoupling as scad-check above.
     needs: changes
     if: needs.changes.outputs.scad == 'true'
-    runs-on: ubuntu-latest
+    # Same 24.04 pin as render-gate / regen (issue #916 reopen).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1296,7 +1306,7 @@ jobs:
       - name: Install OpenSCAD nightly (cached)
         uses: ./.github/actions/setup-openscad-nightly
         with:
-          cache-version: "2026-10"
+          cache-version: "2026-10-24"
       # Same reason as scad-check above: check.sh's fusecheck selftest needs
       # printcheck, and the selftest has no skip path.
       - uses: actions/setup-python@v7
@@ -1319,7 +1329,10 @@ jobs:
     # Pin 24.04: ubuntu-latest has rolled to 26.04, whose prusa-slicer 2.9.4
     # breaks `prusa-slicer --merge --export-3mf` (upstream #14632) used by
     # plate.sh. 24.04 still ships the 2.7.x build the plate gate was written
-    # against. OpenSCAD nightly follows VERSION_ID via setup-openscad-nightly.
+    # against. Same pin keeps openscad-nightly on the OBS xUbuntu_24.04
+    # suite (issue #916 reopen — 26.04 cannot install the 24.04 nightly's
+    # libpython3.12t64). setup-openscad-nightly still keys the cache on
+    # VERSION_ID so a future runner change cannot mix suites.
     runs-on: ubuntu-24.04
     permissions:
       # contents:write only for the telemetry roll-up on default-branch
@@ -1365,7 +1378,7 @@ jobs:
         if: needs.changes.outputs.gate_designs != ''
         uses: ./.github/actions/setup-openscad-nightly
         with:
-          cache-version: "2026-10"
+          cache-version: "2026-10-24"
       - uses: actions/setup-python@v7
         if: needs.changes.outputs.gate_designs != ''
         with:
@@ -1696,7 +1709,8 @@ jobs:
       github.event_name == 'pull_request' &&
       needs.changes.outputs.gate == 'true' &&
       needs.changes.outputs.gate_designs != ''
-    runs-on: ubuntu-latest
+    # Same 24.04 pin as render-gate / regen (issue #916 reopen).
+    runs-on: ubuntu-24.04
     continue-on-error: true
     permissions:
       contents: read
@@ -1730,7 +1744,7 @@ jobs:
         # Same engine as render-gate so base and head render identically.
         uses: ./.github/actions/setup-openscad-nightly
         with:
-          cache-version: "2026-10"
+          cache-version: "2026-10-24"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'

@@ -80,7 +80,7 @@ jobs:
         # magnitude faster than 2021.01's CGAL on these models.
         uses: ./.github/actions/setup-openscad-nightly
         with:
-          cache-version: "2026-10"
+          cache-version: "2026-10-24"
 
       - uses: actions/setup-python@v7
         with:
