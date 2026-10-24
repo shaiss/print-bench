@@ -15,8 +15,8 @@
 use <nuggs-coupling.scad>
 
 /* [What to render] */
-// bridge is the printable module; coupon is two port stubs for tuning port_tol
-part = "bridge"; // [bridge, coupon]
+// bridge = printable module; coupon = port_tol stubs; wordpair = one F→R weld
+part = "bridge"; // [bridge, coupon, wordpair]
 
 /* [The word] */
 // CAPITALS A-Z only. Lowercase is refused by the glyph table on purpose:
@@ -32,8 +32,10 @@ letter_track = 0.92;
 // This is structure, not taste: F's and E's free arm ends must land on the
 // next letter's stem or they print as drooping cantilevers — the arm's
 // underside is a flat face that appears in mid-air unless it bridges to the
-// neighbour. Tune by looking at the F-R and E-D junctions in a render.
-letter_kern = [8, 0, 0, 8, 0];
+// neighbour. Mid-arm weld_rib() closes what kern alone can leave open on
+// the outer face (radial prisms meet better at r_si than at r_so). Tune by
+// looking at previews/weld-fr.png (and any new junction close-up).
+letter_kern = [12, 0, 0, 12, 0];
 // Font. Metric-compatible with Arial Bold; the advance table below is its.
 letter_font = "Liberation Sans:style=Bold";
 
@@ -91,8 +93,13 @@ ring_inset = 0.2;
 cone_ang = 50;
 // Axial thickness of the conical skirts (mm)
 cone_ax = 3.0;
-// Radial overlap fusing the skirts into the tube wall (mm)
-cone_bite = 0.8;
+// Radial overlap fusing the skirts into the tube wall (mm). Must reach past
+// the bore (wall + eps = 2.41 at the defaults below): a wall-only burial
+// leaves a coincident cylindrical face that Manifold exports as a zero-area
+// triangle on the bore (issue #542). The extra root is removed by
+// nuggs_bore_cut(), so the exterior cage / letter / port geometry is
+// unchanged — only the buried boolean gets a clean trim.
+cone_bite = 2.41;
 // How far a glyph reaches past a rail edge to fuse with it (mm)
 rail_overlap = 1.3;
 
@@ -110,12 +117,14 @@ chamfer_ang = 50;
 
 /* [Revision mark] */
 // Cap height of the engraved mark (mm). 0 leaves the part unmarked.
-mark_h = 5.0;
+// 8 mm keeps stroke ≥ 0.8 mm on a 0.4 nozzle (welfare text must stay
+// legible: MAX RUN / COUPLINGS DONT RESET). Was 5 → ~0.5 mm grooves.
+mark_h = 8.0;
 // Engrave depth (mm). Recessed, never proud (a raised character is a
 // chew-initiation edge, N6). Asserted to leave 3 perimeters.
 mark_d = 0.6;
-// Per-character advance along the marked surface (mm)
-mark_adv = 4.8;
+// Per-character advance along the marked surface (mm). Scales with mark_h.
+mark_adv = 7.2;
 // Clear tube wall reserved for a mark band above/below the cage (mm)
 mark_band = 17;
 
@@ -204,7 +213,7 @@ assert(len(letter_kern) == len(name) - 1, str(
     "CAGE KERN: letter_kern has ", len(letter_kern), " entries for a ",
     len(name), "-glyph name; it needs exactly ", len(name) - 1,
     " (one per gap). Any glyph with free-ended arms (E, F, L, T) wants a",
-    " weld into its right-hand neighbour — see NOTES.md F3."));
+    " weld into its right-hand neighbour — see NOTES.md O3."));
 advs   = [for (i = [0 : len(name) - 1]) _adv_mm(name[i])];
 kerns  = letter_kern;
 word_w = _vsum(advs, len(advs)) - _vsum(kerns, len(kerns));
@@ -221,9 +230,9 @@ function letter_ang(i) =
 run_len   = straight_len + 2 * port_proj;
 run_limit = 2 * body_len_mm;
 
-assert(straight_len + 2 * port_proj <= 240,
-       "BED: the bridge plus both port projections must fit a 256 mm bed \
-printed upright (240 mm, leaving margin).");
+assert(straight_len + 2 * port_proj <= 240, str(
+    "BED: the bridge plus both port projections must fit a 256 mm bed ",
+    "printed upright (240 mm, leaving margin)."));
 
 // PM.md N2 (designs/nuggs/PM.md), condensed to what a person changing
 // straight_len needs; the full rule and its sources are the nuggs straight's
@@ -279,9 +288,9 @@ assert(max(advs) / 2 / r_lm * 180 / PI <= 50, str(
     max(advs) / r_lm * 180 / PI, " deg; above 100 deg its edges fall outside",
     " the conformal prism. Shrink letter_size."));
 
-assert(mark_d <= wall - 3 * nozzle,
-       "MARK DEPTH: the revision engraving must leave >= 3 perimeters of tube \
-shell behind it. Reduce mark_d or thicken wall.");
+assert(mark_d <= wall - 3 * nozzle, str(
+    "MARK DEPTH: the revision engraving must leave >= 3 perimeters of tube ",
+    "shell behind it. Reduce mark_d or thicken wall."));
 
 echo(str("nuggs-frieda: port standard R", NUGGS_PORT_REV, " at bore ", bore_d,
          " mm, port_tol ", port_tol, " mm (lib defaults; the exact config",
@@ -368,10 +377,39 @@ module cage_letters() {
     }
 }
 
+// Mid-arm weld rib for a positive letter_kern gap. F's and E's middle arms
+// are shorter than their top arms: kern that lands the top into the neighbour
+// (or into the shared cap rail) can still leave the middle arm ending in
+// daylight on the outer face. A short circumferential rib at mid-arm height
+// turns that shelf into a two-ended bridge without growing letters into the
+// bore. span bites into both glyphs so the union is solid, not a kiss.
+module weld_rib(i) {
+    a0 = letter_ang(i);
+    a1 = letter_ang(i + 1);
+    amid = (a0 + a1) / 2;
+    // Full centre-to-centre plus margin so the rib buries into both stems —
+    // a gap-only span can still leave daylight at the outer face.
+    span_deg = abs(a1 - a0) + 16;
+    // Liberation Sans Bold F/E mid-arm sits ~0.50–0.72 of cap_h above
+    // baseline; cover that whole band.
+    rib_h = 0.24 * cap_h;
+    zw = z_base + 0.58 * cap_h;
+    rotate([0, 0, amid - span_deg / 2])
+        rotate_extrude(angle = span_deg)
+            translate([r_si - eps, zw - rib_h / 2])
+                square([sleeve_t + 2 * eps, rib_h]);
+}
+
+module weld_ribs() {
+    for (i = [0 : len(kerns) - 1])
+        if (kerns[i] > 0) weld_rib(i);
+}
+
 module cage() {
     cage_ring(z_cone0);
     translate([0, 0, 2 * z_mid]) mirror([0, 0, 1]) cage_ring(z_cone0);
     cage_letters();
+    weld_ribs();
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +458,30 @@ module coupon() {
         translate([x * (r_out + 6), 0, 0]) nuggs_neck(cfg, 25);
 }
 
+// One F→R junction of the production cage (glyphs 0–1, production kern and
+// weld ribs). Minutes of print against the ~16 h bridge — the riskiest
+// feature the port coupon cannot rehearse. Wrapper:
+// designs/nuggs-frieda/nuggs-frieda-wordpair-coupon.scad.
+module wordpair() {
+    a0 = letter_ang(0);
+    a1 = letter_ang(1);
+    amid = (a0 + a1) / 2;
+    span = abs(a1 - a0) + 55;
+    z0 = z_cone0 - 2;
+    z1 = z_cone1 + 2;
+    translate([0, 0, -z0])
+        intersection() {
+            union() {
+                translate([0, 0, z0]) tube(z1 - z0);
+                cage();
+            }
+            rotate([0, 0, amid - span / 2])
+                rotate_extrude(angle = span)
+                    square([r_so + 4, z1 - z0]);
+        }
+}
+
 if      (part == "bridge") bridge();
 else if (part == "coupon") coupon();
+else if (part == "wordpair") wordpair();
 else assert(false, str("unknown part: ", part));
