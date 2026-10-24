@@ -272,7 +272,8 @@ against the pocket wall settles an arch and drags shot around through a couple
 of mm of plastic — worth a try (chrome-steel shot only; stainless bearing balls
 won't follow a magnet). Once the fill that lands STABLE is final, a few drops of
 CA (or epoxy) through each port before the plug locks the CoG you measured —
-loose shot can resettle and quietly eat tip clearance. Press a Ø5 mm silicone
+loose shot can resettle and quietly eat tip clearance. This is permanent (you
+can't pour some out afterward), so do it only after the tip check passes. Press a Ø5 mm silicone
 bumper into each of the four foot recesses.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
