@@ -49,6 +49,7 @@ drifts. Read the outputs and run §2 accordingly:
 | `ci_gates_tests` | `pytest tools/ci-gates/tests` |
 | `growth_tests` | `pytest tools/growth/tests` |
 | `andon_tests` | `pytest tools/andon/tests` |
+| `concept_preview_tests` | `pytest tools/concept-preview/tests` |
 | `agent_memory_tests` | `pytest tools/agent-memory/tests` |
 
 The classifier already applies everything this section used to spell out by
@@ -92,6 +93,7 @@ python -m pytest tools/telemetry/tests -q            # if telemetry_tests=true
 python -m pytest tools/ci-gates/tests -q             # if ci_gates_tests=true
 python -m pytest tools/growth/tests -q               # if growth_tests=true
 python -m pytest tools/andon/tests -q                # if andon_tests=true
+python -m pytest tools/concept-preview/tests -q      # if concept_preview_tests=true
 python -m pytest tools/agent-memory/tests -q         # if agent_memory_tests=true
 ```
 
@@ -102,7 +104,7 @@ The pytest lines presume the suite's package is importable. CI pip-installs each
 one before running it; locally the SessionStart hook installs only `printcheck`
 and `stylelift`. Of the rest, the suites whose tests bootstrap `src/` into
 `sys.path` themselves (`lineage`, `stylelift`, `model-registry`, `ci-gates`,
-`backlog-burn`, `cogcheck`) collect with no install, while `reeve`, `backlog-groomer`,
+`backlog-burn`, `cogcheck`, `concept-preview`) collect with no install, while `reeve`, `backlog-groomer`,
 `telemetry`, `brief-sources` and `growth` die at collection with
 `ModuleNotFoundError` in a fresh session — run `pip install -e 'tools/<t>[test]'`
 on those first (the same command CI's job uses).

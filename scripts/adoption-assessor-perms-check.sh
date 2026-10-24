@@ -115,6 +115,9 @@ REQUIRED_DENIES = {
     "Write", "Edit", "NotebookEdit",
 }
 missing_required = sorted(REQUIRED_DENIES - deny_set)
+# Jane/Drik posting surface (#773): server or tool spelling, growth-server pattern.
+REVIEWER_DENIES = {"mcp__reviewer", "mcp__reviewer__post_review"}
+missing_reviewer = not (REVIEWER_DENIES & deny_set)
 
 # Coverage: every non-wrapper Bash allow must be denied verbatim. assessor-helper.sh
 # is not on settings.json's allow-list, so this covers chunk-helper.sh too; the
@@ -150,6 +153,12 @@ if missing_required:
         "Write/Edit/NotebookEdit regardless of settings.json:\n")
     for r in missing_required:
         sys.stderr.write(f"    {r}\n")
+if missing_reviewer:
+    ok = False
+    sys.stderr.write(
+        f"the backstop no longer denies mcp__reviewer or "
+        f"mcp__reviewer__post_review (issue #773 sibling deny) in "
+        f"{assessor_path}\n")
 
 sys.exit(0 if ok else 1)
 PY
@@ -166,7 +175,7 @@ selftest() {
 {"permissions":{"allow":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/adoption-assessor/assessor-helper.sh:*)"]}}
 EOF
   cat > "$tmp/good-assessor.json" <<'EOF'
-{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","Write","Edit","NotebookEdit","mcp__reviewer","mcp__reviewer__post_review"]}}
 EOF
   if check_pair "$tmp/good-settings.json" "$tmp/good-assessor.json" 2>/dev/null; then
     echo "ok    selftest: complete deny coverage passes"
@@ -226,6 +235,16 @@ EOF
     echo "FAIL  selftest: a dropped required sibling-wrapper deny was NOT caught"; return 1
   else
     echo "ok    selftest: a dropped required sibling-wrapper deny fails the check"
+  fi
+
+  # Missing Jane/Drik posting deny (#773): every other required deny present.
+  cat > "$tmp/bad-reviewer-assessor.json" <<'EOF'
+{"permissions":{"deny":["Bash(xvfb-run:*)","Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(./.claude/skills/chunk-issue/chunk-helper.sh:*)","Bash(.claude/skills/label-issues/label-helper.sh:*)","Bash(./.claude/skills/label-issues/label-helper.sh:*)","Bash(.claude/skills/product-scout/scout-helper.sh:*)","Bash(./.claude/skills/product-scout/scout-helper.sh:*)","Bash(.claude/skills/wright/wright-helper.sh:*)","Bash(./.claude/skills/wright/wright-helper.sh:*)","Write","Edit","NotebookEdit"]}}
+EOF
+  if check_pair "$tmp/good-settings.json" "$tmp/bad-reviewer-assessor.json" 2>/dev/null; then
+    echo "FAIL  selftest: a missing reviewer-posting deny was NOT caught"; return 1
+  else
+    echo "ok    selftest: a missing reviewer-posting deny fails the check"
   fi
 }
 

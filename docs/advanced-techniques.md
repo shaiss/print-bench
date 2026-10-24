@@ -367,15 +367,19 @@ layers, ~0.20–0.40 mm); `line_w ≈ 1.1–1.2 × nozzle_d`. **Never one global
 
 ## What should become a `lib/` module
 
-The repo encodes the rules; none of these advanced families exist as gated
-primitives yet. Ranked:
+The repo encodes the rules; of these advanced families only the first has
+begun to land as gated primitives. Ranked:
 
 1. **`lib/compliant.scad` (flagship, [#202](https://github.com/shaiss/print-bench/issues/202)).**
    Flexure family — small-length pivot, cross-axis pivot, LET joint, bistable
    arch. Dissolves the exact clearance/rattle/wear problem `print-in-place.scad`
    fights; lamina-emergent joints print flat. Fits the library contract cleanly
    (demo + guards for zero-fillet / over-stress / PLA-flexure, a stiffness coupon).
-   First-party, BSD-clean.
+   First-party, BSD-clean. **Stage 1 shipped** (harvest-first): the bistable
+   arch (`bistable_arch_2d`/`bistable_arch`, echoing the two constants above)
+   and the `r ≥ 0.5t` root-fillet helpers, lifted from the compliant designs
+   with their guards; the pivots, the LET joint and the stiffness coupon follow
+   in later stages.
 2. **`lib/dfm-supports.scad` (complement).** Sacrificial-layer helper, designed-in
    breakaway support (`z_gap = layer_h`, break-notch, tunable contact/scar),
    self-supporting cone ceiling, chamfer-down-edge. Extends `printability.scad`'s

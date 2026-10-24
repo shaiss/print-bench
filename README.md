@@ -22,6 +22,7 @@ co-designer, and gated by automated printability checks before they ship.
 | Design | |
 |---|---|
 | <a href="designs/nuggs/"><img src="designs/nuggs/previews/contact-sheet.png" width="320" alt="nuggs previews"></a> | **[nuggs](designs/nuggs/)** — An 80 mm-bore tunnel **system** for an adult Syrian hamster, built around one genderless quarter-turn port that every module carries at every end. The kit that exists today is the Bin Bridge: two bulkheads and one straight joining two enclosures through their walls, with nothing inside the cage. |
+| <a href="designs/nuggs-bottle-adapter/"><img src="designs/nuggs-bottle-adapter/previews/contact-sheet.png" width="320" alt="nuggs-bottle-adapter previews"></a> | **[nuggs-bottle-adapter](designs/nuggs-bottle-adapter/)** — The NUGGS **bottle adapter** (issue #515): the part that turns an off-the-shelf PCO-1881 water bottle into a drop-in habitat module. One printed body, two interfaces — the standard genderless quarter-turn NUGGS port below (80 mm bore, full library defaults), a threaded throat above that takes a stock bottle finish. The animal never passes *through* this module: the passage narrows to the bottle's own orifice by design, so this is a service module (water/bedding), not a transit module — the 70 mm bore floor governs entrances an animal uses, and the port below it stays full standard. |
 | <a href="designs/nuggs-den/"><img src="designs/nuggs-den/previews/contact-sheet.png" width="320" alt="nuggs-den previews"></a> | **[nuggs-den](designs/nuggs-den/)** — A **terminal** NUGGS module — the first one in the system that is not a run of bore. `nuggs` is the straight (the Bin Bridge), and the `nuggs` backlog lists elbow / node / open module / wye, all of them still tube; `nuggs-yard` shares the `nuggs-` name but not the port, so it is a sibling, not a system module. This is the end-cap: a single-port rounded **refuge bulb** that turns the dead flat wall at the end of a run into a place to sit, hoard and hide. |
 | <a href="designs/nuggs-elbow/"><img src="designs/nuggs-elbow/previews/contact-sheet.png" width="320" alt="nuggs-elbow previews"></a> | **[nuggs-elbow](designs/nuggs-elbow/)** — A first-party NUGGS module: a curved (elbow) tube that routes an 80 mm-bore run around a corner, carrying the genderless quarter-turn NUGGS port (`nuggs_neck()`/`nuggs_port()` from `lib/nuggs-coupling.scad`) on each end, joined by a bent tube shell with a **continuous, smooth bore through the bend** (welfare non-negotiable). It is a consumer of the port standard, exactly like `designs/nuggs`: it builds one `cfg` with `nuggs_cfg()` defaults and never redefines a coupling number. |
 | <a href="designs/nuggs-frieda/"><img src="designs/nuggs-frieda/previews/contact-sheet.png" width="320" alt="nuggs-frieda previews"></a> | **[nuggs-frieda](designs/nuggs-frieda/)** — A Word-World module: a NUGGS straight whose midspan is *made of* the resident's name — **FRIEDA** wrapped around the tube as a structural letter cage. Functionally it is a drop-in replacement for the nuggs straight (same 160 mm face-to-face length, same port standard at the same defaults); the letters are what it is *for*. The brief: "like Word World the object is made of letters … the word is Frieda. you can mix case … as needed." |
@@ -29,9 +30,12 @@ co-designer, and gated by automated printability checks before they ship.
 | <a href="designs/nuggs-open/"><img src="designs/nuggs-open/previews/contact-sheet.png" width="320" alt="nuggs-open previews"></a> | **[nuggs-open](designs/nuggs-open/)** — The first member of the NUGGS **open-module family**: a straight 80 mm-bore module whose midspan opens into a longitudinal window ≥ 180° with the bore's own arc as its floor. Under charter N2 an open module is one of only three things that **reset a run** (an open end, an open module, a turnaround node), so any layout longer than one straight *requires* a part like this to stay legal. Who it's for: a NUGGS owner extending a run past the 360 mm limit, or wanting a mid-run check/hand-access point without disconnecting anything. |
 | <a href="designs/nuggs-orrery/"><img src="designs/nuggs-orrery/previews/contact-sheet.png" width="320" alt="nuggs-orrery previews"></a> | **[nuggs-orrery](designs/nuggs-orrery/)** — An abstract, boundary-pushing NUGGS module that is *only manufacturable on a dual-nozzle 3D printer* (Bambu H2-series class; AMS available for color): the standard port at both ends, and outside the hamster-contact envelope a kinetic sculpture — six twisted fins carrying three captive, free-spinning orbit rings in a second material. Request: unique/abstract, dual materials using both nozzles, bonus for built-in break-away supports and other advanced techniques. NUGGS rules constrain the animal-contact surfaces; the exterior is fair game (owner's brief, this session). |
 | <a href="designs/nuggs-rim-saddle/"><img src="designs/nuggs-rim-saddle/previews/contact-sheet.png" width="320" alt="nuggs-rim-saddle previews"></a> | **[nuggs-rim-saddle](designs/nuggs-rim-saddle/)** — A saddle that clamps over the top rim of a glass-tank enclosure — no drilling (N9: tempered glass shatters), no adhesive — and carries one standard NUGGS genderless quarter-turn port (`lib/nuggs-coupling.scad`, N10: the one interlock), so a run starts from a glass cabinet the same way it starts from a plywood bulkhead. Target enclosure: IKEA Detolf (the cabinet charter N9 itself names), parametrically — every rim dimension is a parameter with the Detolf value as the default, so another cabinet is a `-D` override. |
+| <a href="designs/nuggs-sand-bath/"><img src="designs/nuggs-sand-bath/previews/contact-sheet.png" width="320" alt="nuggs-sand-bath previews"></a> | **[nuggs-sand-bath](designs/nuggs-sand-bath/)** — The grooming module the NUGGS ecosystem was missing: an **open-topped sand-bath trough** a run dead-ends into. The animal walks the standard 80 mm bore, crosses a containment lip down a ≤45° beach, and stands on a flat sand floor wider than the bore; sand goes in from the open mouth, the animal can be lifted out the same way. One `nuggs_cfg()` consumer like every NUGGS module — the port is the shared interlock, nothing about it is restated here. |
 | <a href="designs/nuggs-shutter-valve/"><img src="designs/nuggs-shutter-valve/previews/contact-sheet.png" width="320" alt="nuggs-shutter-valve previews"></a> | **[nuggs-shutter-valve](designs/nuggs-shutter-valve/)** — - **Bore 80 mm, wall 2.4 mm, tube OD 84.8 mm** — inherited from `nuggs_cfg()`   defaults so the valve mates with every existing NUGGS module. Every coupling   number is the standard's; the coupling guards fire inside `nuggs_cfg()`. - **Slide clearances** — the battleship-tuned values `lib/print-in-place.scad`   carries (rail 0.4 vertical / 0.5 horizontal tabs, lip engagement). Do **not**   loosen the rail clearances (the acoustic property); tune only the door-side   `door_fit` on the coupon. - **Target printers** — Bambu P2S (256 mm bed) / H2C (bigger). Gated against the   smaller P2S bed. Jane runs the same hardware. - **Welfare non-negotiable** — when open, the shutter retracts entirely out of   the 80 mm bore; the bore is continuous and smooth with no interior ledge. |
 | <a href="designs/nuggs-turnaround/"><img src="designs/nuggs-turnaround/previews/contact-sheet.png" width="320" alt="nuggs-turnaround previews"></a> | **[nuggs-turnaround](designs/nuggs-turnaround/)** — The NUGGS **turnaround node** (issue #394, charter backlog B4): the run-resetter. A module carrying the standard genderless quarter-turn port on **two faces of one widened chamber**, so an adult Syrian hamster can enter port A, pivot 180°, and leave port B — doubling a run back on itself. This is the module that makes layouts larger than one straight legal: charter **N2** caps any continuously enclosed run at 2 × body length between *breaks*, and a turnaround node of **clear internal width ≥ body_len_mm that is itself open to ventilated space** is one of only three breaks. Without this part, no layout bigger than one straight tube is legal. |
 | <a href="designs/nuggs-turnaround-tee/"><img src="designs/nuggs-turnaround-tee/previews/contact-sheet.png" width="320" alt="nuggs-turnaround-tee previews"></a> | ↳ **[nuggs-turnaround-tee](designs/nuggs-turnaround-tee/)** — The **three-port turnaround** for the N.U.G.G.S. run system: everything the two-port `nuggs-turnaround` node is, plus a **third port on the chamber crown**, anti-parallel to the two bed ports, so a run can pass **straight through** the turnaround instead of only switching back. Issue #435 — the 2-vs-3-ports decision deferred from #394; the owner settled it on-thread: build it **as a derivative** of `nuggs-turnaround`, same rule set, same port revision, deliverable `designs/nuggs-turnaround-tee/`.<br>_derived from [nuggs-turnaround](designs/nuggs-turnaround/)_ |
+| <a href="designs/nuggs-vent-cap/"><img src="designs/nuggs-vent-cap/previews/contact-sheet.png" width="320" alt="nuggs-vent-cap previews"></a> | **[nuggs-vent-cap](designs/nuggs-vent-cap/)** — The NUGGS **vent cap** (issue #592, the filter body the ecosystem names but doesn't have): the standard genderless quarter-turn port face closed by a **support-free lattice dome**. Air and light pass; bedding stays; openings stay at or under the assumed 6 mm welfare ceiling (1/4″ hardware-cloth convention — owner confirmation on a live animal is still pending). Charter **N2** caps a continuously enclosed run at 2 × body length between breaks, and today the only way to *end* a run is a solid cap — which seals it dead (ammonia and CO2 build up in an enclosed system) — or leaving it open, which is an exit. The vent cap is the third option: an enclosed end that breathes. It does **not** break a run the way nuggs-open does (air passes; openings stay at or under that assumed ceiling), so under the run-length rule it is still an end. |
+| <a href="designs/nuggs-wheel/"><img src="designs/nuggs-wheel/previews/contact-sheet.png" width="320" alt="nuggs-wheel previews"></a> | **[nuggs-wheel](designs/nuggs-wheel/)** — The NUGGS **exercise module** (issue #834): a segmented rim wheel on a free-standing stand that anchors into a standard genderless quarter-turn port. The ecosystem had no locomotion module; an exercise wheel is the standard welfare kit a hamster habitat has. Segmentation is the design premise — a Syrian-scale Ø280 mm wheel exceeds the gate's 200 mm test-slice ceiling (#673). |
 | <a href="designs/nuggs-y-splitter/"><img src="designs/nuggs-y-splitter/previews/contact-sheet.png" width="320" alt="nuggs-y-splitter previews"></a> | **[nuggs-y-splitter](designs/nuggs-y-splitter/)** — A first-party NUGGS junction module: branch an 80 mm-bore NUGGS run into two paths — one inlet port, two symmetric outlets at a 60° included angle — with all three faces carrying the standard genderless quarter-turn bayonet port (`nuggs_port()` from `lib/nuggs-coupling.scad`). Branching was the one topology the ecosystem could not do; every other module is two-port single-path. A consumer of the port standard, exactly like `designs/nuggs` and `designs/nuggs-elbow`: one `cfg` built from `nuggs_cfg()` defaults, handed to every port call, never a redefined coupling number. |
 
 ### Compliant mechanisms
@@ -81,7 +85,10 @@ _These parts come off the bed ready to move — free each one as its card says, 
 | <a href="designs/calibration-cube/"><img src="designs/calibration-cube/previews/contact-sheet.png" width="320" alt="calibration-cube previews"></a> | **[calibration-cube](designs/calibration-cube/)** — Simple dimensional-accuracy test print; also serves as the repo's starter design demonstrating the parameter conventions. |
 | <a href="designs/desiccant-capsule/"><img src="designs/desiccant-capsule/previews/contact-sheet.png" width="320" alt="desiccant-capsule previews"></a> | **[desiccant-capsule](designs/desiccant-capsule/)** — Refillable two-part capsule for loose silica gel beads, lived-in filament dry-boxes. Perforated body lets air/moisture reach the beads; screw-on lid with real threads (not press-fit) and a ribbed grip edge so it can be opened with dry-box gloves on. Must print on FDM with no supports on either part. |
 | <a href="designs/extrusion-shelf-bracket/"><img src="designs/extrusion-shelf-bracket/previews/contact-sheet.png" width="320" alt="extrusion-shelf-bracket previews"></a> | **[extrusion-shelf-bracket](designs/extrusion-shelf-bracket/)** — A shelf corner bracket that locks into the **side slot of standard 2020 T-slot aluminum extrusion**: hammer-head lugs on the back of the plate slide along the slot, so a shelf board attaches anywhere along a rail with no T-nuts and no frame teardown. Horizontal arm carries the board between 45° gussets and a front stop lip. One printable part + a fit coupon. Brief: issue #283 (design-brief, `workshop-utility` style). |
+| <a href="designs/gridfinity-starter/"><img src="designs/gridfinity-starter/previews/contact-sheet.png" width="320" alt="gridfinity-starter previews"></a> | **[gridfinity-starter](designs/gridfinity-starter/)** — A first-party Gridfinity starter set (issue #733): one screw-down baseplate (3×3 default) plus the open bins that drop into it — 1×1×3U, 2×1×3U and a 1×1×1U low tray. The product is **interoperability**: every bin printed from this design must drop into any community Gridfinity baseplate, and every community bin must drop into this baseplate. Wrong-by-0.5 mm breaks that, so the spec numbers below were pinned before any modeling. |
+| <a href="designs/hex-bit-rail/"><img src="designs/hex-bit-rail/previews/contact-sheet.png" width="320" alt="hex-bit-rail previews"></a> | **[hex-bit-rail](designs/hex-bit-rail/)** — A bench-top rail that stores ¼″ hex driver bits standing up, every one held by a printed hex pocket and presented label-up — the workshop basic the catalog had zero designs for (no tool-storage part existed). The engineering is the fit: a hex pocket registering six faces accurately enough to grip a hardened steel shank printed against PLA. Brief: issue #594. Design run: SHIP-LOCK contract in the issue thread. |
 | <a href="designs/nuggs-yard/"><img src="designs/nuggs-yard/previews/contact-sheet.png" width="320" alt="nuggs-yard previews"></a> | **[nuggs-yard](designs/nuggs-yard/)** — An open-top run for an adult Syrian hamster's **playpen** — free-roam time outside the cage. The ask was "loops and twists, turns, branches, all the stuff to keep him busy". It is a floor-standing kit of modules the owner lays out themselves, not a fixed object. Despite the `nuggs-` name, it is a sibling of the NUGGS tunnel system, not a module in it — its lap-skirt joint does not mate with the NUGGS port. |
+| <a href="designs/ovodyo/"><img src="designs/ovodyo/previews/contact-sheet.png" width="320" alt="ovodyo previews"></a> | **[ovodyo](designs/ovodyo/)** — A clean-room, print-bench-native re-creation of Mectolab's "ovodyo" kinetic dice-ball clock, built as the **v0 base** every issue in the [#599](https://github.com/shaiss/print-bench/issues/599) improvement backlog modifies. The reference study and the improvement brainstorm were produced in-session (design study + `ovodyo-improvement-brainstorm.md`). |
 | <a href="designs/preroll-elevator/"><img src="designs/preroll-elevator/previews/contact-sheet.png" width="320" alt="preroll-elevator previews"></a> | **[preroll-elevator](designs/preroll-elevator/)** — A chapstick / glue-stick–style twist tube that stores and *presents* pre-rolls. Unscrew the hex cap-nut lid, twist the hex knob at the base → a central screw raises an internal elevator carrying 4 pre-rolls in a ring so their tops rise out the top to grab; twist back to retract, cap the lid to close and protect. Styled deliberately as an **industrial hex bolt with a nut on top** — the mechanical look is the point, and the interior echoes it (the elevator is literally a nut climbing a bolt). |
 | <a href="designs/sbc-case/"><img src="designs/sbc-case/previews/contact-sheet.png" width="320" alt="sbc-case previews"></a> | **[sbc-case](designs/sbc-case/)** — A hardware-rich single-board-computer case (Raspberry Pi 4 primary target) that is deliberately the **reference / stress-test design for the assembly-instructions feature** (issue #158): it ships an `assembly.conf` declaring real `vitamin:` entries — board, inserts, three screw types, washers, fan — so it exercises the NopSCADlib vitamin path, the BOM collection pass, and the GPL-3.0 product-page disclosure no existing design carries. |
 <!-- gallery:end -->
@@ -268,6 +275,12 @@ surfaces studies awaiting a read live in
   `print-in-place.scad` (print-in-place slide rails, tabs, end-stops,
   sacrificial membranes and a teardrop-bore hinge, extracted from the
   archived sushi-battleship),
+  `compliant.scad` (flexure primitives — the bistable snap-through arch and
+  weld-safe flexure-root fillets, harvested from the compliant designs;
+  issue #202 stage 1),
+  `spaceframe.scad` (parametric space-frame trusses — warren/pratt/vierendeel
+  topologies, cosine taper to needle ends, a separate core/web split for
+  two-tone exports),
   `printer-conf.scad` (the print-feedback profile a design reads to pre-fill
   its tuned-fit tolerances),
   `stencil-glyphs.scad` (clean-room 2D stencil digits 0-9 with bridged
@@ -367,6 +380,13 @@ surfaces studies awaiting a read live in
     shell surface, whose `--selftest` pins every post-greenlight refusal and
     the assembled comment shape — marker, `GREENLIGHT: YES|NO|ROUTE` verdict
     line, reasoning, wrapper-appended approval footer) must never be denied
+  - `coach-lock-check.sh` — fails a design-coach round that posted no
+    trusted COACH-LOCK (an Actions-bot comment that *ends* with the
+    assembled `<!-- COACH_LOCK -->` + footer suffix, created at or
+    after `--since` — a Jane/Drik/PM family comment that smuggled
+    the HTML does not count; those jobs share github-actions[bot];
+    a lock from an earlier coach run does not either; claude-code-action
+    exits 0 on a denial-only turn; issue #806)
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
@@ -374,11 +394,23 @@ surfaces studies awaiting a read live in
     exemption (gh, jq, mktemp; the reviewer's also keeps PM triage's
     `chunk-helper.sh`, the coach's git), always deny the render toolchain
     (apt, openscad, xvfb-run, prusa-slicer, printcheck, the render/gate/check
-    scripts, session-start.sh) and the gh escape hatches, and never deny the
+    scripts, session-start.sh) and the gh escape hatches, and the env-lock
+    floor (`export`/`env`/`unset`/`set` and `bash`/`sh`/`dash -c`, issue
+    #777) so the job-level `GIT_*` lock cannot be unset by an additive
+    allow, and never deny the
     review surface (gh, the read tools; git checkout/add/commit/push and
     Write/Edit too for the coach). A deny list cannot contain git, so the
     reviewers get none (`Bash(git:*)` denied; the workflow stages the PR
-    head for Jane and Drik) and the coach's git is fenced to local verbs;
+    head for Jane and Drik) and the coach's git is fenced to local verbs
+    (global options plus the four-verb option floor from #775: editor,
+    gpg-sign, template/squash, receive-pack/exec, recurse-submodules, repo
+    at shortest unique prefixes `--e`/`--g`/`--te`/`--sq`/`--r`/`--rece`/
+    `--recu`/`--rep`, URL/path dest including dest-not-first and scp-like
+    `host:path` (`*:**`) with no required space after the verb so IFS TAB/double-space
+    splits match, plus plumbing send-pack/http-push/fetch-pack/http-fetch
+    and --fixup/--fix, enumerated clustered `-e`/`-c`/`-S` shorts (`*` only —
+    Claude Code has no `?`) plus explicit TAB twins for short option-first
+    stems, and `git remote` retarget);
     `--selftest` with a positive and a negative control per rule, run by
     check.sh. The workflow half — every reviewer ship step in
     `auto-review.yml` passes its backstop under `dontAsk` and runs under the
@@ -386,6 +418,17 @@ surfaces studies awaiting a read live in
     config) — is pinned by
     `tools/model-registry/tests/test_reviewer_backstop_wiring.py` and
     `test_reviewer_git_containment.py`.
+  - `reviewer-deny-canary.sh` — runtime proof that the Claude Code build
+    `auto-review.yml`'s pinned `claude-code-action` SHA actually installs
+    still refuses the three syntax families the reviewer/coach backstops
+    spell (issue #776): mid-string `*`, `:*` word-boundary prefix, and
+    `Edit(./.git/**)`. `reviewer-perms-check.sh` is a Python model of the
+    matcher; this extracts the matcher from CLI 2.1.301 (the version that
+    SHA hardcodes and installs at run time — not bundled, not `latest`)
+    and fails if a denied probe is not refused. `--selftest` run by
+    `check.sh`; the live extract is `.github/workflows/reviewer-deny-canary.yml`
+    (dispatchable, not a required check). Record in
+    [docs/actions-security.md](docs/actions-security.md) CR-A.
   - `spike-converter-perms-check.sh` — the same drift check for the scheduled
     spike-to-brief converter's own deny backstop
     (`.claude/spike-converter-settings.json`, #245 child C / issue #440), the
@@ -423,11 +466,36 @@ surfaces studies awaiting a read live in
     `reviewer-signoff` required commit status (posted by `auto-review.yml`), the
     second required context that makes Jane and Drik actually run and sign off
     before a design PR merges. Fail-closed: a design PR without two clean,
-    current sign-offs blocks (a sign-off survives a non-design push via
-    design-tree currency, and must acknowledge a live `fusecheck` STRONG WARN);
+    current sign-offs blocks (a sign-off survives a non-design push, or a
+    previews-only all-noise regen commit-back, via its `key` currency, and must
+    acknowledge a live `fusecheck` STRONG WARN);
     a non-design PR and the `no-auto-review`/`signoff-override` labels pass so a
     required check never strands a PR it wasn't meant to gate. All the policy
     lives here behind a `--selftest` with a negative control per row
+  - `reviewer-posted.sh` — check + diagnose; the reviewer-outcome reader `auto-review.yml`'s
+    chain walk and round stamp key on (issues #762 / #770): did THIS
+    reviewer's MCP-assembled per-head marker for THIS head sha land from
+    `github-actions[bot]` (the posting identity `.claude/reviewer-post/
+    reviewer_mcp.py` uses via `GITHUB_TOKEN`) — `JANE`/`DRIK_SIGNOFF`,
+    `PM_TRIAGE_DONE`, or `COACH_DONE` — ending with the server-assembled
+    marker-then-footer suffix, optionally scoped to this run with
+    `--since`? claude-code-action exits 0 whenever the agent ends its turn
+    without an API error, so an exit-0 link that posted nothing used to win
+    the chain walk and be stamped a completed round (PRs #755/#756); a
+    planted marker from any other author is ignored (coach-lock-check.sh's
+    author+suffix pattern); refuses (rather than answers `false`) on a
+    typo'd reviewer or sha, and carries a `--selftest` with a negative
+    control per row
+  - `design-run-deliver.sh` — pushes a design-run's `claude/issue-<N>-*` branch
+    and opens its draft PR after the agent step, and posts the success
+    comment only once the remote tip and a same-repo draft PR at that tip
+    are verified (issue #853)
+  - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
+    context (Gate contract / Acceptance criteria / Design name / Chosen
+    approach) from an allowlisted author only (github-actions[bot] or
+    shaiss — same trust rule as the SHIP-LOCK readers; attended runs post
+    as shaiss or not at all), never the settle SHIP-LOCK stub alone and
+    never an outsider or cursor[bot] heading-shaped comment (issue #864)
   - `routine-lock-cleanup.sh` — withdraws a dead scheduled run's SHIP-LOCK (a
     run killed by its timeout cannot run the skill's own release step) and
     escalates to `needs-decision` after 3 run-deaths on one issue; invoked by
@@ -451,6 +519,11 @@ surfaces studies awaiting a read live in
     malformed line, and the exit-4 hard-fail path, over committed fixtures in
     `scripts/fusecheck-fixtures/` whose body counts are re-measured with
     fusecheck itself (issue #627)
+  - `scad-closure.sh` — include-closure walk behind gate.sh's `ci.fitchecks`
+    branch proof and fusecheck-check.sh's control proof (issue #766): a
+    `part == "..."` dispatcher in an included parent counts; a name nowhere
+    in the closure still FAILs; `--selftest` is the negative-control half
+    check.sh runs
   - `cog-check.sh` — proves the assembled object STANDS (issue #623), the
     thing no per-part gate can: reads a `ci.cog` manifest (per-part densities,
     non-printed hardware masses, assembly transforms, a stability margin) and
@@ -485,6 +558,12 @@ surfaces studies awaiting a read live in
   - `shot-spec.sh` — authors `shots.conf`/`lifestyle.conf` from a PM's
     art-direction brief (named views/colors, freeze and disclosure enforced);
     the mechanics behind the `/art-direction` skill
+  - `concept-preview.sh` — a design's four blueprint-style concept sheets
+    (exterior, cutaway, top section, exploded + bill of parts) as checked
+    SVGs from its `preview-spec.conf`, in one house drafting style; nothing
+    is written unless every sheet parses, stays self-contained and in bounds,
+    and has no overlapping labels — the mechanics behind the
+    `/concept-preview` skill
   - `lifestyle-clip.sh` — tier-2 AI motion clips from `motion.conf` via the
     Z.AI Vidu 2 image-to-video API, transcoded to a budgeted GIF (cosmetic,
     geometry-approximate, motion illustrative, disclosed)
@@ -556,6 +635,12 @@ surfaces studies awaiting a read live in
   `product-shot.sh`, which turns a design's own STL export into the
   photographed-looking hero image on its product page — see its
   [README](tools/photoshot/README.md)
+- `tools/concept-preview/` — the blueprint concept-sheet emitter behind
+  `concept-preview.sh`: one drafting system defined once (lifted from the
+  approved pre-roll elevator canvas, with local fonts so no served byte
+  reaches the network), six pure drafting primitives, a fail-loud spec
+  parser, and an independent checker for XML, bounds and label collisions —
+  see its [README](tools/concept-preview/README.md)
 - `tools/lineage/` — the lineage resolver: reads each design's
   `derives.conf` and its include lines, and answers who derives from whom —
   see its [README](tools/lineage/README.md)

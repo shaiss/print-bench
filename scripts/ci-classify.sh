@@ -14,7 +14,7 @@
 #     scad, printcheck_tests, stylelift_tests, lineage_tests, cogcheck_tests,
 #     backlog_burn_tests, backlog_groomer_tests, telemetry_tests,
 #     ci_gates_tests, model_registry_tests, reeve_tests, brief_sources_tests,
-#     growth_tests, andon_tests, agent_memory_tests, styles, gate,
+#     growth_tests, andon_tests, concept_preview_tests, agent_memory_tests, styles, gate,
 #     gate_designs, regen, regen_designs, docs_standards
 #   All diagnostics go to STDERR so STDOUT stays a clean key=value stream.
 #
@@ -50,7 +50,7 @@ classify() {
   local event="${CI_CLASSIFY_EVENT:-}"
   local scad=false ptests=false stests=false ltests=false styles=false
   local bbtests=false bgtests=false tmtests=false cgtests=false mrtests=false rvtests=false gwtests=false docs_standards=false
-  local bstests=false adtests=false cogtests=false amtests=false
+  local bstests=false adtests=false cogtests=false cptests=false amtests=false
   local gate=false designs=""
   local regen=false regen_designs=""
 
@@ -59,7 +59,7 @@ classify() {
     # regenerate every design.
     scad=true; ptests=true; stests=true; ltests=true; styles=true
     bbtests=true; bgtests=true; tmtests=true; cgtests=true; mrtests=true; rvtests=true; gwtests=true; docs_standards=true
-    bstests=true; adtests=true; cogtests=true; amtests=true
+    bstests=true; adtests=true; cogtests=true; cptests=true; amtests=true
     gate=true; designs=ALL
     regen=true; regen_designs=ALL
   else
@@ -132,7 +132,9 @@ classify() {
         tools/reeve/*|.github/reeve.conf|\
         tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
-        tools/andon/*|tools/agent-memory/*|\
+        tools/andon/*|\
+        tools/concept-preview/*|\
+        tools/agent-memory/*|\
         .github/workflows/*|printer.conf|\
         telemetry/*|tools/telemetry/*|people/*)
           soft_infra=true ;;
@@ -259,8 +261,13 @@ classify() {
         # The precedent-log seed (issue #445) joins for the same reason: the
         # golden round-trip test reads the committed file itself, so a hand
         # edit that broke the parse/render identity must re-run these tests.
+        # So does the data-branch Vercel guard (.github/data-branch-guard/):
+        # the two branch builders hash it into the telemetry tree, and
+        # test_learning_wiring.py pins both its content and its 100755 mode.
+        # It moves no mesh, no pixels and no site byte (Vercel skips .github/),
+        # so nothing else runs for it.
         tools/reeve/*|.github/reeve.conf|\
-        telemetry/reeve-greenlights.ndjson|\
+        telemetry/reeve-greenlights.ndjson|.github/data-branch-guard/*|\
         .github/workflows/reeve.yml|scripts/preview-budget.sh|\
         .github/workflows/ci.yml) rvtests=true ;;
       esac
@@ -295,6 +302,16 @@ classify() {
         # the reconciler workflow they pin (job shape, cron literal, marker/label
         # parity with the tool) — an edit to either must re-run them.
         tools/andon/*|.github/workflows/andon.yml|.github/workflows/ci.yml) adtests=true ;;
+      esac
+      case "$f" in
+        # The concept-preview emitter (issue #472): tools/concept-preview's own
+        # tests. scripts/concept-preview.sh is here because the suite drives the
+        # wrapper (selftest + usage refusals) — a wrapper-only edit must re-run
+        # the tests that pin it. The emitted sheets themselves are design files
+        # (designs/<name>/previews/), scoped by the designs/*/ case like any
+        # other committed preview.
+        tools/concept-preview/*|scripts/concept-preview.sh|\
+        .github/workflows/ci.yml) cptests=true ;;
       esac
       case "$f" in
         # Agentic memory, Slice 1a (issue #429): tools/agent-memory's own
@@ -337,7 +354,9 @@ classify() {
         tools/reeve/*|.github/reeve.conf|\
         tools/brief-sources/*|\
         tools/growth/*|growth/*|.github/growth-twitter.conf|\
-        tools/andon/*|tools/agent-memory/*|\
+        tools/andon/*|\
+        tools/concept-preview/*|\
+        tools/agent-memory/*|\
         telemetry/*|tools/telemetry/*|people/*|\
         .github/workflows/*|.github/actions/*)
           scad=true ;;
@@ -438,6 +457,7 @@ classify() {
   echo "brief_sources_tests=$bstests"
   echo "growth_tests=$gwtests"
   echo "andon_tests=$adtests"
+  echo "concept_preview_tests=$cptests"
   echo "agent_memory_tests=$amtests"
   echo "styles=$styles"
   echo "gate=$gate"
@@ -664,6 +684,14 @@ selftest() {
   # round-trip test reads the committed file itself.
   out="$(run "telemetry/reeve-greenlights.ndjson")"
   check "reeve-precedent-seed-drift" "$out" "reeve_tests=true"
+  # The data-branch Vercel guard is a drift-guard input the same way (the
+  # wiring tests pin its bytes and mode) — and nothing more: it reaches no
+  # mesh, no preview and no served byte, so a guard-only change runs reeve's
+  # tests alone (ci-ok accepts the skipped jobs, the docs-only precedent).
+  out="$(run ".github/data-branch-guard/vercel-ignore-build.sh")"
+  check "reeve-data-branch-guard-drift" "$out" \
+    "reeve_tests=true" "gate=false" "gate_designs=" "scad=false" "regen=false" \
+    "printcheck_tests=false" "model_registry_tests=false"
 
   # 4g. brief-sources (#438, deterministic half of the #245 spike-to-brief
   #     converter) is soft-infra like its tool siblings: its own tests run and
@@ -721,12 +749,28 @@ selftest() {
   check "andon-only" "$out" \
     "andon_tests=true" "gate=true" "gate_designs=" \
     "printcheck_tests=true" "scad=true" "regen=false" "growth_tests=false" \
-    "agent_memory_tests=false"
+    "concept_preview_tests=false" "agent_memory_tests=false"
   out="$(run ".github/workflows/andon.yml")"
   check "andon-workflow-drift" "$out" "andon_tests=true" "model_registry_tests=true"
   out="$(run ".github/workflows/lifestyle-shot.yml")"
   check "any-workflow-reruns-the-drift-guard" "$out" "model_registry_tests=true"
-  # 4i. Agentic memory, Slice 1a (issue #429) is soft-infra the same way: the
+  # 4i. The concept-preview emitter (issue #472) is soft-infra like its tool
+  #     siblings: its own tests run and the required contexts RUN with an empty
+  #     design list — it draws SVG from a spec, moving no mesh and no gated
+  #     pixels. The wrapper script re-runs the suite (the tests drive it) and,
+  #     as a scripts/ file, is soft-infra too; the authoring skill alone runs
+  #     nothing (skills-only matches no gate).
+  out="$(run "tools/concept-preview/src/concept_preview/primitives.py")"
+  check "concept-preview-only" "$out" \
+    "concept_preview_tests=true" "gate=true" "gate_designs=" \
+    "printcheck_tests=true" "scad=true" "regen=false" "andon_tests=false"
+  out="$(run "scripts/concept-preview.sh")"
+  check "concept-preview-wrapper" "$out" \
+    "concept_preview_tests=true" "gate=true" "gate_designs=" "scad=true"
+  out="$(run ".claude/skills/concept-preview/SKILL.md")"
+  check "concept-preview-skill-only" "$out" \
+    "concept_preview_tests=false" "scad=false" "gate=false"
+  # 4j. Agentic memory, Slice 1a (issue #429) is soft-infra the same way: the
   #     store and its write path move no mesh and no pixels, but a
   #     tools/agent-memory-only PR must still RUN the required contexts, and
   #     check.sh (scad=true) runs the tool's --selftest and store check. A

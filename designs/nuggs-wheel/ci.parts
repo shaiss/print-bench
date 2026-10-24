@@ -1,0 +1,7 @@
+# Printable parts (gate.sh renders each as build/nuggs-wheel-<part>.stl).
+# The coupon wrapper is discovered and gated separately.
+# assembled / cutaway are review previews — never plate parts.
+rim-segment
+hub
+stand
+axle

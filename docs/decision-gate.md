@@ -337,5 +337,6 @@ deterministic, and the job's first step):
 - An optional GitHub Projects (v2) `Decision` field for a board view — already on
   the roadmap as #148.
 - An optional read-only queue section on the Vercel site, via the deploy-time,
-  best-effort, empty-on-failure fetch seam `site/lib/releases.mjs`.
+  best-effort fetch seam `site/lib/releases.mjs` (a failed fetch renders as
+  "unavailable", never as an empty queue).
 - Custom notification routing.

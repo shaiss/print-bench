@@ -270,18 +270,26 @@ jobs:
                 --jq '"**" + .title + "**\n\n" + (.body // "(no body)")' \
                 || echo "(issue #${n} could not be read)"
               echo
-              lock="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
-                --paginate \
-                --jq '[.[] | select(.body | startswith("🚢 SHIP-LOCK"))
-                           | select(.body | startswith("🚢 SHIP-LOCK WITHDRAWN") | not)]
-                      | last
-                      | if . == null then ""
-                        else "### SHIP-LOCK contract (by " + .user.login
-                             + " at " + .created_at + ")\n\n" + .body end' || true)"
-              if [ -n "$lock" ]; then
-                printf '%s\n\n' "$lock"
+              # Frozen §2 contract — NOT the settle stub lock. Settle posts
+              # "🚢 SHIP-LOCK — settle claim" + HTML marker; the real contract
+              # is a later comment (or an attended claim that embeds Gate
+              # contract / Acceptance criteria). scripts/oracle-ship-contract.sh
+              # picks it from an allowlisted author only (same logins as the
+              # SHIP-LOCK readers); --selftest covers stub vs real and an
+              # outsider heading-shaped spoof (Cipher, #864).
+              comments_json="$(gh api "/repos/${GITHUB_REPOSITORY}/issues/${n}/comments" \
+                --paginate --slurp 2>/dev/null || true)"
+              contract=""
+              if [ -n "$comments_json" ]; then
+                contract="$(printf '%s' "$comments_json" | jq -c 'add // []' \
+                  | ./scripts/oracle-ship-contract.sh - || true)"
+              fi
+              if [ -n "$contract" ]; then
+                echo "### Acceptance contract (from issue #${n})"
+                echo
+                printf '%s\n\n' "$contract"
               else
-                echo "### No active SHIP-LOCK contract found on issue #${n}"
+                echo "### No acceptance contract found on issue #${n}"
                 echo
               fi
             done
@@ -345,7 +353,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
           ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -365,7 +373,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
           ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -386,7 +394,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
           ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
@@ -408,7 +416,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
           ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -431,7 +439,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
           ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -455,7 +463,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
           ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
@@ -480,7 +488,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ORACLE_PR: ${{ github.event.pull_request.number }}
           ORACLE_CAP_STATE: ${{ runner.temp }}/oracle-posts
-        uses: anthropics/claude-code-action@9171db3e57d6a3140a37ddc2ba92788584e0ead6  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}

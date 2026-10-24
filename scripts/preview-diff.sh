@@ -60,8 +60,16 @@
 #
 # Output: one machine line per staged preview on stdout,
 #   PREVIEW-DIFF <class> <changed-pixels-%|-> <path>
-# then the annotations and a tally; --summary appends a markdown table to
-# <file> (CI passes $GITHUB_STEP_SUMMARY).
+# then the annotations, a tally, and one verdict line over the whole set,
+#   PREVIEW-DIFF-VERDICT all-noise|content
+# — all-noise only when no staged preview is anything but noise (none staged
+# counts: a stamp-only commit-back changes no image), content the moment one
+# is content, resized, new, removed or not-compared. CI's regen job carries it
+# on its commit-back as a `Preview-Diff:` trailer, and auto-review.yml opens no
+# new review round for a previews-only all-noise one (reviewer-signoff.sh's
+# `round`, the owner's ruling on decision regen-commitback-review-retrigger).
+# It is printed only once every row is in, so a run that dies early has none.
+# --summary appends a markdown table to <file> (CI passes $GITHUB_STEP_SUMMARY).
 #
 # The ImageMagick binaries are read from PREVIEW_DIFF_CONVERT and
 # PREVIEW_DIFF_COMPARE (default `convert` and `compare`); the selftest points
@@ -111,6 +119,16 @@ classify() {
   else
     echo content
   fi
+}
+
+# verdict_of CLASS... — no I/O. all-noise when every class given is noise (or
+# none is given), content otherwise: an unmeasured preview is never noise.
+verdict_of() {
+  local c
+  for c in "$@"; do
+    [ "$c" = noise ] || { echo content; return 0; }
+  done
+  echo all-noise
 }
 
 # pct_to_ppm PCT — "1" -> 10000, "0.25" -> 2500. Refuses (returns 2) anything
@@ -285,6 +303,10 @@ run() {
     tally="$tally $c=$(cut -f1 "$t/rows" | grep -cx -- "$c" || true)"
   done
   echo "preview-diff: $total staged preview(s) vs $BASE —$tally (band ${BAND_PCT}% at fuzz ${FUZZ_PCT}%; cross-check $cross)"
+  local verdict
+  # shellcheck disable=SC2046  # one class per word is the point
+  verdict="$(verdict_of $(cut -f1 "$t/rows"))"
+  echo "PREVIEW-DIFF-VERDICT $verdict"
 
   if [ -n "$SUMMARY" ]; then
     {
@@ -302,6 +324,8 @@ run() {
           echo "| \`$cls\` | $frac | \`$path\` | $detail |"
         done < "$t/rows"
       fi
+      echo
+      echo "Commit-back verdict: \`$verdict\`."
       echo
       echo "Source cross-check: $cross."
       if [ -s "$t/notes" ]; then
@@ -343,6 +367,22 @@ NEGCTL-5%-shifted-shape-is-never-noise|200 150 200 150 1500 10000|content
 NEGCTL-5%-shape-at-a-generous-4.99%-band|200 150 200 150 1500 49900|content
 malformed-arg|200 150 200 x 0 10000|rc=2
 too-few-args|200 150 200 150 0|rc=2
+ROWS
+  # The commit-back verdict (the Preview-Diff trailer): all-noise only when no
+  # class is anything but noise; a negative control per other class.
+  while IFS='|' read -r label args want; do
+    [ -n "$label" ] || continue
+    # shellcheck disable=SC2086  # args is a space-separated class list
+    got="$(verdict_of $args)"
+    if [ "$got" = "$want" ]; then ok "verdict $label -> $want"; else bad "verdict $label" "expected $want, got $got"; fi
+  done <<'ROWS'
+all-noise|noise noise noise|all-noise
+none-staged|  |all-noise
+NEGCTL-one-content|noise content noise|content
+NEGCTL-resized|noise resized|content
+NEGCTL-new|new|content
+NEGCTL-removed|noise removed|content
+NEGCTL-not-compared|not-compared|content
 ROWS
   for row in "1|10000" "0.25|2500" "0|0" "100|1000000" "abc|rc=2" "101|rc=2" ".5|rc=2" "1.2.3|rc=2" "|rc=2"; do
     args="${row%%|*}"; want="${row#*|}"
@@ -511,6 +551,13 @@ WANT
   done
   nrows="$(grep -c '^| `' "$sum" || true)"
   [ "$nrows" -eq 13 ] && ok "summary table carries all thirteen rows" || bad "summary" "expected 13 table rows, got $nrows"
+  # NEGATIVE CONTROL: a set with any non-noise row is never all-noise, and the
+  # verdict is the last machine line, printed once.
+  [ "$(grep -c '^PREVIEW-DIFF-VERDICT ' <<<"$out" || true)" -eq 1 ] \
+    && grep -q '^PREVIEW-DIFF-VERDICT content$' <<<"$out" \
+    && grep -q '^Commit-back verdict: `content`\.$' "$sum" \
+    && ok "NEGCTL a mixed set's verdict is content (stdout and summary)" \
+    || bad "verdict mixed" "expected exactly one 'PREVIEW-DIFF-VERDICT content'"
 
   # Cross-check: still (prose + stamp only — not sources) warns; edited
   # (cameras.conf moved — a source) must NOT warn; moved (.scad moved, noise
@@ -560,6 +607,10 @@ WANT
   else
     bad "ImageMagick absent" "rc=$rc, not-compared=$nrows"; printf '%s\n' "$out" | sed 's/^/    /' >&2
   fi
+  # NEGATIVE CONTROL: an unmeasured preview can never vouch for noise.
+  grep -q '^PREVIEW-DIFF-VERDICT content$' <<<"$out" \
+    && ok "NEGCTL ImageMagick absent: the verdict is content, not all-noise" \
+    || bad "verdict unmeasured" "expected 'PREVIEW-DIFF-VERDICT content'"
 
   # Usage errors are exit 2, never a verdict.
   for args in "--band abc" "--fuzz 101" "--base no-such-ref" "--source-base no-such-ref" "--bogus"; do
@@ -568,6 +619,20 @@ WANT
     bash "$self" --repo "$r" $args >/dev/null 2>&1 || rc=$?
     [ "$rc" -eq 2 ] && ok "usage error '$args' -> exit 2" || bad "usage '$args'" "expected exit 2, got $rc"
   done
+
+  # LAST, because it rewrites the index the runs above share: stage only the
+  # noise rows (the wobble PNG, the pixel-identical re-encode, the wobble GIF)
+  # plus a stamp, and the verdict must be all-noise.
+  (
+    cd "$r" && git reset -q \
+      && git add designs/still/previews/a.png designs/still/previews/f.png \
+           designs/still/previews/wobble.gif designs/still/previews/.regen-stamp
+  ) || { bad "verdict all-noise" "could not restage the fixture repo"; return 1; }
+  out="$(bash "$self" --repo "$r" --base HEAD 2>&1)" || true
+  grep -q '^PREVIEW-DIFF-VERDICT all-noise$' <<<"$out" \
+    && [ "$(grep -c '^PREVIEW-DIFF noise ' <<<"$out" || true)" -eq 3 ] \
+    && ok "a noise-only set (plus its stamp) is all-noise" \
+    || { bad "verdict all-noise" "expected 3 noise rows and 'PREVIEW-DIFF-VERDICT all-noise'"; printf '%s\n' "$out" | sed 's/^/    /' >&2; }
 }
 
 # --- CLI --------------------------------------------------------------------------

@@ -20,29 +20,49 @@
 //     meta          — a small secondary line ("#42 · issue")
 //
 // A BUNDLE is what the bell renders:
-//   { items: Notification[], actions: [{ label, url }] }
-//     items   — the rows, newest concern first (the queue is oldest-parked
-//               first, which is the one waiting longest — that order is kept)
-//     actions — tray-footer links ("Every open decision →")
+//   { items: Notification[], actions: [{ label, url }], unavailable: string[] }
+//     items       — the rows, newest concern first (the queue is oldest-parked
+//                   first, which is the one waiting longest — that order is kept)
+//     actions     — tray-footer links ("Every open decision →")
+//     unavailable — one line per source whose deploy-time fetch failed
+//                   (seam.mjs `unavailable`), shown in the tray INSTEAD of
+//                   "You're all caught up": an empty bell must mean nothing is
+//                   waiting, never that we couldn't look
 //
 // Everything here is PURE and total on junk — the data it maps already came
 // through decisions.mjs's best-effort fetch, so a malformed row must degrade to
 // "fewer notifications", never a thrown build.
 
+import { SEAM } from "./seam.mjs";
+
+/** The tray line for a decision queue the deploy could not load. */
+export const DECISIONS_UNAVAILABLE = "Couldn't load the decision queue for this deploy.";
+
 /** The empty bundle — an all-caught-up bell. */
 export function emptyBundle() {
-  return { items: [], actions: [] };
+  return { items: [], actions: [], unavailable: [] };
 }
 
 /**
- * Pure: the decision queue `{ rows, searchUrl }` (as build.mjs assembles it
- * from decisions.mjs) → a notification bundle. Each row becomes one
- * `category: "decision"` notification; the queue's saved-search link becomes
- * the tray's one footer action. Total on junk: a missing/empty queue yields the
- * empty bundle, and a row missing its number/title/url is skipped rather than
- * rendered half-blank.
+ * Pure: the decision queue `{ status, rows, searchUrl }` (as build.mjs
+ * assembles it from decisions.mjs's seam result) → a notification bundle. Each
+ * row becomes one `category: "decision"` notification; the queue's
+ * saved-search link becomes the tray's one footer action. A queue whose status
+ * is `unavailable` yields no rows but the DECISIONS_UNAVAILABLE line — and
+ * keeps the footer link, so the reader can still check GitHub directly. Total
+ * on junk: a missing/empty queue (incl. a seam that was `off`, which build.mjs
+ * passes as null) yields the empty bundle, and a row missing its
+ * number/title/url is skipped rather than rendered half-blank.
  */
 export function decisionsToNotifications(queue) {
+  if (queue && typeof queue === "object" && queue.status === SEAM.UNAVAILABLE) {
+    const out = emptyBundle();
+    out.unavailable.push(DECISIONS_UNAVAILABLE);
+    if (typeof queue.searchUrl === "string" && queue.searchUrl) {
+      out.actions.push({ label: "Every open decision →", url: queue.searchUrl });
+    }
+    return out;
+  }
   if (!queue || typeof queue !== "object" || !Array.isArray(queue.rows)) {
     return emptyBundle();
   }
@@ -67,7 +87,7 @@ export function decisionsToNotifications(queue) {
     items.length && typeof queue.searchUrl === "string" && queue.searchUrl
       ? [{ label: "Every open decision →", url: queue.searchUrl }]
       : [];
-  return { items, actions };
+  return { items, actions, unavailable: [] };
 }
 
 /**
@@ -82,6 +102,7 @@ export function mergeBundles(...bundles) {
     if (!b || typeof b !== "object") continue;
     if (Array.isArray(b.items)) out.items.push(...b.items);
     if (Array.isArray(b.actions)) out.actions.push(...b.actions);
+    if (Array.isArray(b.unavailable)) out.unavailable.push(...b.unavailable);
   }
   return out;
 }

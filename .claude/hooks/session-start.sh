@@ -42,11 +42,15 @@ has_bpy() {
     >/dev/null 2>&1
 }
 
+# Skip when the full set is already on PATH (e.g. backlog-burn's trusted
+# preflight step installed it before disable-sudo stripped setuid). jq is
+# part of that set — keep the early exit aligned with the apt line below.
 if command -v openscad >/dev/null 2>&1 \
   && command -v xvfb-run >/dev/null 2>&1 \
   && command -v montage >/dev/null 2>&1 \
   && command -v ffmpeg >/dev/null 2>&1 \
   && command -v gifsicle >/dev/null 2>&1 \
+  && command -v jq >/dev/null 2>&1 \
   && { [ "$WITH_BPY" != 1 ] || has_bpy; } \
   && command -v prusa-slicer >/dev/null 2>&1 \
   && command -v printcheck >/dev/null 2>&1 \
