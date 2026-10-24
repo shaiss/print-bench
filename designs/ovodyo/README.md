@@ -20,7 +20,9 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 > structural core** — a ballast keel with sealed shot pockets ([#603](https://github.com/shaiss/print-bench/issues/603)). Several
 > things are still deliberately simplified and tracked as issues: the base gears
 > *represent* the drive but aren't a real meshing involute differential; there is
-> no reusable space-frame library ([#604](https://github.com/shaiss/print-bench/issues/604)); the slot isn't yet a tunable brand
+> no reusable space-frame library ([#604](https://github.com/shaiss/print-bench/issues/604)); the
+> **ball-side stalk hub/socket** (the brass rod seats in the base today; a printed
+> socket in the ball half is [#604](https://github.com/shaiss/print-bench/issues/604) with the real drive); the slot isn't yet a tunable brand
 > module ([#601](https://github.com/shaiss/print-bench/issues/601)); the CoG/tip-over
 > check now runs from `ci.cog` as an **advisory WARN** (it does not fail the gate).
 > The first gate emit on tip `d8d9cf5` measured **STABLE** (38.28 mm clearance
@@ -29,12 +31,17 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 > change. ≈55 g of shot remains a **starting fill**; if a run says TIP-RISK,
 > follow the care playbook in NOTES.md rather than treating STABLE as a claim.
 > There's no committed two-tone reveal render yet ([#600](https://github.com/shaiss/print-bench/issues/600)). See NOTES.md.
+>
+> **Desk space:** needs about **40 cm of clear desk** (383 mm base) and **~17 cm of
+> headroom** (balls sit at ~124 mm centres, ~163 mm overall height).
 
 ![Hero — the whole clock](previews/hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ![A single ball](previews/hours-ball.png)
+
+![Helical slot through a corner](previews/slot-corner.png)
 
 ## What you get
 
@@ -63,7 +70,9 @@ whole clock would print as one fused lump):
 The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf`
 (built by `./scripts/plate.sh ovodyo` from `ci.plate`): the eight production
 parts as eight separate objects a slicer imports as parts — duplicate `base-end`
-and `base-plug` in the slicer to print two of each.
+and `base-plug` in the slicer to print two of each. On a **256 mm bed**, plan on
+**two plates**: the four ball halves alone (they pack 2×2 with shared settings),
+then segment + both ends + core + both plugs on a second plate with margin.
 - `mock-drive` — a single representative reduction gear, kept as a gated
   printability sample of the (otherwise preview-only) drivetrain. It is not a
   placed assembly part and is not included on the production plate.
@@ -86,8 +95,8 @@ gallery preview. Select a part with `-D 'part="hours-top"'` (or `base-mech` /
   support-free. The halves' printcheck caveats are **by-design underside
   texture** on the chamfer facets ringing the pole — they sit ~52° off-axis
   when pole-down and print with slight droop, no support — so **keep
-  auto-supports off**, or the slicer fills the open bowl and welds the stalk
-  boss.
+  auto-supports off**, or the slicer fills the open bowl and welds the seam
+  ring (the captive thread) shut.
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render);
   truss segments bottom-chord-down (as modeled); mock drive flat; the seam
@@ -148,15 +157,26 @@ one fine line. No glue, no dowels, and it unscrews the same way to reach the
 mechanism. **Print the seam coupon first** (`ovodyo-coupon.scad`: a male ring
 and a female puck side by side) and tune `seam_tol` in 0.05 mm steps until the
 puck runs on by hand with light drag and seats without rattle — then render
-the halves with that value. A brass rod (≈4.5 mm) is the support stalk: it seats into the
-bored boss on each end segment and reaches the ball centre. The three truss
-segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603)).
+the halves with that value. If the coupon's male ring feels tight only at the
+very start of the turn, that's **first-layer squish on the coupon**, not the
+fit — don't loosen `seam_tol` for it; the production seam never touches the bed.
+
+**Stalks (v0 display):** two brass rods (≈Ø4.5 mm) seat snug in the bored bosses
+on each `base-end` — if a rod rattles, a wrap of tape or a drop of CA fixes it;
+don't ream the boss. The **ball halves have no printed pole socket yet** — the
+hero preview unions a cylinder into the shell that no printable part carries.
+Until the hub lands in [#604](https://github.com/shaiss/print-bench/issues/604), stand each assembled ball on its
+flat pole pentagon beside the base, or rest it on the rod tip without claiming a
+retained mount. The three truss segments join end to end (printed bolt/flange
+joints are [#603](https://github.com/shaiss/print-bench/issues/603); tape or a dab of glue holds a temporary join).
 
 **The red core goes in before the clock stands up, and the order matters: 1. fill
 each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into each port
 → 3. slide the keel into the centre segment** until it drops onto the deck struts
 (it seats one way only). Fill and plug *before* you slide — a seated keel has no
-port access. Press a Ø5 mm silicone bumper into each of the four foot recesses.
+port access. Weigh the pour first (~55 g total starting fill); the Ø3.2 mm ports
+are tight for Ø2 mm shot — tap and shake as you pour so the shot doesn't arch in
+the throat. Press a Ø5 mm silicone bumper into each of the four foot recesses.
 
 The real
 clock is driven by a geared stepper through a bevel differential and homed with a

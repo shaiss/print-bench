@@ -242,6 +242,7 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
 | Ballast pockets + ≈55 g starting fill; `ci.cog` advisory CoG/tip-over (WARN on TIP-RISK); first emit on `d8d9cf5` / PR #789 measured STABLE 38.28 mm — fill still a starting guess, playbook in “TIP-RISK care” | #603 (item 10 remaining: this manifest; platform half #623 / #652) |
+| **No ball-side stalk socket** — brass rod seats in `base-end` only; hero preview's "reaches the ball centre" is not a printable interface (Drik #914) | #604 (hub/bearing with the real drive); page carries the interim display note until then |
 
 ## Tumble kinematics (N2)
 

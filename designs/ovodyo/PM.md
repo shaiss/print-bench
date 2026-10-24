@@ -36,7 +36,9 @@ gears, numerals, slot, core); a committed two-tone reveal render is [#600](https
 
 **Deferred** (in the [#599](https://github.com/shaiss/print-bench/issues/599) backlog): the geodesic-ball lib
 (#600), true stencil numerals (#601), flat parting seam (#602), tapered
-space-frame base (#603), real bevel differential + `ci.plate` deliverable (#604).
+space-frame base (#603), real bevel differential + `ci.plate` deliverable +
+**ball-side stalk hub/socket** (#604 — brass rods seat in `base-end` today; the
+hero's "reaches the ball centre" is preview-only until the hub lands).
 
 **Never:**
 - **Painted two-tone** — the colour comes from geometry + material, not paint (N1).
