@@ -71,7 +71,7 @@ the one motion the part really performs — seeded from the hero.
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
 | ~~B3~~ | ~~Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release)~~ | **Done** (#631): `collar-shallow` gated via `ci.parts`; plate stays boss+collar; README points at the Release/gated part | — |
-| B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
+| B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints. Rider: the proving print runs the page's own instructions verbatim, and its FIELD-TEST entry logs one full wash-day cycle (unthread → lift → re-hang) | one print + NOTES entry |
 | B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence — plus vibration insurance: ~730 axial curtain-tugs/yr vs single-digit unthreads, and a steep 2-start lead is what walks loose under cyclic load; nothing on the rod resists a slow unthread. Measured by the proving print's week-of-use seat check; a walked collar promotes B1 to #1 | small geometry + re-gate |
 | B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
 | B5 | Sizes other than 40 (25 mm reference origin) | parameters exist but are untested at other rods — the page now says so outright, so this is the proof, not the disclosure | coupon set per size |

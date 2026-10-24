@@ -7,14 +7,18 @@ the bosses. Curtains down for washing = unthread two collars, no tools.
 
 > **v2** — ships the separable multi-object plate deliverable. v1 (#361)
 > printed **fused** in the field (a single STL of the two parts slices as one
-> welded body); v2 fixes the packaging, geometry unchanged. See *Deliverable*
-> below and the field test log in NOTES.md.
+> welded body); v2 fixes the packaging (per-part STLs / plate as file format),
+> geometry unchanged — the proving print that confirms the customer-facing
+> cure (print, unthread, lift the rod) is still pending; see NOTES.md.
+> See *Deliverable* below and the field test log in NOTES.md.
 
 ![Product shot](previews/product-hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
-![Section through the seated socket](previews/cutaway.png)
+![Half of the seated socket — the full section is below](previews/cutaway.png)
+
+![Diametral section — full width, countersink in plane, thread mesh](previews/cutaway-wide.png)
 
 ![The seated pair with the rod through it — boss, collar, thread engaged](previews/assembly.png)
 
@@ -32,7 +36,8 @@ Printed **in pairs** (one holder per wall, one pair per rod):
   the push-in-deep / drop-in-shallow install). Gated and shipped in the
   Release; not on the plate (the plate is the default-depth holder pair).
 - `thread-coupon` / `bore-coupon` — the "print this first" fit checks (see
-  Print settings).
+  Print settings); Release files are `alcove-rod-socket-coupon.stl` and
+  `alcove-rod-socket-bore-coupon.stl`.
 
 **Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
 **separate parts**, and the one rule is: keep them as two distinct objects in the
@@ -51,7 +56,9 @@ STL imports as one fused body and welds them together — v1's field-test failur
   install. There is **no** multi-object plate `.3mf` on that Release (only
   STLs / zip / manifest) — the plate stays a local build artifact (see the
   clone path below). That is a tracked follow-up: the platform release-bundle
-  does not upload the multi-object plate 3MF today.
+  does not upload the multi-object plate 3MF today. Release STLs are as of
+  the tag; if this README names a part or parameter the Release lacks, use
+  the clone path.
 - **Cloned the repo (advanced / local):** `./scripts/plate.sh alcove-rod-socket`
   bundles the two default-depth parts into one multi-object 3MF
   (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
@@ -91,7 +98,12 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   prints the thread slightly fatter, so expect `thread_tol` +0.05–0.1 mm
   vs PLA; ASA shrinks the bore ~0.2–0.4 mm — about the whole slip — so
   print the bore coupon in ASA first and expect +0.1–0.2 mm on
-  `rod_clearance` (a material-specific preset is charter backlog B4).
+  `rod_clearance`. An ASA install should print the **thread** coupon in
+  ASA too — longer engagement, and the taper is unforgiving of a
+  half-percent shrink — still unproven until B4 (a material-specific
+  preset is charter backlog B4). If that ASA coupon binds, the fix is a
+  `thread_tol` change, which needs the clone/source path rather than the
+  Release STLs.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Seam:** Scarf (Bambu Studio) or Back — the default Aligned seam stacks a
@@ -105,14 +117,17 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   part that can lift; the boss doesn't need it — it prints flange-down on a
   full Ø58.8 disc, the best contact on the plate. Cheap insurance on the
   collar rim's own merits (the v1 field failure was *packaging*, not adhesion
-  — see NOTES.md — so the plate is what fixes that; the brim is separate). A
-  per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
-  bridges. (Brim the *whole plate* instead and the two brims may meet in one
-  web; it should peel clean, but that is **untested** — predicted, not
-  observed, and the proving print is what confirms it. Per-object avoids the
-  question.) Trim the collar's brim tabs flush and set it on a flat surface
-  to confirm the rim sits flat before threading it onto the boss — the rim
-  is both the bed-contact face and the seating face on the flange.
+  — see NOTES.md — so the plate is what fixes that; the brim is separate). If
+  the rim's outer edge starts lifting in the first centimeter, kill the
+  print — more brim won't save it mid-run, and a lifted rim is a cocked
+  thread. A per-object collar brim can't reach the ~5.7 mm gap to the boss,
+  so nothing bridges. (Brim the *whole plate* instead and the two brims may
+  meet in one web; it should peel clean, but that is **untested** —
+  predicted, not observed, and the proving print is what confirms it.
+  Per-object avoids the question.) Trim the collar's brim tabs flush and
+  set it on a flat surface to confirm the rim sits flat before threading it
+  onto the boss — the rim is both the bed-contact face and the seating face
+  on the flange.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   (and collar-shallow) rod-mouth-down (the internal thread prints at the top
   of the collar, never on the first layer). Never flip the collar
@@ -166,14 +181,17 @@ proof: print them in your material first and trust them over this page.
    weight — heavier curtains than that want a stud or `screw_count=2`
    (derivation in NOTES).
 2. Slide the collars over the rod before hanging it — one at each end.
-3. Thread each collar onto its boss until the rim seats on the plate. For a
-   rigid rod between two fixed walls: use one default `collar` (deep) and one
-   `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
+3. Lower the rod between the bosses, slide each collar out to its boss, and
+   thread it on until the rim seats on the boss's flange. For a rigid rod between
+   two fixed walls: use one default `collar` (deep) and one `collar-shallow`
+   — the deep/shallow pairing is the retention margin on each end, not how
+   the rod goes in. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
    shorter** (38–42 mm is the safe band): each end bottoms on its collar
    shoulder 19 mm from that wall, so the seated rod spans nearly
    wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
-   into their collars).
+   into their collars). Aim for ~40 mm shorter; if you land between sizes,
+   cut long (toward the 38 mm end of the band) and trim — a rod can be
+   shortened, but a too-short rod means buying another.
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the
