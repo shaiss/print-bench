@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""reviewer_mcp.py — the Jane/Drik reviewers' shared posting surface, stdio MCP.
+"""reviewer_mcp.py — the Jane/Drik/PM-triage shared posting surface, stdio MCP.
 
-WHY THIS SERVER EXISTS (issue #764)
------------------------------------
-The auto-review reviewer agents (Jane, Drik) ran for their whole history under
+WHY THIS SERVER EXISTS (issues #764, #772, coach path #806)
+-----------------------------------------------------------
+The auto-review reviewer agents (Jane, Drik, then PM triage) ran for their
+whole history under
 `--permission-mode dontAsk --settings .claude/reviewer-settings.json` with NO
 surface that could carry their review: Write/Edit/NotebookEdit are denied
 (read-only reviewers), every file-creating Bash form (echo >, heredoc, tee) is
@@ -28,19 +29,46 @@ comment on the ONE PR the workflow selected":
   * the target PR comes ONLY from the REVIEWER_PR environment variable, set by
     the trusted workflow — there is no argument for it, so a prompt-injected
     run can never redirect the comment to another issue or PR;
-  * the reviewer IDENTITY comes ONLY from REVIEWER_ID (jane|drik), likewise
-    set by the trusted workflow step — never an argument. The marker prefix
-    (JANE_SIGNOFF vs DRIK_SIGNOFF) is derived from it server-side, so a Jane
-    session cannot forge Drik's sign-off or vice versa, and no input can post
-    an unrecognised marker family;
-  * the marker is ASSEMBLED from validated fields (40-hex sha, pass|block
-    verdict, none|acknowledged fuse) — the fail-closed reviewer-signoff gate's
-    "malformed marker" failure mode is unreachable from this path;
+  * the reviewer IDENTITY comes ONLY from REVIEWER_ID (jane|drik|pm), likewise
+    set by the trusted workflow step — never an argument. The marker family
+    (JANE_SIGNOFF vs DRIK_SIGNOFF vs PM_TRIAGE) is derived from it server-side,
+    so a Jane session cannot forge Drik's sign-off, a PM session cannot post a
+    reviewer sign-off, and no input can post an unrecognised marker family;
+  * the PR HEAD sha the marker may carry is pinned by REVIEWER_HEAD_SHA (the
+    workflow's ``pull_request.head.sha``) in every unattended run — the model's
+    ``sha`` argument must match it byte-for-byte (after lower-casing). Format-
+    only validation used to accept any 40-hex string, so a reviewer that copied
+    a stale sha from an older thread comment could post, burn the one-post-per-
+    run cap, and leave ``reviewer-posted.sh`` ``served=false`` for the real head
+    (run 37530117408 on PR #559: Drik posted ``073fd1af…`` while head was
+    ``169898ab…``; later links including a clean glm-5.1 exit could not post).
+    A mismatch is refused BEFORE the GitHub write, so it does not consume the
+    cap and the agent can retry with the pinned value in the same turn.
+    The design-coach is the exception that *moves* the head: it git-pushes
+    iterations inside a round, so a later ``post_coach`` must carry the new
+    head. The workflow keeps a pin file (``REVIEWER_HEAD_SHA_PIN``) that
+    trusted restore steps advance from the live PR head before each later
+    chain link; within a link, ``post_coach`` may advance that same pin only
+    when the caller's sha equals the live head from the GitHub API — never
+    an arbitrary model-supplied value. Jane/Drik/PM cannot advance the pin;
+  * Jane/Drik markers are ASSEMBLED from validated fields (40-hex sha,
+    pass|block verdict, none|acknowledged fuse) — the fail-closed
+    reviewer-signoff gate's "malformed marker" failure mode is unreachable
+    from this path. PM triage markers are assembled as
+    ``<!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->`` (the /pm §8
+    family — one ruling per run, every covered design named) plus the
+    per-head completion marker ``<!-- PM_TRIAGE_DONE sha=<40hex> -->``
+    (issue #770) that the chain walk keys on; coach posts carry
+    ``<!-- COACH_LOCK -->`` then ``<!-- COACH_DONE sha=<40hex> -->``;
   * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
-    (case-insensitive) is refused, not posted: ``get_marker()`` greps every
-    comment with no author check, so a Jane body carrying a Drik pass would
-    otherwise satisfy both identities from one post. Only the server-assembled
-    marker from sha/verdict/fuse + trusted REVIEWER_ID may appear;
+    / ``<!-- PM_TRIAGE`` / ``<!-- COACH_LOCK`` / ``<!-- COACH_DONE``
+    (case-insensitive) is refused,
+    not posted: ``get_marker()`` greps every comment with no author check, so
+    a Jane body carrying a Drik pass would otherwise satisfy both identities
+    from one post, and a Jane/Drik/PM body carrying ``<!-- COACH_LOCK -->``
+    would satisfy the coach completeness pin (those jobs share
+    ``github-actions[bot]``). Only the server-assembled marker from trusted
+    REVIEWER_ID may appear;
   * the attribution footer is HARDCODED here — every post is disclosed as a
     Claude Code review whatever the body says;
   * a per-run cap of ONE post (counted in a state file every chain link of
@@ -51,11 +79,40 @@ comment on the ONE PR the workflow selected":
   * the only GitHub call is `POST /issues/{REVIEWER_PR}/comments` on the
     CURRENT repo — no labels, no reviews/approves, no other repo, no pushes.
 
-Each reviewer job's ship steps run with `--allowedTools
-"mcp__reviewer__post_review,Read,Grep,Glob"` on top of the deny backstop, so
-the tool is the only added write; gh/jq/mktemp stay allowed for reads (the
-backstop keeps denying everything else). Stdlib only; logs go to stderr so
-stdout carries nothing but JSON-RPC.
+Jane/Drik ship steps allow `mcp__reviewer__post_review`; pm-triage allows
+`mcp__reviewer__post_triage`. Each is the session's only added write; gh/jq/
+mktemp stay allowed for reads (the backstop keeps denying everything else).
+
+The design-coach job is the same posting hole (#806) with different
+containment: the coach still pushes iterations (Write/Edit + git
+checkout/add/commit/push stay allowed — Jane/Drik's read-only
+`--allowedTools` must not be copied onto it). Its comments are still
+multi-line markdown, so `gh pr comment --body` is denied under dontAsk the
+same way; run 37218561622 completed success with `permission_denials_count`
+= 3 and posted no COACH-LOCK. `post_coach` is the JSON-argument write for
+those comments. The HTML `<!-- COACH_LOCK -->` marker is assembled here;
+`scripts/coach-lock-check.sh` is the pin that a denial-only turn cannot
+stamp the round complete (claude-code-action still exits 0), and it
+counts only an Actions-bot comment that *ends* with the assembled
+``<!-- COACH_LOCK -->`` + footer suffix — a planted ``🎓 COACH-LOCK``
+substring, or a Jane/Drik/PM body that smuggled the HTML (those jobs
+share ``github-actions[bot]``), does not satisfy it. Cap is 8 comments
+per unattended walk — a kickoff plus first-round notes — not Jane's
+one-review cap.
+
+Jane's and Drik's jobs check out ``pull_request.base.ref`` so this
+file is never the PR's copy. The coach cannot: it git-pushes the PR
+branch, so auto-review.yml overlays ``.claude/reviewer-post/`` (and
+the coach settings/skill) from ``base.sha`` before each agent step.
+The completeness pin then extracts ``scripts/coach-lock-check.sh``
+from the same base blob AFTER the agent — the workspace copy is
+Write-able. The MCP config's command is ``/usr/bin/python3`` (not
+PATH ``python3``) with ``-I`` (isolated mode) so a GITHUB_PATH /
+GITHUB_ENV write from a failed Bash link cannot become the posting
+server via PATH lookup or PYTHONPATH sitecustomize. Do not spawn
+this server from a PR-controlled checkout.
+
+Stdlib only; logs go to stderr so stdout carries nothing but JSON-RPC.
 """
 
 import json
@@ -73,7 +130,11 @@ SERVER_NAME = "reviewer"
 # The sign-off families this server may emit, keyed by the trusted
 # REVIEWER_ID env value. Anything else is refused — a new reviewer joins by
 # adding an entry here, not by passing a new string at call time.
-REVIEWERS = {"jane": "JANE_SIGNOFF", "drik": "DRIK_SIGNOFF"}
+REVIEWERS = {"jane": "JANE_SIGNOFF", "drik": "DRIK_SIGNOFF", "pm": "PM_TRIAGE"}
+# Which tool an identity may call. The family still comes from REVIEWERS, so a
+# new identity is an entry here plus its tool set — never a call-time string.
+REVIEW_POSTERS = {"jane", "drik"}
+TRIAGE_POSTERS = {"pm"}
 FOOTER = "---\n_Generated by [Claude Code](https://claude.ai/code)_"
 # One review comment is ~2-6 KB; 64 KiB is generous headroom for a long
 # findings list while still refusing a repository dump (GitHub's own comment
@@ -84,6 +145,12 @@ DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 # One review per run. Deliberately not an env knob — "one signed-off review
 # per reviewer per round" is the reviewer contract, not a tunable.
 MAX_POSTS_PER_RUN = 1
+# Coach comments are a thread, not a single sign-off. Bound a hijacked
+# unattended walk without refusing the kickoff-plus-round the first job
+# actually posts.
+MAX_COACH_POSTS_PER_RUN = 8
+COACH_LOCK_HTML = "<!-- COACH_LOCK -->"
+COACH_LOCK_LINE = "🎓 COACH-LOCK"
 
 # The walk-spanning post cap (the #549 class, ORACLE_CAP_STATE's sibling).
 # auto-review.yml walks its chain one claude-code-action step per link and each
@@ -94,6 +161,18 @@ MAX_POSTS_PER_RUN = 1
 # test_cap_state_wiring.py) reads CAP_STATE_ENV from this file and fails
 # pre-merge if a link step that launches this server does not set it.
 CAP_STATE_ENV = "REVIEWER_POST_STATE"
+# Trusted PR-head pin (sibling of REVIEWER_PR / REVIEWER_ID). Unattended ship
+# steps must export the workflow's pull_request.head.sha here; the model's
+# sha argument is checked against it so a stale 40-hex cannot burn the cap.
+# The backstop wiring drift guard reads HEAD_SHA_ENV the same way.
+HEAD_SHA_ENV = "REVIEWER_HEAD_SHA"
+# Optional pin *file* the design-coach workflow advances between rounds
+# (and that post_coach may advance in-process when the live PR head moves).
+# When set and readable, it overrides HEAD_SHA_ENV so a later coach link
+# sees the head a prior push created. Jane/Drik/PM ship steps omit it.
+HEAD_SHA_PIN_ENV = "REVIEWER_HEAD_SHA_PIN"
+# Selftest-only override for the live-head GET (never set in the workflow).
+FAKE_LIVE_HEAD_ENV = "REVIEWER_MCP_FAKE_LIVE_HEAD"
 
 
 def _cap_state_path():
@@ -183,10 +262,10 @@ def _pr_number():
 def _reviewer():
     """The reviewing identity — trusted workflow input, never an argument.
 
-    Determines the sign-off family the post may carry; a Jane session can
-    never emit a DRIK_SIGNOFF marker (and vice versa) because the prefix is
-    derived here, from the env the step set, not from anything the model
-    writes."""
+    Determines the marker family the post may carry; a Jane session can
+    never emit a DRIK_SIGNOFF or PM_TRIAGE marker (and vice versa) because
+    the prefix is derived here, from the env the step set, not from anything
+    the model writes."""
     who = os.environ.get("REVIEWER_ID", "").strip().lower()
     marker = REVIEWERS.get(who)
     if marker is None:
@@ -195,6 +274,22 @@ def _reviewer():
             + " — the workflow must export it (it selects the sign-off family;"
             + " it is deliberately not a tool argument)")
     return who, marker
+
+
+def _require_coach():
+    """Coach identity — trusted workflow input, never an argument.
+
+    post_coach refuses any other REVIEWER_ID so a Jane/Drik step that
+    somehow loaded this tool cannot emit a COACH_LOCK, and a coach step
+    cannot satisfy reviewer-signoff via post_review (that tool still keys
+    only jane/drik).
+    """
+    who = os.environ.get("REVIEWER_ID", "").strip().lower()
+    if who != "coach":
+        raise RuntimeError(
+            "REVIEWER_ID is not coach — the workflow must export it for "
+            "post_coach (it is deliberately not a tool argument)")
+    return who
 
 
 def _token():
@@ -227,33 +322,83 @@ _last_payload = None
 _last_path = None
 
 
-# Reserved HTML-comment syntax the sign-off status greps for. A caller body
-# that already contains either family is refused — REVIEWER_ID only chooses
-# which marker *we* append, and get_marker() has no author check.
-_SIGNOFF_IN_BODY = re.compile(
-    r"<!--\s*(?:JANE|DRIK)_SIGNOFF\b",
+# Reserved HTML-comment syntax the sign-off / coach-lock / completion
+# checks grep for. A caller body that already contains any family is
+# refused — REVIEWER_ID only chooses which marker *we* append. get_marker()
+# has no author check, and Jane/Drik/PM share github-actions[bot] with the
+# coach, so a planted COACH_LOCK / COACH_DONE / PM_TRIAGE_DONE in a sibling
+# caller body is refused here; coach-lock-check.sh and reviewer-posted.sh
+# also require the assembled marker-then-footer suffix.
+_INJECTED_MARKER = re.compile(
+    r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE(?:_DONE)?|COACH_(?:LOCK|DONE))\b",
     re.IGNORECASE,
 )
 
 
 def _marker_line(marker, sha, verdict, fuse):
-    """The sign-off marker, assembled from validated fields — byte-identical
-    to the shape scripts/reviewer-signoff.sh parses:
+    """The Jane/Drik sign-off marker, assembled from validated fields —
+    byte-identical to the shape scripts/reviewer-signoff.sh parses:
     <!-- <FAMILY>_SIGNOFF sha=<40hex> verdict=pass|block fuse=none|acknowledged -->
     """
     return f"<!-- {marker} sha={sha} verdict={verdict} fuse={fuse} -->"
 
 
-def _post_comment(body, sha, verdict, fuse):
-    """POST one review comment to the workflow-selected PR. The marker and
-    footer are assembled HERE, from constants and validated fields, never from
-    caller input — so every post is a disclosed, correctly-signed reviewer
-    comment whatever the body says. REVIEWER_MCP_FAKE short-circuits the
-    network for the selftest (it is never set in the workflow)."""
+def _parse_designs(raw):
+    """Every design this ruling covers. Sorted unique names, or an error.
+
+    One post per run (MAX_POSTS_PER_RUN) has to name every design the PR
+    touches, so ``design`` accepts a comma- or space-separated list. A
+    single name stays the common case and keeps the historical marker
+    ``design=<name>``.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None, _tool_error(
+            "post_triage: 'design' must name every design this ruling "
+            "covers ([A-Za-z0-9][A-Za-z0-9._-]*), comma- or "
+            f"space-separated; got {raw!r}")
+    names = [t for t in re.split(r"[\s,]+", raw.strip()) if t]
+    if not names:
+        return None, _tool_error(
+            "post_triage: 'design' must name every design this ruling "
+            f"covers; got {raw!r}")
+    bad = [n for n in names if not _DESIGN_RE.fullmatch(n)]
+    if bad:
+        return None, _tool_error(
+            "post_triage: 'design' must be design directory name(s) "
+            "([A-Za-z0-9][A-Za-z0-9._-]*), comma- or space-separated; "
+            f"got {bad[0]!r}")
+    return sorted(set(names)), None
+
+
+def _triage_marker_line(designs, sha):
+    """The PM triage markers, assembled from validated fields.
+
+    Per-design verdict marker (kept for §8 reads) plus the per-head
+    completion marker (issue #770) that reviewer-posted.sh keys the
+    chain walk on — DONE is last so the body ends with the completion
+    suffix the artifact check matches:
+      <!-- PM_TRIAGE design=<name>[,<name>…] sha=<40hex> -->
+      <!-- PM_TRIAGE_DONE sha=<40hex> -->
+    """
+    return (
+        f"<!-- PM_TRIAGE design={','.join(designs)} sha={sha} -->\n\n"
+        f"<!-- PM_TRIAGE_DONE sha={sha} -->"
+    )
+
+
+def _coach_done_line(sha):
+    """Per-head coach completion marker (issue #770)."""
+    return f"<!-- COACH_DONE sha={sha} -->"
+
+
+def _post_comment(body, marker_line):
+    """POST one comment to the workflow-selected PR. The marker and footer
+    are assembled HERE, never from caller input. REVIEWER_MCP_FAKE
+    short-circuits the network for the selftest (it is never set in the
+    workflow)."""
     global _last_payload, _last_path
-    _, marker = _reviewer()
     full = (f"{body.rstrip()}\n\n"
-            f"{_marker_line(marker, sha, verdict, fuse)}\n\n"
+            f"{marker_line}\n\n"
             f"{FOOTER}")
     payload = {"body": full}
     path = f"/repos/{_repo()}/issues/{_pr_number()}/comments"
@@ -265,38 +410,251 @@ def _post_comment(body, sha, verdict, fuse):
 
 
 _SHA_CHARS = set("0123456789abcdef")
+_DESIGN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _validate_body(tool, body):
+    if not isinstance(body, str) or not body.strip():
+        return _tool_error(f"{tool}: 'body' is required (non-empty string)")
+    if len(body.encode()) > MAX_BODY_BYTES:
+        return _tool_error(
+            f"{tool}: body is {len(body.encode())} bytes, over the "
+            f"{MAX_BODY_BYTES}-byte cap — condense it")
+    if _INJECTED_MARKER.search(body):
+        return _tool_error(
+            f"{tool}: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
+            "PM_TRIAGE, PM_TRIAGE_DONE, COACH_LOCK or COACH_DONE HTML "
+            "comment — the marker is assembled server-side from typed "
+            "fields and REVIEWER_ID; a caller-supplied marker is refused so "
+            "one post cannot satisfy another identity's family")
+    return None
+
+
+def _read_head_pin_file():
+    """Return the 40-hex pin from REVIEWER_HEAD_SHA_PIN, or None."""
+    path = os.environ.get(HEAD_SHA_PIN_ENV, "").strip()
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            val = fh.read().strip().lower()
+    except OSError:
+        return None
+    if len(val) == 40 and set(val) <= _SHA_CHARS:
+        return val
+    return None
+
+
+def _expected_head_sha():
+    """The trusted head pin: pin file (coach) overrides the env seed."""
+    pinned = _read_head_pin_file()
+    if pinned is not None:
+        return pinned
+    return os.environ.get(HEAD_SHA_ENV, "").strip().lower()
+
+
+def _write_head_pin(sha_l):
+    """Advance the trusted pin (file when present, else process env).
+
+    Called only after the live PR head from the GitHub API confirmed
+    ``sha_l`` — never on a caller-supplied value alone.
+    """
+    os.environ[HEAD_SHA_ENV] = sha_l
+    path = os.environ.get(HEAD_SHA_PIN_ENV, "").strip()
+    if not path:
+        return
+    parent = os.path.dirname(path) or "."
+    try:
+        fd, tmp = tempfile.mkstemp(prefix="reviewer-head-", dir=parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(sha_l + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except OSError as e:
+        log(f"WARNING: could not advance {HEAD_SHA_PIN_ENV} ({e}); "
+            f"in-process {HEAD_SHA_ENV} is {sha_l[:12]}")
+
+
+def _live_pr_head_sha():
+    """Current PR head oid from GitHub — trusted, not model-supplied.
+
+    Selftest sets REVIEWER_MCP_FAKE + REVIEWER_MCP_FAKE_LIVE_HEAD so this
+    never hits the network. Production uses GET /repos/.../pulls/{n}.
+    """
+    if os.environ.get("REVIEWER_MCP_FAKE"):
+        fake = os.environ.get(FAKE_LIVE_HEAD_ENV, "").strip().lower()
+        if len(fake) == 40 and set(fake) <= _SHA_CHARS:
+            return fake
+        raise RuntimeError(
+            f"{FAKE_LIVE_HEAD_ENV} must be a 40-hex sha when "
+            "REVIEWER_MCP_FAKE is set (selftest wiring)")
+    path = f"/repos/{_repo()}/pulls/{_pr_number()}"
+    data = _api("GET", path)
+    sha = (data.get("head") or {}).get("sha", "")
+    if not isinstance(sha, str):
+        sha = ""
+    sha_l = sha.strip().lower()
+    if len(sha_l) != 40 or not set(sha_l) <= _SHA_CHARS:
+        raise RuntimeError(
+            f"GitHub pull head.sha is not 40-hex (got {sha!r})")
+    return sha_l
+
+
+def _validate_sha(tool, sha, *, coach_live_advance=False):
+    """Format-check ``sha`` and, when pinned, require the trusted PR head.
+
+    Returns ``(normalized_sha, None)`` on success or ``(None, error_result)``
+    on refusal. Normalization is lower-case so a mixed-case argument that
+    matches REVIEWER_HEAD_SHA still assembles the marker the artifact check
+    looks for (GitHub head shas are lower-case; the suffix match is exact).
+
+    When ``coach_live_advance`` is true (``post_coach`` only), a sha that
+    does not match the pin is still accepted if it equals the live PR head
+    from the GitHub API — the pin then advances to that value. An arbitrary
+    model-supplied sha that is neither the pin nor the live head is refused.
+    """
+    if not isinstance(sha, str) or len(sha) != 40 \
+            or not set(sha.lower()) <= _SHA_CHARS:
+        return None, _tool_error(
+            f"{tool}: 'sha' must be the PR's current head commit as 40 "
+            "lower-case hex characters (the value the workflow prompt pins "
+            f"as PR head sha / `{HEAD_SHA_ENV}`); got {sha!r}")
+    sha_l = sha.lower()
+    expected = _expected_head_sha()
+    if os.environ.get("GITHUB_RUN_ID", "").strip() and not expected:
+        return None, _tool_error(
+            f"{tool}: {HEAD_SHA_ENV} is not set but this is an unattended "
+            "run (GITHUB_RUN_ID is set) — the workflow must pin "
+            "pull_request.head.sha so a stale/wrong sha cannot burn the "
+            "one-post cap and leave reviewer-posted.sh served=false for "
+            "the real head")
+    if expected:
+        if len(expected) != 40 or not set(expected) <= _SHA_CHARS:
+            return None, _tool_error(
+                f"{tool}: {HEAD_SHA_ENV}/{HEAD_SHA_PIN_ENV} is not a 40-hex "
+                f"sha (workflow bug); got {expected!r}")
+        if sha_l != expected:
+            if coach_live_advance:
+                try:
+                    live = _live_pr_head_sha()
+                except RuntimeError as e:
+                    return None, _tool_error(
+                        f"{tool}: cannot verify live PR head to advance "
+                        f"the pin after a push ({e})")
+                if sha_l == live:
+                    _write_head_pin(sha_l)
+                    log(f"advanced trusted head pin to {sha_l[:12]} "
+                        "(matches live PR head after coach push)")
+                    return sha_l, None
+            return None, _tool_error(
+                f"{tool}: 'sha' {sha_l!r} is not the PR head pinned by "
+                f"{HEAD_SHA_ENV}/{HEAD_SHA_PIN_ENV} ({expected}) — posting "
+                "a stale sha would burn the one-post-per-run cap while "
+                "reviewer-posted.sh still reads served=false for the real "
+                "head; use the exact 40-hex from the prompt's 'PR head "
+                "sha' line (or, after a coach push, the live "
+                "`gh pr view --json headRefOid`). This refusal did not "
+                "post and did not consume the cap.")
+    return sha_l, None
+
+
+def _cap_preflight(tool):
+    """Return (state_path_or_None, error_or_None)."""
+    state = _cap_state_path()
+    if state is None:
+        return None, None
+    if not state:
+        return None, _tool_error(
+            f"{tool}: {CAP_STATE_ENV} is not set but this is an "
+            "unattended run (GITHUB_RUN_ID is set) — the workflow must "
+            "give every link step the same state-file path or the "
+            "one-post cap cannot span the chain walk; refusing to post")
+    try:
+        posted = _cap_state_count(state)
+    except RuntimeError as e:
+        return None, _tool_error(f"{tool}: {e}")
+    if posted >= MAX_POSTS_PER_RUN:
+        return None, _tool_error(
+            "this reviewer posts exactly ONE comment per run and it is "
+            f"already posted ({posted} recorded across the chain walk so "
+            "far); refusing a second comment")
+    try:
+        _cap_state_ensure_appendable(state)
+    except RuntimeError as e:
+        return None, _tool_error(f"{tool}: {e}")
+    return state, None
+
+
+def _cap_record(state, url):
+    recorded = False
+    try:
+        _cap_state_record(state, _pr_number(), url)
+        recorded = True
+    except OSError as e:
+        log(f"WARNING: posted {url} but could not append its "
+            f"{CAP_STATE_ENV} JSONL record ({e})")
+    try:
+        with open(state + ".posted", "w", encoding="utf-8") as fh:
+            fh.write("1\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        recorded = True
+    except OSError as e:
+        log(f"WARNING: posted {url} but could not write the "
+            f"{CAP_STATE_ENV} posted-flag ({e})")
+    if not recorded:
+        return _tool_error(
+            f"posted {url} but could not record the walk cap — refusing "
+            "so a later link does not treat this run as unposted")
+    return None
+
+
+def _emit(tool, body, marker_line, noun):
+    try:
+        _pr_number()
+        _repo()
+    except RuntimeError as e:
+        return _tool_error(f"{tool}: {e}")
+    state, err = _cap_preflight(tool)
+    if err is not None:
+        return err
+    try:
+        comment = _post_comment(body, marker_line)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:500] if hasattr(e, "read") else ""
+        return _tool_error(f"GitHub API error {e.code} posting {noun}: {detail}")
+    except Exception as e:  # noqa: BLE001 — surface any failure to the agent
+        return _tool_error(f"failed to post {noun}: {type(e).__name__}: {e}")
+    url = comment.get("html_url", "(unknown url)")
+    if state:
+        rec_err = _cap_record(state, url)
+        if rec_err is not None:
+            return rec_err
+    log(f"posted {_reviewer()[0]} {noun}: {url}")
+    return _tool_text(f"POSTED {url}")
 
 
 def _post_review(arguments):
-    """Post ONE signed-off review comment. The reviewer agents' entire write
-    taxonomy."""
+    """Post ONE signed-off Jane/Drik review comment."""
     args = arguments or {}
     body = args.get("body")
     sha = args.get("sha")
     verdict = args.get("verdict")
     fuse = args.get("fuse")
-    if not isinstance(body, str) or not body.strip():
-        return _tool_error("post_review: 'body' is required (non-empty string)")
-    if len(body.encode()) > MAX_BODY_BYTES:
-        return _tool_error(
-            f"post_review: body is {len(body.encode())} bytes, over the "
-            f"{MAX_BODY_BYTES}-byte cap — a review is a verdict with findings, "
-            f"not a data dump; condense it")
-    if _SIGNOFF_IN_BODY.search(body):
-        return _tool_error(
-            "post_review: body must not contain a JANE_SIGNOFF or DRIK_SIGNOFF "
-            "HTML comment — the sign-off marker is assembled server-side from "
-            "sha/verdict/fuse and REVIEWER_ID; a caller-supplied marker is "
-            "refused so one review cannot satisfy the other reviewer's gate")
-    # sha/verdict/fuse are validated here so the marker the gate parses can
-    # never be malformed from this path (a malformed marker blocks the merge
-    # fail-closed — better to refuse the post than to ship a blocker).
-    if not isinstance(sha, str) or len(sha) != 40 \
-            or not set(sha.lower()) <= _SHA_CHARS:
-        return _tool_error(
-            "post_review: 'sha' must be the PR's current head commit as 40 "
-            "lower-case hex characters (read it from `gh pr view`); got "
-            f"{sha!r}")
+    err = _validate_body("post_review", body)
+    if err is not None:
+        return err
+    sha, err = _validate_sha("post_review", sha)
+    if err is not None:
+        return err
     if verdict not in ("pass", "block"):
         return _tool_error(
             "post_review: 'verdict' must be \"pass\" (default — findings are "
@@ -308,73 +666,178 @@ def _post_review(arguments):
             "the printcheck sticky shows a fusecheck STRONG WARN you address "
             f"in a finding; got {fuse!r}")
 
-    # Identity and target are read (and validated) before anything else can
-    # run, so a mis-wired step fails loudly rather than posting as the wrong
-    # reviewer or to the wrong PR.
     try:
-        _reviewer()
+        who, marker = _reviewer()
+    except RuntimeError as e:
+        return _tool_error(f"post_review: {e}")
+    if who not in REVIEW_POSTERS:
+        return _tool_error(
+            "post_review: REVIEWER_ID is "
+            f"{who!r} — this tool posts a Jane/Drik sign-off; a pm session "
+            "must use post_triage so it cannot emit JANE_SIGNOFF/DRIK_SIGNOFF")
+    return _emit("post_review", body, _marker_line(marker, sha, verdict, fuse),
+                 "review")
+
+
+def _post_triage(arguments):
+    """Post ONE PM triage ruling. The pm-triage job's entire write taxonomy
+    besides the HITL `needs-decision` label via chunk-helper."""
+    args = arguments or {}
+    body = args.get("body")
+    sha = args.get("sha")
+    design = args.get("design")
+    err = _validate_body("post_triage", body)
+    if err is not None:
+        return err
+    sha, err = _validate_sha("post_triage", sha)
+    if err is not None:
+        return err
+    designs, err = _parse_designs(design)
+    if err is not None:
+        return err
+
+    try:
+        who, marker = _reviewer()
+    except RuntimeError as e:
+        return _tool_error(f"post_triage: {e}")
+    if who not in TRIAGE_POSTERS:
+        return _tool_error(
+            "post_triage: REVIEWER_ID is "
+            f"{who!r} — this tool posts a PM_TRIAGE ruling; a jane/drik "
+            "session must use post_review so it cannot emit the PM family")
+    if marker != "PM_TRIAGE":
+        return _tool_error(
+            "post_triage: REVIEWER_ID did not select the PM_TRIAGE family")
+    return _emit("post_triage", body, _triage_marker_line(designs, sha),
+                 "triage")
+
+
+def _post_coach_comment(body, sha):
+    """POST one coach comment. COACH_LOCK, COACH_DONE and the footer are
+    assembled HERE so a denial-only turn that never called this tool cannot
+    satisfy scripts/coach-lock-check.sh / reviewer-posted.sh with a forged
+    Jane comment. DONE is last (issue #770) so the artifact check's
+    endswith match keys on the per-head completion marker; COACH_LOCK
+    stays ahead of it for the lock-check's "contains lock + ends with
+    DONE+footer" rule."""
+    global _last_payload, _last_path
+    text = body.rstrip()
+    full = (f"{text}\n\n"
+            f"{COACH_LOCK_HTML}\n\n"
+            f"{_coach_done_line(sha)}\n\n"
+            f"{FOOTER}")
+    payload = {"body": full}
+    path = f"/repos/{_repo()}/issues/{_pr_number()}/comments"
+    _last_payload = payload
+    _last_path = path
+    if os.environ.get("REVIEWER_MCP_FAKE"):
+        return {"html_url": "https://example.invalid/fake"}
+    return _api("POST", path, payload)
+
+
+def _cap_gate(label, max_posts):
+    """Return None if posting may proceed, or a tool-error result."""
+    state = _cap_state_path()
+    if state is None:
+        return None, None
+    if not state:
+        return _tool_error(
+            f"{label}: {CAP_STATE_ENV} is not set but this is an "
+            "unattended run (GITHUB_RUN_ID is set) — the workflow must "
+            "give every link step the same state-file path or the "
+            "cap cannot span the chain walk; refusing to post"
+        ), None
+    try:
+        posted = _cap_state_count(state)
+    except RuntimeError as e:
+        return _tool_error(f"{label}: {e}"), None
+    if posted >= max_posts:
+        return _tool_error(
+            f"{label}: this run's comment cap is {max_posts} and "
+            f"{posted} are already recorded across the chain walk; "
+            "refusing another comment"
+        ), None
+    try:
+        _cap_state_ensure_appendable(state)
+    except RuntimeError as e:
+        return _tool_error(f"{label}: {e}"), None
+    return None, state
+
+
+def _cap_record_after(state, url, label):
+    recorded = False
+    try:
+        _cap_state_record(state, _pr_number(), url)
+        recorded = True
+    except OSError as e:
+        log(f"WARNING: posted {url} but could not append its "
+            f"{CAP_STATE_ENV} JSONL record ({e})")
+    try:
+        with open(state + ".posted", "w", encoding="utf-8") as fh:
+            fh.write("1\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        recorded = True
+    except OSError as e:
+        log(f"WARNING: posted {url} but could not write the "
+            f"{CAP_STATE_ENV} posted-flag ({e})")
+    if not recorded:
+        return _tool_error(
+            f"posted {url} but could not record the walk cap — refusing "
+            "so a later link does not treat this run as unposted")
+    log(f"posted {label}: {url}")
+    return None
+
+
+def _post_coach(arguments):
+    """Post one coach comment on the workflow-selected PR."""
+    args = arguments or {}
+    body = args.get("body")
+    if not isinstance(body, str) or not body.strip():
+        return _tool_error("post_coach: 'body' is required (non-empty string)")
+    if len(body.encode()) > MAX_BODY_BYTES:
+        return _tool_error(
+            f"post_coach: body is {len(body.encode())} bytes, over the "
+            f"{MAX_BODY_BYTES}-byte cap")
+    if _INJECTED_MARKER.search(body):
+        return _tool_error(
+            "post_coach: body must not contain a JANE_SIGNOFF, DRIK_SIGNOFF, "
+            "PM_TRIAGE, PM_TRIAGE_DONE, COACH_LOCK or COACH_DONE HTML "
+            "comment — those markers are assembled server-side")
+    sha = args.get("sha")
+    # Coach may push mid-round; accept the new head only when it matches
+    # the live PR head (API), advancing the trusted pin — never an
+    # arbitrary caller sha (CodeRabbit major on PR #829).
+    sha, err = _validate_sha("post_coach", sha, coach_live_advance=True)
+    if err is not None:
+        return err
+
+    try:
+        _require_coach()
         _pr_number()
         _repo()
     except RuntimeError as e:
-        return _tool_error(f"post_review: {e}")
+        return _tool_error(f"post_coach: {e}")
 
-    # Per-run cap — enforced only inside an Actions run (the unattended case
-    # it exists to bound); attended, a human is the trust boundary. The count
-    # is read from the shared state file so it spans the whole chain walk,
-    # not this one server process.
-    state = _cap_state_path()
-    if state is not None:
-        if not state:
-            return _tool_error(
-                f"post_review: {CAP_STATE_ENV} is not set but this is an "
-                "unattended run (GITHUB_RUN_ID is set) — the workflow must "
-                "give every link step the same state-file path or the "
-                "one-review cap cannot span the chain walk; refusing to post")
-        try:
-            posted = _cap_state_count(state)
-        except RuntimeError as e:
-            return _tool_error(f"post_review: {e}")
-        if posted >= MAX_POSTS_PER_RUN:
-            return _tool_error(
-                "this reviewer posts exactly ONE review per run and it is "
-                f"already posted ({posted} recorded across the chain walk so "
-                "far); refusing a second comment")
-        try:
-            _cap_state_ensure_appendable(state)
-        except RuntimeError as e:
-            return _tool_error(f"post_review: {e}")
+    err, state = _cap_gate("post_coach", MAX_COACH_POSTS_PER_RUN)
+    if err is not None:
+        return err
 
     try:
-        comment = _post_comment(body, sha, verdict, fuse)
+        comment = _post_coach_comment(body, sha)
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:500] if hasattr(e, "read") else ""
-        return _tool_error(f"GitHub API error {e.code} posting review: {detail}")
-    except Exception as e:  # noqa: BLE001 — surface any failure to the agent
-        return _tool_error(f"failed to post review: {type(e).__name__}: {e}")
+        return _tool_error(f"GitHub API error {e.code} posting coach comment: {detail}")
+    except Exception as e:  # noqa: BLE001
+        return _tool_error(f"failed to post coach comment: {type(e).__name__}: {e}")
 
     url = comment.get("html_url", "(unknown url)")
     if state:
-        recorded = False
-        try:
-            _cap_state_record(state, _pr_number(), url)
-            recorded = True
-        except OSError as e:
-            log(f"WARNING: posted {url} but could not append its "
-                f"{CAP_STATE_ENV} JSONL record ({e})")
-        try:
-            with open(state + ".posted", "w", encoding="utf-8") as fh:
-                fh.write("1\n")
-                fh.flush()
-                os.fsync(fh.fileno())
-            recorded = True
-        except OSError as e:
-            log(f"WARNING: posted {url} but could not write the "
-                f"{CAP_STATE_ENV} posted-flag ({e})")
-        if not recorded:
-            return _tool_error(
-                f"posted {url} but could not record the walk cap — refusing "
-                "so a later link does not treat this run as unposted")
-    log(f"posted {_reviewer()[0]} review: {url}")
+        rec_err = _cap_record_after(state, url, "coach")
+        if rec_err is not None:
+            return rec_err
+    else:
+        log(f"posted coach comment: {url}")
     return _tool_text(f"POSTED {url}")
 
 
@@ -410,9 +873,11 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first. "
-                        "A marker for a superseded head is treated as stale "
-                        "by the merge gate."
+                        "characters — use the exact value from the prompt's "
+                        "'PR head sha' line (pinned by the workflow as "
+                        "REVIEWER_HEAD_SHA). Do not copy a sha from an older "
+                        "comment or commit on the thread; a stale sha is "
+                        "refused and does not count as posted."
                     ),
                 },
                 "verdict": {
@@ -437,10 +902,106 @@ TOOLS = [
             "required": ["body", "sha", "verdict", "fuse"],
             "additionalProperties": False,
         },
-    }
+    },
+    {
+        "name": "post_triage",
+        "description": (
+            "Post your ONE PM triage ruling on the PR this run was launched "
+            "for (the workflow fixes the PR number and REVIEWER_ID=pm — "
+            "neither is an argument). This is your ONLY write for the "
+            "verdict comment: posting any other way (gh pr comment, writing "
+            "files) is denied by the permission backstop and will silently "
+            "fail. The body is a JSON argument, so it may be full "
+            "multi-line markdown with tables, pipes and backticks. The "
+            "PM_TRIAGE + PM_TRIAGE_DONE markers and the attribution footer "
+            "are added automatically from the design/sha fields — never "
+            "type either marker yourself. One post per run covering every "
+            "named design (a section each in the body); a second call is "
+            "refused."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "description": (
+                        "The triage body in markdown: the §8 table first. "
+                        "Multi-line markdown, tables and code spans are all "
+                        "fine here."
+                    ),
+                },
+                "design": {
+                    "type": "string",
+                    "description": (
+                        "Every design directory this ruling covers "
+                        "(designs/<name>/), comma- or space-separated. "
+                        "A single name is fine. Assembled into the "
+                        "PM_TRIAGE marker server-side so the comment "
+                        "identifies every design it rules on."
+                    ),
+                },
+                "sha": {
+                    "type": "string",
+                    "description": (
+                        "The PR's current head commit, 40 lower-case hex "
+                        "characters — use the prompt's 'PR head sha' line "
+                        "(REVIEWER_HEAD_SHA). Also assembled into the "
+                        "PM_TRIAGE_DONE completion marker (issue #770)."
+                    ),
+                },
+            },
+            "required": ["body", "design", "sha"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "post_coach",
+        "description": (
+            "Post a comment on the design PR this run was launched for "
+            "(the workflow fixes the PR number — it is not an argument). "
+            "Use this for the kickoff (start the body with "
+            "'🎓 COACH-LOCK') and later round notes. This is the coach's "
+            "comment write: a multi-line `gh pr comment --body` is denied "
+            "under dontAsk. Git checkout/add/commit/push stay available "
+            "separately for iterations. The COACH_LOCK HTML marker, the "
+            "per-head COACH_DONE completion marker (issue #770) and the "
+            "attribution footer are added automatically — pass `sha`."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "description": (
+                        "The comment body in markdown. Kickoff comments "
+                        "must start with '🎓 COACH-LOCK'. Multi-line "
+                        "markdown, tables and code spans are fine here."
+                    ),
+                },
+                "sha": {
+                    "type": "string",
+                    "description": (
+                        "The PR's current head commit, 40 lower-case hex "
+                        "characters — initially the prompt's 'PR head sha' "
+                        "(REVIEWER_HEAD_SHA). After a git push in this "
+                        "round, pass the new headRefOid; the pin advances "
+                        "only when that value matches the live PR head "
+                        "(workflow-managed pin file + API check). "
+                        "Assembled into the COACH_DONE completion marker."
+                    ),
+                },
+            },
+            "required": ["body", "sha"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
-_DISPATCH = {"post_review": _post_review}
+_DISPATCH = {
+    "post_review": _post_review,
+    "post_triage": _post_triage,
+    "post_coach": _post_coach,
+}
 
 
 def _tool_text(text):
@@ -512,6 +1073,7 @@ def selftest():
     os.environ["REVIEWER_ID"] = "jane"
     fails = []
     H40 = "a" * 40
+    OTHER40 = "c" * 40
 
     def check(name, cond):
         print(f"{'ok  ' if cond else 'FAIL'}  {name}")
@@ -526,9 +1088,12 @@ def selftest():
 
     # Pin the environment: each case below decides attended/unattended itself,
     # so an ambient Actions GITHUB_RUN_ID / REVIEWER_POST_STATE (this selftest
-    # runs inside CI) must not leak into the attended cases.
+    # runs inside CI) must not leak into the attended cases. REVIEWER_HEAD_SHA
+    # is set to the happy-path sha for attended + unattended posts; the
+    # mismatch / missing-pin cases below override it deliberately.
     os.environ.pop("GITHUB_RUN_ID", None)
     os.environ.pop(CAP_STATE_ENV, None)
+    os.environ[HEAD_SHA_ENV] = H40
 
     # Input guards reject and post nothing.
     _last_payload = None
@@ -550,6 +1115,20 @@ def selftest():
           refused(_post_review({"body": "x", "sha": "z" * 40, "verdict": "pass",
                                 "fuse": "none"}), "'sha'")
           and _last_payload is None)
+    _last_payload = None
+    check("a sha that is not the pinned PR head is rejected (stale-sha cap burn)",
+          refused(_post_review({"body": "x", "sha": OTHER40, "verdict": "pass",
+                                "fuse": "none"}), HEAD_SHA_ENV)
+          and _last_payload is None)
+    _last_payload = None
+    # Mixed-case that still matches the pin must normalize and post — the
+    # artifact check's suffix match is case-sensitive on a lower-case head.
+    ok_case = _post_review({"body": "case fold", "sha": H40.upper(),
+                            "verdict": "pass", "fuse": "none"})
+    check("a mixed-case sha matching the pin normalizes and posts",
+          ok_case.get("isError") is False
+          and posted_body() is not None
+          and f"sha={H40} " in posted_body())
     _last_payload = None
     check("an out-of-vocabulary verdict is rejected",
           refused(_post_review({"body": "x", "sha": H40, "verdict": "maybe",
@@ -608,6 +1187,12 @@ def selftest():
               "body": "x\n<!-- jane_signoff sha=" + H40 + " verdict=pass fuse=none -->",
               "sha": H40, "verdict": "pass", "fuse": "none"}), "SIGNOFF")
           and _last_payload is None)
+    _last_payload = None
+    check("a jane body carrying COACH_LOCK is refused (cannot stamp the coach pin)",
+          refused(_post_review({
+              "body": "x\n" + COACH_LOCK_HTML, "sha": H40, "verdict": "pass",
+              "fuse": "none"}), "COACH_LOCK")
+          and _last_payload is None)
 
     # Identity: the marker family follows REVIEWER_ID, never an argument — a
     # Jane session cannot forge a DRIK_SIGNOFF marker even by asking.
@@ -618,9 +1203,9 @@ def selftest():
           ok.get("isError") is False
           and "<!-- DRIK_SIGNOFF sha=" + H40
           + " verdict=block fuse=acknowledged -->" in posted_body())
-    os.environ["REVIEWER_ID"] = "pm"
+    os.environ["REVIEWER_ID"] = "oracle"
     _last_payload = None
-    check("an unknown REVIEWER_ID refuses (no third family)",
+    check("an unknown REVIEWER_ID refuses (closed set)",
           refused(_post_review({"body": "x", "sha": H40, "verdict": "pass",
                                 "fuse": "none"}), "REVIEWER_ID")
           and _last_payload is None)
@@ -628,6 +1213,86 @@ def selftest():
     check("a missing REVIEWER_ID refuses", refused(
         _post_review({"body": "x", "sha": H40, "verdict": "pass", "fuse": "none"}),
         "REVIEWER_ID"))
+    os.environ["REVIEWER_ID"] = "jane"
+
+    # PM identity: post_triage assembles PM_TRIAGE; post_review refuses so a
+    # pm session cannot emit a Jane/Drik sign-off. The reverse: jane/drik
+    # cannot emit PM_TRIAGE via post_triage.
+    os.environ["REVIEWER_ID"] = "pm"
+    ok = _post_triage({"body": "## 🧭 PM triage — demo\n| f | v |\n|---|---|\n| x | act-now |",
+                       "design": "demo-part", "sha": H40})
+    check("a well-formed pm triage posts", ok.get("isError") is False)
+    body = posted_body()
+    check("the posted triage ends with the attribution footer",
+          body.endswith(FOOTER))
+    check("the pm marker line is assembled server-side from design+sha",
+          "\n<!-- PM_TRIAGE design=demo-part sha=" + H40 + " -->\n" in body)
+    check("the pm completion marker (PM_TRIAGE_DONE) is assembled last",
+          "\n<!-- PM_TRIAGE_DONE sha=" + H40 + " -->\n" in body
+          and (body or "").endswith(
+              "<!-- PM_TRIAGE_DONE sha=" + H40 + " -->\n\n" + FOOTER))
+    check("the triage body precedes the marker",
+          body.index("PM triage") < body.index("PM_TRIAGE design="))
+    check("the triage post targets the workflow-selected PR only",
+          _last_path == "/repos/example/selftest/issues/123/comments")
+    _last_payload = None
+    check("pm calling post_review is refused (cannot emit a Jane/Drik family)",
+          refused(_post_review({"body": "x", "sha": H40, "verdict": "pass",
+                                "fuse": "none"}), "post_triage")
+          and _last_payload is None)
+    _last_payload = None
+    check("a pm body carrying a Jane sign-off marker is refused",
+          refused(_post_triage({
+              "body": "x\n<!-- JANE_SIGNOFF sha=" + H40 + " verdict=pass fuse=none -->",
+              "design": "demo-part", "sha": H40}), "SIGNOFF")
+          and _last_payload is None)
+    _last_payload = None
+    check("a pm body carrying a PM_TRIAGE marker is refused",
+          refused(_post_triage({
+              "body": "x\n<!-- PM_TRIAGE design=other sha=" + H40 + " -->",
+              "design": "demo-part", "sha": H40}), "PM_TRIAGE")
+          and _last_payload is None)
+    _last_payload = None
+    check("a pm body carrying COACH_LOCK is refused (cannot stamp the coach pin)",
+          refused(_post_triage({
+              "body": "x\n" + COACH_LOCK_HTML, "design": "demo-part",
+              "sha": H40}), "COACH_LOCK")
+          and _last_payload is None)
+    _last_payload = None
+    check("an invalid design name is refused",
+          refused(_post_triage({"body": "x", "design": "../etc", "sha": H40}),
+                  "'design'")
+          and _last_payload is None)
+    ok = _post_triage({"body": "## 🧭 PM triage — alpha\n## 🧭 PM triage — beta",
+                       "design": "beta alpha", "sha": H40})
+    check("a combined ruling names every design in the marker, sorted",
+          ok.get("isError") is False
+          and "\n<!-- PM_TRIAGE design=alpha,beta sha=" + H40 + " -->\n"
+          in posted_body()
+          and "\n<!-- PM_TRIAGE_DONE sha=" + H40 + " -->\n" in posted_body())
+    ok = _post_triage({"body": "comma list", "design": "alpha, beta",
+                       "sha": H40})
+    check("comma-separated design names assemble the same marker",
+          ok.get("isError") is False
+          and "PM_TRIAGE design=alpha,beta sha=" + H40 in posted_body()
+          and "PM_TRIAGE_DONE sha=" + H40 in posted_body())
+    _last_payload = None
+    check("a mixed list with one invalid name is refused",
+          refused(_post_triage({"body": "x", "design": "alpha,../etc",
+                                "sha": H40}), "'design'")
+          and _last_payload is None)
+    os.environ["REVIEWER_ID"] = "jane"
+    _last_payload = None
+    check("jane calling post_triage is refused (cannot emit the PM family)",
+          refused(_post_triage({"body": "x", "design": "demo-part", "sha": H40}),
+                  "post_review")
+          and _last_payload is None)
+    os.environ["REVIEWER_ID"] = "drik"
+    _last_payload = None
+    check("drik calling post_triage is refused (cross-family negative)",
+          refused(_post_triage({"body": "x", "design": "demo-part", "sha": H40}),
+                  "post_review")
+          and _last_payload is None)
     os.environ["REVIEWER_ID"] = "jane"
 
     # A missing/invalid REVIEWER_PR refuses rather than guessing a target.
@@ -650,6 +1315,17 @@ def selftest():
 
     # The walk-spanning one-review cap, inside an Actions run.
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
+    os.environ[HEAD_SHA_ENV] = H40
+
+    # Unwired head pin: run id set but no REVIEWER_HEAD_SHA. Fail closed —
+    # format-only validation is exactly the stale-sha hole this pin closes.
+    os.environ.pop(HEAD_SHA_ENV, None)
+    _last_payload = None
+    r = _post_review({"body": "unpinned head", "sha": H40, "verdict": "pass",
+                      "fuse": "none"})
+    check("an unattended run without REVIEWER_HEAD_SHA refuses (fail closed)",
+          refused(r, HEAD_SHA_ENV) and _last_payload is None)
+    os.environ[HEAD_SHA_ENV] = H40
 
     # Unwired: run id set but no state path. Fail closed — per-process
     # counting is exactly the per-link reset the state file replaces.
@@ -662,6 +1338,16 @@ def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         state = os.path.join(tmp, "reviewer-posts")
         os.environ[CAP_STATE_ENV] = state
+
+        # A stale-sha refusal must not consume the cap — otherwise a wrong
+        # first attempt would strand later links the same way a successful
+        # wrong-sha post did on PR #559.
+        _last_payload = None
+        r = _post_review({"body": "stale", "sha": OTHER40, "verdict": "pass",
+                          "fuse": "none"})
+        check("a stale-sha refusal does not consume the cap",
+              refused(r, HEAD_SHA_ENV) and _last_payload is None
+              and _cap_state_count(state) == 0)
 
         # A post that FAILS does not consume the cap — the record is appended
         # only after a successful write.
@@ -689,7 +1375,7 @@ def selftest():
         r2 = _post_review({"body": "second", "sha": H40, "verdict": "pass",
                            "fuse": "none"})
         check("a second post in the same run is refused",
-              refused(r2, "ONE review") and _last_payload is None
+              refused(r2, "ONE comment") and _last_payload is None
               and _cap_state_count(state) == 1)
 
         # THE cross-process property: link N posts and then dies; link N+1 is
@@ -755,9 +1441,145 @@ def selftest():
     os.environ.pop(CAP_STATE_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
 
-    # The JSON-RPC surface only exposes the one tool.
-    check("tools/list exposes exactly post_review",
-          [t["name"] for t in TOOLS] == ["post_review"])
+    # Coach family (#806): a separate tool, not a third REVIEWERS sign-off.
+    os.environ["REVIEWER_ID"] = "coach"
+    os.environ["REVIEWER_PR"] = "123"
+    _last_payload = None
+    check("post_review under coach is refused (not a sign-off family)",
+          refused(_post_review({"body": "x", "sha": H40, "verdict": "pass",
+                                "fuse": "none"}), "REVIEWER_ID")
+          and _last_payload is None)
+    ok = _post_coach({"body": COACH_LOCK_LINE + "\n\nkickoff", "sha": H40})
+    check("a well-formed coach post succeeds", ok.get("isError") is False)
+    body = posted_body()
+    check("the coach post carries the HTML COACH_LOCK marker",
+          COACH_LOCK_HTML in (body or ""))
+    check("the coach post carries the per-head COACH_DONE marker",
+          "<!-- COACH_DONE sha=" + H40 + " -->" in (body or ""))
+    check("the coach post ends with the assembled DONE-then-footer suffix",
+          (body or "").endswith(
+              "<!-- COACH_DONE sha=" + H40 + " -->\n\n" + FOOTER))
+    check("COACH_LOCK sits immediately before COACH_DONE",
+          (body or "").index(COACH_LOCK_HTML)
+          < (body or "").index("<!-- COACH_DONE sha=" + H40 + " -->"))
+    check("the coach post targets the workflow-selected PR",
+          _last_path == "/repos/example/selftest/issues/123/comments")
+    _last_payload = None
+    os.environ["REVIEWER_ID"] = "jane"
+    check("post_coach under jane is refused",
+          refused(_post_coach({"body": "x", "sha": H40}), "coach")
+          and _last_payload is None)
+    os.environ["REVIEWER_ID"] = "coach"
+    _last_payload = None
+    check("post_coach missing body is refused",
+          _post_coach({"sha": H40}).get("isError") is True
+          and _last_payload is None)
+    _last_payload = None
+    check("post_coach missing sha is refused",
+          _post_coach({"body": "x"}).get("isError") is True
+          and _last_payload is None)
+    _last_payload = None
+    check("a coach body carrying a JANE_SIGNOFF marker is refused",
+          refused(_post_coach({
+              "body": "<!-- JANE_SIGNOFF sha=" + H40
+              + " verdict=pass fuse=none -->", "sha": H40}), "SIGNOFF")
+          and _last_payload is None)
+    _last_payload = None
+    check("a coach body carrying a caller-supplied COACH_LOCK is refused",
+          refused(_post_coach({"body": "x\n" + COACH_LOCK_HTML, "sha": H40}),
+                  "COACH_LOCK")
+          and _last_payload is None)
+    _last_payload = None
+    check("a coach body carrying a caller-supplied COACH_DONE is refused",
+          refused(_post_coach({
+              "body": "x\n<!-- COACH_DONE sha=" + H40 + " -->",
+              "sha": H40}), "COACH_DONE")
+          and _last_payload is None)
+
+    os.environ["GITHUB_RUN_ID"] = "selftest-coach-cap"
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "coach-posts")
+        os.environ[CAP_STATE_ENV] = state
+        for i in range(MAX_COACH_POSTS_PER_RUN):
+            r = _post_coach({"body": f"note {i}", "sha": H40})
+            check(f"coach post {i + 1} under the cap succeeds",
+                  r.get("isError") is False)
+        _last_payload = None
+        r = _post_coach({"body": "one too many", "sha": H40})
+        check("coach post past the cap is refused",
+              r.get("isError") is True and _last_payload is None)
+    os.environ.pop(CAP_STATE_ENV, None)
+    os.environ.pop("GITHUB_RUN_ID", None)
+
+    # Coach pin advance after a push (PR #829 / CodeRabbit major): the
+    # workflow seeds REVIEWER_HEAD_SHA_PIN; a later post_coach with the
+    # NEW head is accepted only when that sha equals the live PR head
+    # (API), and the pin file advances so artifact checks / later links
+    # see it. An arbitrary non-live sha stays refused and does not
+    # consume the cap. Jane cannot take this path.
+    os.environ["GITHUB_RUN_ID"] = "selftest-coach-pin-advance"
+    os.environ["REVIEWER_ID"] = "coach"
+    os.environ[HEAD_SHA_ENV] = H40
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "coach-pin-posts")
+        pin = os.path.join(tmp, "reviewer-head-sha")
+        with open(pin, "w", encoding="utf-8") as fh:
+            fh.write(H40 + "\n")
+        os.environ[CAP_STATE_ENV] = state
+        os.environ[HEAD_SHA_PIN_ENV] = pin
+        os.environ[FAKE_LIVE_HEAD_ENV] = OTHER40
+
+        _last_payload = None
+        # Stale / invented sha that is neither the pin nor the live head.
+        ghost = "d" * 40
+        r = _post_coach({"body": "ghost head", "sha": ghost})
+        check("coach refuses a sha that is neither pin nor live head",
+              refused(r, HEAD_SHA_ENV) and _last_payload is None
+              and _cap_state_count(state) == 0
+              and _read_head_pin_file() == H40)
+
+        # After a push the live head is OTHER40; post_coach advances the pin.
+        r = _post_coach({"body": "round summary after push", "sha": OTHER40})
+        check("coach accepts the live head after a push (pin advances)",
+              r.get("isError") is False and _last_payload is not None)
+        check("COACH_DONE carries the advanced head, not the event seed",
+              "<!-- COACH_DONE sha=" + OTHER40 + " -->" in (posted_body() or ""))
+        check("the pin file advanced to the live head",
+              _read_head_pin_file() == OTHER40)
+        check("in-process REVIEWER_HEAD_SHA advanced with the pin file",
+              os.environ.get(HEAD_SHA_ENV) == OTHER40)
+        check("a live-head advance consumes one cap slot (not a refusal)",
+              _cap_state_count(state) == 1)
+
+        # A subsequent post with the advanced pin succeeds without re-GET.
+        os.environ.pop(FAKE_LIVE_HEAD_ENV, None)
+        r = _post_coach({"body": "follow-up on new head", "sha": OTHER40})
+        check("coach posts against the advanced pin without another live GET",
+              r.get("isError") is False)
+
+        # Jane must not advance even when the "live" head would match.
+        os.environ["REVIEWER_ID"] = "jane"
+        os.environ[HEAD_SHA_ENV] = H40
+        with open(pin, "w", encoding="utf-8") as fh:
+            fh.write(H40 + "\n")
+        os.environ[FAKE_LIVE_HEAD_ENV] = OTHER40
+        _last_payload = None
+        r = _post_review({"body": "jane no advance", "sha": OTHER40,
+                          "verdict": "pass", "fuse": "none"})
+        check("jane cannot advance the pin via a live-head mismatch",
+              refused(r, HEAD_SHA_ENV) and _last_payload is None
+              and _read_head_pin_file() == H40)
+
+    os.environ.pop(CAP_STATE_ENV, None)
+    os.environ.pop(HEAD_SHA_PIN_ENV, None)
+    os.environ.pop(FAKE_LIVE_HEAD_ENV, None)
+    os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ[HEAD_SHA_ENV] = H40
+    os.environ["REVIEWER_ID"] = "jane"
+
+    check("tools/list exposes post_review, post_triage and post_coach",
+          [t["name"] for t in TOOLS] == [
+              "post_review", "post_triage", "post_coach"])
 
     if fails:
         print(f"\nreviewer_mcp selftest FAILED: {', '.join(fails)}")
@@ -778,7 +1600,10 @@ def selftest_cap_child(state_path):
     os.environ["REVIEWER_ID"] = "jane"
     os.environ["GITHUB_RUN_ID"] = "selftest-link-n+1"
     os.environ[CAP_STATE_ENV] = state_path
-    r = _post_review({"body": "cross-process probe", "sha": "b" * 40,
+    # Pin the head to the sha this probe posts — unattended runs require it.
+    child_sha = "b" * 40
+    os.environ[HEAD_SHA_ENV] = child_sha
+    r = _post_review({"body": "cross-process probe", "sha": child_sha,
                       "verdict": "pass", "fuse": "none"})
     outcome = "REFUSED" if r.get("isError") else "POSTED"
     print(f"{outcome}: {r['content'][0]['text']}")

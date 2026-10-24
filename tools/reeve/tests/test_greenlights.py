@@ -1,6 +1,6 @@
 """Precedent-log tests (issue #445) — the greenlight loop's learning half.
 
-Three groups, mirroring the module's three pure layers:
+Four groups, mirroring the module's four pure layers:
 
 - **parse/render** — the strict ndjson schema, every malformation loud with
   its line number, and the golden round-trip against the REAL committed seed
@@ -11,6 +11,10 @@ Three groups, mirroring the module's three pure layers:
   exactly one record each, everything else yields none, and the reaction
   precedence (ledger row → verdict label → inline reply → honest none) and
   outcome shapes are pinned.
+- **restore** — the branch builders' repair (``merge_logs``): a tip that lost
+  seed records gets them back in front, every tip record kept byte-for-byte;
+  an empty tip yields exactly the seed, a complete tip exactly itself, and a
+  malformed input raises rather than being repaired into data loss.
 - **load** — the drafter's capped context: the most recent records reach the
   digest, records beyond the cap never do, replies are bounded, and an empty
   log renders the fresh-log placeholder rather than an error.
@@ -319,6 +323,102 @@ def test_append_records_repairs_a_missing_final_newline():
     updated = greenlights.append_records(lone, fresh)
     assert updated.count("\n") == 2  # the repaired separator + the record's own
     assert [r["issue"] for r in greenlights.parse_log(updated)] == [500, 501]
+
+
+# --- restore (the branch builders' repair, merge_logs) ---------------------------
+#
+# The live defect: the data branch's tip carried telemetry/reeve-greenlights
+# .ndjson as the EMPTY blob while the default-branch seed holds six records —
+# the truncating `git show <tip>:<path> > <path>` seed read had pushed a 0-byte
+# copy, and plain re-seeding from that tip keeps it empty forever.
+
+
+def _seed_text():
+    return SEED.read_text(encoding="utf-8")
+
+
+def _line(**overrides):
+    return greenlights.render_line(_record(**overrides)) + "\n"
+
+
+def test_merge_empty_tip_yields_exactly_the_seed():
+    # The live case: a 0-byte tip. Whitespace-only is the same empty state
+    # parse_log already treats as no records.
+    seed = _seed_text()
+    for tip in ("", "\n", "\n\n"):
+        assert greenlights.merge_logs(tip, seed) == seed, repr(tip)
+
+
+def test_merge_tip_holding_every_seed_issue_is_byte_identical_to_the_tip():
+    # A healthy branch passes through untouched: the seed's own bytes, and the
+    # seed plus everything the observer appended after it.
+    seed = _seed_text()
+    assert greenlights.merge_logs(seed, seed) == seed
+    grown = seed + _line(issue=501) + _line(issue=502)
+    assert greenlights.merge_logs(grown, seed) == grown
+
+
+def test_merge_restores_lost_seed_records_before_the_tip_in_seed_order():
+    seed = _seed_text()
+    seed_lines = seed.splitlines()
+    # The tip kept #230 and #267 (out of seed order, as an append could leave
+    # them) and grew #501; the other four seed rounds are gone.
+    tip = seed_lines[4] + "\n" + _line(issue=501) + seed_lines[2] + "\n"
+    merged = greenlights.merge_logs(tip, seed)
+    lost = [seed_lines[0], seed_lines[1], seed_lines[3], seed_lines[5]]
+    assert merged == "".join(line + "\n" for line in lost) + tip
+    # Tip bytes kept exactly and in order, after the restored seed rounds.
+    assert merged.endswith(tip)
+    assert [r["issue"] for r in greenlights.parse_log(merged)] == [
+        201, 202, 265, 269, 267, 501, 230]
+
+
+def test_merge_keeps_the_tips_record_over_the_seeds_for_the_same_issue():
+    # The tip is the live data: a tip record for a seed issue wins, and the
+    # seed's version is NOT added beside it (no duplicate issue).
+    seed = _seed_text()
+    tip = _line(issue=267, reasoning="the live copy, not the seed's")
+    merged = greenlights.merge_logs(tip, seed)
+    records = greenlights.parse_log(merged)
+    assert [r["issue"] for r in records].count(267) == 1
+    assert merged.endswith(tip)
+    assert [r["issue"] for r in records] == [201, 202, 230, 265, 269, 267]
+
+
+def test_merge_preserves_a_tip_without_a_final_newline():
+    seed = _seed_text()
+    tip = _line(issue=501).rstrip("\n")
+    merged = greenlights.merge_logs(tip, seed)
+    assert merged == seed + tip  # the tip's bytes are not "repaired" either
+
+
+def test_merge_is_idempotent():
+    seed = _seed_text()
+    for tip in ("", _line(issue=501), seed.splitlines()[3] + "\n"):
+        once = greenlights.merge_logs(tip, seed)
+        assert greenlights.merge_logs(once, seed) == once, repr(tip)
+
+
+def test_merge_with_an_empty_seed_is_the_tip():
+    tip = _line(issue=501)
+    assert greenlights.merge_logs(tip, "") == tip
+    assert greenlights.merge_logs("", "") == ""
+
+
+def test_merge_refuses_a_malformed_tip_naming_its_line():
+    # NEGATIVE CONTROL: a tip the strict parser rejects must raise (the CLI then
+    # writes nothing and the builder pushes the tip unchanged) — never be
+    # "repaired" by dropping the bad line in favour of the seed.
+    tip = _line(issue=501) + "{oops\n"
+    with pytest.raises(ValueError, match=r"tip:2"):
+        greenlights.merge_logs(tip, _seed_text())
+    with pytest.raises(ValueError, match=r"branch\.ndjson:1"):
+        greenlights.merge_logs('{"issue": 1}\n', _seed_text(), tip_where="branch.ndjson")
+
+
+def test_merge_refuses_a_malformed_seed_naming_its_line():
+    with pytest.raises(ValueError, match=r"seed:1"):
+        greenlights.merge_logs(_line(issue=501), "not json\n")
 
 
 # --- load (the drafter's capped context) ----------------------------------------

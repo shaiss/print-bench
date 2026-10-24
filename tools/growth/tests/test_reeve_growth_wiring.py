@@ -121,11 +121,17 @@ def test_every_link_gets_a_fresh_tested_dedup_context():
     assert wiring_errors(WORKFLOW.read_text(encoding="utf-8"), _dedup_env()) == []
 
 
+def _n_links(text: str | None = None) -> int:
+    src = text if text is not None else WORKFLOW.read_text(encoding="utf-8")
+    return sum(1 for s in _steps(_job_text(src)) if "uses: anthropics/claude-code-action" in s)
+
+
 def test_the_workflow_invocation_parses_and_runs_under_the_real_cli(tmp_path):
     text = WORKFLOW.read_text(encoding="utf-8")
     invocations = [a for a in map(_invocation, _steps(_job_text(text))) if a]
-    assert len(invocations) == 3, "expected the head assembly + two tail refreshes"
-    assert all(a == invocations[0] for a in invocations), "the three copies diverged"
+    n = _n_links(text)
+    assert len(invocations) == n, f"expected the head assembly + {n - 1} tail refreshes"
+    assert all(a == invocations[0] for a in invocations), "the dedup-context copies diverged"
     snap = tmp_path / "snap.json"
     snap.write_text(json.dumps([{"number": 597, "title": "Growth post: declined",
                                  "state": "open",
@@ -155,7 +161,8 @@ def test_a_link_without_the_context_env_is_caught():
     head, sep, tail = text.rpartition(line)
     assert sep, "env line not found"
     errors = wiring_errors(head + tail, env)
-    assert any(e.startswith("link 3: env") for e in errors), errors
+    last = _n_links()
+    assert any(e.startswith(f"link {last}: env") for e in errors), errors
 
 
 def test_a_tail_link_without_its_refresh_is_caught():
@@ -178,7 +185,8 @@ def test_a_refresh_that_does_not_invalidate_first_is_caught():
     assert sep, "rm -f line not found"
     errors = wiring_errors(head + tail, _dedup_env())
     rm_errors = [e for e in errors if "rm -f" in e]
-    assert len(rm_errors) == 1 and rm_errors[0].startswith("link 3:"), errors
+    last = _n_links()
+    assert len(rm_errors) == 1 and rm_errors[0].startswith(f"link {last}:"), errors
 
 
 def test_an_rm_after_the_invocation_does_not_count():
@@ -189,7 +197,7 @@ def test_an_rm_after_the_invocation_does_not_count():
     cat = "          cat .reeve-growth-context/dedup.md || true\n"
     text = text.replace(rm, "").replace(cat, rm + cat)
     errors = wiring_errors(text, _dedup_env())
-    assert len([e for e in errors if "rm -f" in e]) == 3, errors
+    assert len([e for e in errors if "rm -f" in e]) == _n_links(), errors
 
 
 def test_an_inline_gh_listing_is_caught():
@@ -199,15 +207,16 @@ def test_an_inline_gh_listing_is_caught():
 
 
 def test_a_mismatched_out_dir_is_caught():
-    text = _tamper("--out-dir .reeve-growth-context;", "--out-dir .elsewhere;", count=3)
+    n = _n_links()
+    text = _tamper("--out-dir .reeve-growth-context;", "--out-dir .elsewhere;", count=n)
     errors = wiring_errors(text, _dedup_env())
-    assert len([e for e in errors if "env does not carry" in e]) == 3, errors
+    assert len([e for e in errors if "env does not carry" in e]) == n, errors
 
 
 def test_a_renamed_server_env_var_is_caught():
     # If queue_mcp.py renamed its env var, every link would be unwired.
     errors = wiring_errors(WORKFLOW.read_text(encoding="utf-8"), "GROWTHQ_RENAMED")
-    assert len(errors) == 3, errors
+    assert len(errors) == _n_links(), errors
 
 
 @pytest.mark.parametrize("missing", ["--repo", "--out-dir"])
