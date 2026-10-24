@@ -118,7 +118,9 @@
       "Bash(./scripts/growth-perms-check.sh:*)",
       "Bash(scripts/growth-perms-check.sh:*)",
       "mcp__oracle",
-      "mcp__growth_queue"
+      "mcp__growth_queue",
+      "mcp__reviewer",
+      "mcp__reviewer__post_review"
     ]
   }
 }

@@ -193,7 +193,8 @@ than guessed.
 `scripts/site.sh` builds a static product site from what the repo already
 commits — it invents no content. The local and CI build is deterministic and
 offline; the live deploy may fetch first-party data (release manifests, repo
-history) through a best-effort seam that stays empty on failure. "No external
+history) through a best-effort seam that never fails the build and shows a failed fetch as
+a visible "unavailable" state rather than as empty data. "No external
 references" governs the served bytes: everything the browser loads is vendored,
 never a CDN. A local reference that doesn't resolve fails the build.
 
