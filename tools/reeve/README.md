@@ -271,7 +271,8 @@ whose gate resolved (closed, or verdict-labeled by `decide.yml`):
 derive rule (one record per resolved-and-unrecorded round, idempotent, owner
 reaction from the decide.yml ledger row → the verdict label → inline owner
 replies → the honest "none observed"), and the capped context digest the
-drafter reads. Two CLI verbs compose it over the GET seam:
+drafter reads. Two CLI verbs compose it over the GET seam, and an offline
+third repairs the data branch's copy:
 
 - **`reeve greenlight-context`** — the *load* half. Renders the most recent
   `greenlight_precedent_cap` records plus the inline owner replies on their
@@ -290,6 +291,27 @@ drafter reads. Two CLI verbs compose it over the GET seam:
   neither builder can silently delete the other's records
   (`tests/test_learning_wiring.py` pins that parity, tamper negative
   included).
+- **`reeve greenlights-merge --tip T --seed S --out O`** — both builders'
+  *repair* step, run after they seed the log from the branch's tip. It puts
+  back any record of the default-branch seed whose `issue` the tip lacks,
+  BEFORE the tip records and in seed order (the seed's rounds are the older
+  ones), and keeps every tip record byte-for-byte: an empty tip yields exactly
+  the seed, a tip that already holds every seed issue yields exactly itself.
+  It exists because the builders used to seed with `git show <tip>:<path> >
+  <path>`, which truncates the seed before git looks the path up — a tip
+  without the file was pushed back as a 0-byte one, and plain re-seeding from
+  that tip kept it empty forever. A tip (or seed) that fails the strict parse
+  exits 1 having written nothing, and the builder keeps the tip's bytes and
+  warns. Offline and stdlib-only, so `ci.yml` runs it uninstalled
+  (`PYTHONPATH=tools/reeve/src python3 -m reeve greenlights-merge ...`).
+
+The data branch is a five-path tree, identical from both builders: the three
+`telemetry/` files plus a Vercel guard hashed from the committed
+`.github/data-branch-guard/` (a root `vercel.json` disabling git deployments,
+and a stub `scripts/vercel-ignore-build.sh` exiting 0 — the project's Ignored
+Build Step runs in the pushed tree, and without the script there it exits 127,
+which Vercel reads as "build"). Every seed read is guarded by `git cat-file -e`
+and lands through a temp file; the wiring tests forbid the truncating shape.
 
 Both halves share the loop's gates (`greenlight: true` + arming); a dry run
 builds the context but derives and pushes nothing.
@@ -322,6 +344,8 @@ reeve greenlight-poll --repo owner/name      # poll prior greenlights; push appr
                                              # --conf applies the standing modes, #446)
 reeve greenlight-context --repo owner/name   # the drafter's precedent digest (#445)
 reeve greenlight-append --repo owner/name    # records for newly-resolved rounds (#445)
+reeve greenlights-merge --tip T --seed S --out O  # restore seed records the data branch lost
+python3 -m reeve ...                          # the same CLI, uninstalled (PYTHONPATH=tools/reeve/src)
 ```
 
 `--repo` (on `gather` and `run`) attaches the run-health block; the token comes
@@ -356,7 +380,8 @@ bytes with exactly the banner line and its blank inserted once (released is
 asserted equal to the golden as the negative control);
 each detector has a positive case and a negative control, the precedent log has
 a golden round-trip against the committed seed, and `tests/test_learning_wiring.py`
-pins the workflow wiring (context channel, three-file branch parity, keyless
-observer). CI runs the suite when `tools/reeve/**`, `.github/reeve.conf`,
-`.github/workflows/reeve.yml` or the precedent-log seed changes
-(`scripts/ci-classify.sh`).
+pins the workflow wiring (context channel, five-path branch parity with a
+tamper negative per path, guarded non-truncating seed reads, the merge repair,
+keyless observer). CI runs the suite when `tools/reeve/**`, `.github/reeve.conf`,
+`.github/workflows/reeve.yml`, the precedent-log seed or
+`.github/data-branch-guard/` changes (`scripts/ci-classify.sh`).

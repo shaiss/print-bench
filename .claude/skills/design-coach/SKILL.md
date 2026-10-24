@@ -61,8 +61,12 @@ preview, or CI's posted output on the new head. Evidence, not re-derivation.
    (JSON `body` + `sha` arguments: tables, pipes, newlines are fine). The
    tool appends `<!-- COACH_LOCK -->`, the per-head
    `<!-- COACH_DONE sha=<40hex> -->` completion marker (issue #770 — pass
-   the PR head as `sha`) and the attribution footer; start the kickoff
-   body with `🎓 COACH-LOCK`. Do not use `gh pr comment` there.
+   the trusted head pin as `sha`: initially the prompt's PR head; after a
+   `git push` in the round, pass the new `headRefOid` from
+   `gh pr view --json headRefOid` — the pin advances only when that value
+   matches the live PR head, never an arbitrary sha) and the attribution
+   footer; start the kickoff body with `🎓 COACH-LOCK`. Do not use
+   `gh pr comment` there.
 
    Attended, outside that job, the fallback that also passes the matcher is
    two steps: `Write` the markdown to a file, then a **single-line**

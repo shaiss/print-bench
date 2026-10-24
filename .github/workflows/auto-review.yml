@@ -519,7 +519,7 @@ jobs:
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -527,6 +527,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -541,6 +542,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       # Artifact check (issue #762): claude-code-action exits 0 whenever the
       # agent ends its turn without an API error, so a link that posted
@@ -562,17 +568,25 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
           echo "link 1 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane \
+              --since "$SINCE" --link 1 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /jane-review via Z.AI GLM (chain link 2)
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -580,6 +594,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -594,6 +609,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 2 (did Jane's review land?)
         id: v2
@@ -603,17 +623,25 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
           echo "link 2 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane \
+              --since "$SINCE" --link 2 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /jane-review via Z.AI GLM (chain link 3)
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -621,6 +649,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -635,6 +664,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 3 (did Jane's review land?)
         id: v3
@@ -644,11 +678,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
           echo "link 3 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane \
+              --since "$SINCE" --link 3 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /jane-review via Anthropic (chain link 4)
         id: p4
@@ -659,11 +701,12 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -678,6 +721,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 4 (did Jane's review land?)
         id: v4
@@ -687,11 +735,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
           echo "link 4 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane \
+              --since "$SINCE" --link 4 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /jane-review via Anthropic (chain link 5)
         id: p5
@@ -703,11 +759,12 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -722,6 +779,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 5 (did Jane's review land?)
         id: v5
@@ -731,11 +793,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
           echo "link 5 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane \
+              --since "$SINCE" --link 5 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /jane-review via Anthropic (chain link 6)
         id: p6
@@ -748,11 +818,12 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: jane
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -767,6 +838,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /jane-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 6 (did Jane's review land?)
         id: v6
@@ -776,11 +852,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane --since "$SINCE")"
           echo "link 6 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer jane \
+              --since "$SINCE" --link 6 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: No provider key configured
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
@@ -945,7 +1029,7 @@ jobs:
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -953,6 +1037,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -967,6 +1052,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       # Artifact check (issue #762) — same discipline as the jane-review job:
       # each Drik link is followed by a check of the only evidence that counts,
@@ -981,17 +1071,25 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
           echo "link 1 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik \
+              --since "$SINCE" --link 1 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /drik-review via Z.AI GLM (chain link 2)
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -999,6 +1097,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -1013,6 +1112,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 2 (did Drik's review land?)
         id: v2
@@ -1022,17 +1126,25 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
           echo "link 2 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik \
+              --since "$SINCE" --link 2 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /drik-review via Z.AI GLM (chain link 3)
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1040,6 +1152,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -1054,6 +1167,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 3 (did Drik's review land?)
         id: v3
@@ -1063,11 +1181,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
           echo "link 3 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik \
+              --since "$SINCE" --link 3 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /drik-review via Anthropic (chain link 4)
         id: p4
@@ -1078,11 +1204,12 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -1097,6 +1224,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 4 (did Drik's review land?)
         id: v4
@@ -1106,11 +1238,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
           echo "link 4 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik \
+              --since "$SINCE" --link 4 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /drik-review via Anthropic (chain link 5)
         id: p5
@@ -1122,11 +1262,12 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -1141,6 +1282,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 5 (did Drik's review land?)
         id: v5
@@ -1150,11 +1296,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
           echo "link 5 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik \
+              --since "$SINCE" --link 5 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: /drik-review via Anthropic (chain link 6)
         id: p6
@@ -1167,11 +1321,12 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: drik
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -1186,6 +1341,11 @@ jobs:
           claude_args: --permission-mode dontAsk --settings .claude/reviewer-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_review,Read,Grep,Glob" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
             /drik-review ${{ github.event.pull_request.number }}
+            
+            PR head sha (required for your post tool's sha argument —
+            use this exact 40-hex value; do not copy a sha from an older
+            comment or commit on the thread):
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Artifact check after link 6 (did Drik's review land?)
         id: v6
@@ -1195,11 +1355,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
+          REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         run: |
           set -euo pipefail
           served="$(scripts/reviewer-posted.sh check \
             --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik --since "$SINCE")"
           echo "link 6 artifact: served=$served"
+          if [ "$served" != "true" ]; then
+            scripts/reviewer-posted.sh diagnose \
+              --pr "$PR_NUMBER" --sha "$HEAD_SHA" --reviewer drik \
+              --since "$SINCE" --link 6 \
+              --cap-state "${REVIEWER_POST_STATE:-$RUNNER_TEMP/reviewer-posts}" \
+              --execution-log "$RUNNER_TEMP/claude-execution-output.json" || true
+          fi
 
       - name: No provider key configured
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI != 'true' && env.HAS_ANTHROPIC != 'true'
@@ -1373,7 +1541,7 @@ jobs:
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1381,6 +1549,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -1396,7 +1565,10 @@ jobs:
             finding per §8, then post ONE combined PM verdict comment covering
             all of them (a §8 section per design) via the post_triage MCP tool
             once — pass every design name in `design` (comma-separated) with
-            `body` and `sha`. A second post_triage call is refused. Never
+            `body` and `sha`. PR head sha (required for post_triage's sha
+            argument — use this exact 40-hex; do not copy a sha from an
+            older comment): ${{ github.event.pull_request.head.sha }}.
+            A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1441,7 +1613,7 @@ jobs:
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1449,6 +1621,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -1464,7 +1637,10 @@ jobs:
             finding per §8, then post ONE combined PM verdict comment covering
             all of them (a §8 section per design) via the post_triage MCP tool
             once — pass every design name in `design` (comma-separated) with
-            `body` and `sha`. A second post_triage call is refused. Never
+            `body` and `sha`. PR head sha (required for post_triage's sha
+            argument — use this exact 40-hex; do not copy a sha from an
+            older comment): ${{ github.event.pull_request.head.sha }}.
+            A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1509,7 +1685,7 @@ jobs:
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -1517,6 +1693,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -1532,7 +1709,10 @@ jobs:
             finding per §8, then post ONE combined PM verdict comment covering
             all of them (a §8 section per design) via the post_triage MCP tool
             once — pass every design name in `design` (comma-separated) with
-            `body` and `sha`. A second post_triage call is refused. Never
+            `body` and `sha`. PR head sha (required for post_triage's sha
+            argument — use this exact 40-hex; do not copy a sha from an
+            older comment): ${{ github.event.pull_request.head.sha }}.
+            A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1582,11 +1762,12 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -1602,7 +1783,10 @@ jobs:
             finding per §8, then post ONE combined PM verdict comment covering
             all of them (a §8 section per design) via the post_triage MCP tool
             once — pass every design name in `design` (comma-separated) with
-            `body` and `sha`. A second post_triage call is refused. Never
+            `body` and `sha`. PR head sha (required for post_triage's sha
+            argument — use this exact 40-hex; do not copy a sha from an
+            older comment): ${{ github.event.pull_request.head.sha }}.
+            A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1653,11 +1837,12 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -1673,7 +1858,10 @@ jobs:
             finding per §8, then post ONE combined PM verdict comment covering
             all of them (a §8 section per design) via the post_triage MCP tool
             once — pass every design name in `design` (comma-separated) with
-            `body` and `sha`. A second post_triage call is refused. Never
+            `body` and `sha`. PR head sha (required for post_triage's sha
+            argument — use this exact 40-hex; do not copy a sha from an
+            older comment): ${{ github.event.pull_request.head.sha }}.
+            A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1725,11 +1913,12 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: pm
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -1745,7 +1934,10 @@ jobs:
             finding per §8, then post ONE combined PM verdict comment covering
             all of them (a §8 section per design) via the post_triage MCP tool
             once — pass every design name in `design` (comma-separated) with
-            `body` and `sha`. A second post_triage call is refused. Never
+            `body` and `sha`. PR head sha (required for post_triage's sha
+            argument — use this exact 40-hex; do not copy a sha from an
+            older comment): ${{ github.event.pull_request.head.sha }}.
+            A second post_triage call is refused. Never
             `gh pr comment`. This job is read-only on repository content:
             post comments through that tool, and — only when §8 routes a
             blocking binary fork through the §7 HITL gate — add the
@@ -1911,6 +2103,7 @@ jobs:
         id: ready
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -1918,6 +2111,10 @@ jobs:
           # COACH-LOCK left by an earlier coach run (reopened /
           # ready_for_review / denial-only turn — issue #806).
           echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          # Seed the trusted head pin for coach posts (advanced on push).
+          # Keep the Actions expression in env: EVENT_HEAD — the ready-step
+          # run body must not interpolate expressions (git-containment guard).
+          printf '%s\n' "$EVENT_HEAD" > "${RUNNER_TEMP}/reviewer-head-sha"
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
             echo "::add-mask::${FETCH_AUTH}"
@@ -1939,6 +2136,9 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -1987,12 +2187,27 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Z.AI GLM (chain link 1)
         id: p1
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -2000,6 +2215,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2031,7 +2248,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model1 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 1 (did the coach's completion marker land?)
         id: v1
@@ -2073,6 +2290,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2107,6 +2339,9 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2155,12 +2390,27 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Z.AI GLM (chain link 2)
         id: p2
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -2168,6 +2418,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2199,7 +2451,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model2 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 2 (did the coach's completion marker land?)
         id: v2
@@ -2241,6 +2493,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2275,6 +2542,9 @@ jobs:
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2323,12 +2593,27 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Z.AI GLM (chain link 3)
         id: p3
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
@@ -2336,6 +2621,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2367,7 +2654,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model3 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 3 (did the coach's completion marker land?)
         id: v3
@@ -2409,6 +2696,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2448,6 +2750,9 @@ jobs:
           && steps.v3.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2496,6 +2801,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Anthropic (chain link 4)
         id: p4
@@ -2506,11 +2826,13 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2542,7 +2864,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model4 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 4 (did the coach's completion marker land?)
         id: v4
@@ -2584,6 +2906,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2624,6 +2961,9 @@ jobs:
           && steps.v4.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2672,6 +3012,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Anthropic (chain link 5)
         id: p5
@@ -2683,11 +3038,13 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2719,7 +3076,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model5 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
       - name: Artifact check after link 5 (did the coach's completion marker land?)
         id: v5
@@ -2761,6 +3118,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
@@ -2802,6 +3174,9 @@ jobs:
           && steps.v5.outputs.served != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
           # is applied before this script body, so in-script unset is too
           # late for LD_PRELOAD (mapped at exec) and BASH_ENV/ENV (sourced
@@ -2850,6 +3225,21 @@ jobs:
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
             scripts/coach-lock-check.sh
+          # Advance the trusted head pin to the live PR head before this
+          # link posts. The coach may have pushed in a prior link/round;
+          # REVIEWER_HEAD_SHA alone stays the event seed, so the pin file
+          # is what later post_coach / artifact checks read (PR #829).
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ ! -f "$PIN" ]]; then
+            printf '%s\n' "$EVENT_HEAD" > "$PIN"
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            printf '%s\n' "$live" > "$PIN"
+            echo "trusted head pin → ${live:0:12} (live PR head)"
+          else
+            echo "::warning::could not refresh trusted head pin from live PR head (got '$live'); keeping $(tr -d '[:space:]' < "$PIN" | head -c 12)"
+          fi
 
       - name: /design-coach via Anthropic (chain link 6)
         id: p6
@@ -2862,11 +3252,13 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWER_ID: coach
           REVIEWER_PR: ${{ github.event.pull_request.number }}
+          REVIEWER_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWER_HEAD_SHA_PIN: ${{ runner.temp }}/reviewer-head-sha
           REVIEWER_POST_STATE: ${{ runner.temp }}/reviewer-posts
           PYTHONPATH: ""
           PYTHONHOME: ""
@@ -2898,7 +3290,7 @@ jobs:
           allowed_bots: cursor
           claude_args: --permission-mode dontAsk --settings .claude/design-coach-settings.json --mcp-config .claude/reviewer-post/reviewer-mcp.json --allowedTools "mcp__reviewer__post_coach,Read,Grep,Glob,Write,Edit,Bash" --model ${{ needs.design-changes.outputs.model6 }}
           prompt: >-
-            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass sha=${{ github.event.pull_request.head.sha }} (the COACH_DONE completion marker; issue #770).
+            /design-coach ${{ github.event.pull_request.number }} — every post_coach call must pass the trusted head pin (initially sha=${{ github.event.pull_request.head.sha }}; after a git push in this round, pass the new headRefOid from `gh pr view --json headRefOid` — post_coach advances the pin only when that value matches the live PR head; COACH_DONE; issue #770 / #829).
 
 
       - name: Artifact check after link 6 (did the coach's completion marker land?)
@@ -2941,6 +3333,21 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
+          # Prefer the advanced trusted pin (coach may have pushed). Fall
+          # back to the live PR head, then the event seed in HEAD_SHA.
+          PIN="${RUNNER_TEMP}/reviewer-head-sha"
+          if [[ -f "$PIN" ]]; then
+            pinned="$(tr -d '[:space:]' < "$PIN")"
+            if [[ "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+              HEAD_SHA="$pinned"
+            fi
+          fi
+          live="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha || true)"
+          if [[ "$live" =~ ^[0-9a-f]{40}$ ]]; then
+            HEAD_SHA="$live"
+            printf '%s\n' "$live" > "$PIN"
+          fi
+          echo "artifact check head=${HEAD_SHA:0:12}"
           # Extract from base — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
           /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh

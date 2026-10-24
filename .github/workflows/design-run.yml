@@ -77,18 +77,26 @@ on:
         type: boolean
         default: false
 
-# Scoped to what the unattended /design-run run actually does: it pushes a
-# branch (contents:write) and opens a draft PR (pull-requests:write), and posts
-# its SHIP-LOCK claim and outcome (issues:write). Selection alone only needs
-# reads, but permissions are per-job not per-step, and this single job both
-# selects and runs. The job is off unless DESIGN_RUN_ENABLED is set AND the
-# committed config says enabled, and the writing steps are skipped entirely
-# without a provider secret, so these grants sit idle until the routine is
-# deliberately switched on.
+# GITHUB_TOKEN does not push. The AGENT job cannot write issues at all
+# (issue #862): its token is contents read, issues read, pull-requests read,
+# so a prompt-injected /design-run cannot label or comment ANY issue — the
+# off-issue `autonomy-ok` / `design-brief` injection the finding names. The
+# comments and labels the protocol owes the thread travel as an intents
+# file (.design-run-intents.json) that the trusted post-agent steps carry
+# and the settle job applies — only to the selected issue, only with an
+# allowlisted label (needs-decision). settle and triage, which run no agent
+# code, keep issues: write. The push PAT is not referenced in this file at
+# all — design-run-deliver.yml, a workflow_run workflow with no agent code,
+# is the only job that decrypts it. Artifact upload uses the runner's
+# ACTIONS_RUNTIME_TOKEN; it does not need actions: write, and that grant
+# would reach the agent.
+# The jobs are off unless DESIGN_RUN_ENABLED is set AND
+# the committed config says enabled, and the writing steps are skipped
+# entirely without a provider secret, so these grants sit idle until the
+# routine is deliberately switched on. Every job declares its own
+# permissions block, so this default is the least-privilege floor.
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 # Never run two design runs at once — this group serializes THIS workflow with
 # itself. It deliberately does NOT serialize against the backlog burn: GitHub
@@ -110,6 +118,29 @@ concurrency:
 jobs:
   run:
     name: Pick one design-brief and run /design-run
+    outputs:
+      start_sha: ${{ steps.start_ref.outputs.sha }}
+      deliver_sha256: ${{ steps.start_ref.outputs.deliver_sha256 }}
+      bundle_sha256: ${{ steps.bundle.outputs.sha256 }}
+      # True only after the trusted metadata upload. A bundle file the agent
+      # uploaded under the same artifact name does not count: that upload
+      # makes this step's upload fail, and delivery refuses the artifact.
+      bundle_pending: ${{ steps.meta_upload.outputs.ready == 'true' && 'true' || 'false' }}
+      meta_uploaded: ${{ steps.meta_upload.outputs.ready }}
+      lock_uploaded: ${{ steps.lock_uploaded.outputs.ready }}
+      # True only after the TRUSTED intents upload step. settle's applier
+      # keys on this; the agent has no actions: write, so it cannot plant
+      # the artifact, and an earlier same-name upload would break the
+      # trusted upload instead.
+      intents_uploaded: ${{ steps.intents_upload.outputs.ready }}
+      agent_window_end: ${{ steps.agent_window.outputs.end }}
+      issue: ${{ steps.select.outputs.issue }}
+      job_window_start: ${{ steps.job_window.outputs.start }}
+      enabled: ${{ steps.policy.outputs.enabled }}
+      key_present: ${{ steps.policy.outputs.key_present }}
+      # The settle job's two AGENT_OUTCOME reads are this output. The drift
+      # guard counts the name AGENT_OUTCOME twice in the workflow file.
+      walk_outcome: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_zai_1.outcome == 'skipped' && steps.run_zai_2.outcome == 'skipped' && steps.run_zai_3.outcome == 'skipped' && steps.run_anthropic_4.outcome == 'skipped' && steps.run_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
     # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
     # anything but 'true' pauses the whole job in seconds without a commit.
     # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
@@ -148,6 +179,14 @@ jobs:
     # a hung run still never holds the runner (and a secret) for the 6-hour
     # default while the cleanup stays reachable inside a live job.
     timeout-minutes: 360
+    permissions:
+      # #862: no issues: write on the agent job. The token still reads the
+      # thread (the selector's snapshot and the bundle step's hard-stop
+      # read), but a comment or label POST 403s — the intents file is the
+      # agent's only voice on the thread, and settle applies it.
+      contents: read
+      issues: read
+      pull-requests: read
     env:
       # Secrets cannot be read in a step `if:` directly, so surface each
       # provider's key presence as a plain string and gate on it below. The
@@ -158,12 +197,8 @@ jobs:
       # Anthropic credential here is CLAUDE_KEY (see the auth note above).
       HAS_ANTHROPIC_KEY: ${{ secrets.CLAUDE_KEY != '' }}
       HAS_ZAI_KEY: ${{ secrets.ZAI_KEY != '' }}
-      # The github_token PAT is effectively required here (without it the draft
-      # PR won't trigger CI and readme-gate has no preview) — surfaced so a step
-      # can warn before the agentic run when it is missing.
-      HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           # Belt-and-braces with the job `if:` above: always check out the
@@ -180,9 +215,18 @@ jobs:
         # (#627). Captured here, before any agent step can move HEAD or the
         # remote-tracking refs.
         id: start_ref
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          sha="$(git --no-replace-objects rev-parse HEAD)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          # Digest of the delivery-script blob before any agent step. The
+          # deliver step compares the restored file to this, so a replace
+          # ref or an alternate object store cannot swap the bytes.
+          deliver_sha256="$(git --no-replace-objects show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
+          echo "deliver_sha256=${deliver_sha256}" >> "$GITHUB_OUTPUT"
 
       - name: Note the job window start
+        id: job_window
         # Stamped before any agent step and passed to routine-lock-cleanup as
         # --run-started-at. A claimless stop (🚢 DEFERRED, 🚢 DECLINED or
         # 🚦 DECISION NEEDED — the #675 §1 decline never claims) counts as
@@ -191,9 +235,15 @@ jobs:
         # so a later success that posts nothing cannot reuse an older stop
         # that is still the thread's latest comment, and an outsider who
         # comments during the window cannot mint a stop and skip red-on-death.
-        run: echo "JOB_WINDOW_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+        # The output feeds the settle job and the lock artifact. An agent
+        # step can rewrite GITHUB_ENV, and it cannot rewrite this step's
+        # output after the step has finished.
+        run: |
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "JOB_WINDOW_START=${ts}" >> "$GITHUB_ENV"
+          echo "start=${ts}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.12'
 
@@ -314,26 +364,116 @@ jobs:
       # matching run step here (and its slot in the resolve step's --layout)
       # — the drift guard fails either half shipped alone.
       #
-      # All five steps share the pin, the write permissions, the `github_token`
-      # that authenticates the action's own git push / PR creation, and the
-      # same /design-run prompt. The `github_token` is wired to the GH_TOKEN
-      # secret (a PAT) ON PURPOSE — and it matters MORE here than for the
-      # backlog burn: a PR opened with the default GITHUB_TOKEN does not itself
-      # trigger CI (the reason regen uses REGEN_TOKEN), so `regen` would not
-      # fire and the design's previews wouldn't be generated — and a design
-      # page WITHOUT its previews fails readme-gate.sh. With the PAT the draft
-      # PR triggers CI and the product shots regenerate. So for this pipeline a
-      # PAT as `github_token` is effectively required, to reach a mergeable
-      # state unattended: readme-gate needs a preview, and a path-traced
-      # product shot only comes from CI regen. Without a PAT, /design-run first
-      # generates what it can locally (cameras.conf previews via `render.sh
-      # --previews`); if the gate still needs a CI-only shot it stops and
-      # reports rather than opening an image-less PR that fails its own gate
-      # (see its §5 regen handoff).
+      # All five steps share the pin, the workflow's github.token, and the
+      # same /design-run prompt. That token is the job token: contents read,
+      # issues read, pull-requests read. It cannot push, it cannot open a
+      # PR, and since #862 it cannot write an issue either — the skill's
+      # owed comments and labels go into the worktree intents file
+      # (.design-run-intents.json), which the trusted bundle step copies
+      # and settle applies under a selected-issue + label-allowlist rule.
+      # The push PAT is not decrypted in this workflow.
+      # design-run-deliver.yml holds it, pushes, and opens the draft, which
+      # is what makes `regen` fire. .claude/design-run-settings.json denies
+      # `git push`, `gh pr create`, and commands that add `design-brief` or
+      # `autonomy-ok`. The steps use dontAsk because a bypassPermissions
+      # step ignores its own denies. The allow-list stays the whole
+      # toolchain (Bash plus the file tools the skill edits with).
+      # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB drops inherited secrets from
+      # subprocesses the agent spawns. sudo is disabled in the step above
+      # these five; each step requires that disable to have succeeded.
       #
       # The pin is the immutable commit behind the v1 tag; a moved tag must not
       # silently change what runs with write perms + a secret. Re-pin
       # deliberately to adopt a new release.
+
+      - name: Upload the SHIP-LOCK context
+        # Before any agent step. The artifact name is taken from here on, so
+        # the agent cannot replace it. Delivery reads this file for the issue
+        # number when the metadata artifact is missing or untrusted.
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+        env:
+          ISSUE: ${{ steps.select.outputs.issue }}
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
+          JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
+          PATH: /usr/bin:/bin
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          lock_dir="${RUNNER_TEMP}/design-run-lock"
+          mkdir -p "$lock_dir"
+          /usr/bin/jq -n \
+            --arg issue "$ISSUE" \
+            --arg start_sha "$START_SHA" \
+            --arg job_window_start "$JOB_WINDOW_START" \
+            '{issue:$issue, start_sha:$start_sha, job_window_start:$job_window_start}' \
+            > "$lock_dir/lock.json"
+          /usr/bin/jq -e '
+            (.issue | test("^[0-9]+$"))
+            and (.start_sha | test("^[0-9a-f]{40}$"))
+            and (.job_window_start | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+          ' "$lock_dir/lock.json" >/dev/null
+
+      - name: Publish the SHIP-LOCK context
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+        with:
+          name: design-run-lock
+          path: ${{ runner.temp }}/design-run-lock/lock.json
+          retention-days: 1
+          if-no-files-found: error
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Note the SHIP-LOCK context upload
+        id: lock_uploaded
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Disable sudo before the agent
+        id: disable_sudo
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          # Docker group membership gives the runner root without sudo.
+          # Stop the services and remove the sockets while sudo still works.
+          if command -v systemctl >/dev/null 2>&1; then
+            sudo systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
+          fi
+          sudo rm -f /var/run/docker.sock /run/docker.sock /run/containerd/containerd.sock
+          if id -nG | tr ' ' '\n' | grep -qx docker; then
+            sudo gpasswd -d "$(id -un)" docker || true
+          fi
+          targets=()
+          for bin in /usr/bin/sudo /bin/sudo /usr/bin/pkexec /bin/pkexec /usr/bin/su /bin/su /usr/bin/doas /bin/doas; do
+            if [ -e "$bin" ]; then
+              targets+=("$bin")
+            fi
+          done
+          if [ "${#targets[@]}" -gt 0 ]; then
+            sudo chmod a-s "${targets[@]}"
+          fi
+          if sudo -n true 2>/dev/null; then
+            echo "::error::sudo -n true still succeeds after the disable step"
+            exit 1
+          fi
+          if [ -S /var/run/docker.sock ] || [ -S /run/docker.sock ] || [ -S /run/containerd/containerd.sock ]; then
+            echo "::error::a container socket is still present after the disable step"
+            exit 1
+          fi
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            echo "::error::docker is still reachable after the disable step"
+            exit 1
+          fi
 
       - name: Run via Z.AI (GLM, chain link 1)
         id: run_zai_1
@@ -342,6 +482,7 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
         # The step must die inside a live job (step timeout < job timeout) so
         # the lock cleanup below runs as a normal step, not in a cancellation
         # grace window; continue-on-error keeps the job alive for it (the
@@ -361,11 +502,12 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link1_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link1_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       # The GLM tail (#327): links 2 and 3 of the registry's `design-run`
@@ -378,6 +520,7 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
           && steps.run_zai_1.outcome != 'success'
         timeout-minutes: 220
         continue-on-error: true
@@ -385,11 +528,12 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link2_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link2_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       - name: Run via Z.AI (GLM, chain link 3)
@@ -399,6 +543,7 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.zai_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
           && steps.run_zai_1.outcome != 'success'
           && steps.run_zai_2.outcome != 'success'
         timeout-minutes: 220
@@ -407,11 +552,12 @@ jobs:
           ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link3_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link3_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       # The cross-provider tail (issue #544): links 4 and 5 of the registry's
@@ -431,6 +577,7 @@ jobs:
           && steps.select.outputs.issue != ''
           && steps.policy.outputs.anthropic_key_present == '1'
           && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
           && steps.run_zai_1.outcome != 'success'
           && steps.run_zai_2.outcome != 'success'
           && steps.run_zai_3.outcome != 'success'
@@ -442,11 +589,13 @@ jobs:
         # repo secrets; the motivating run 31967535913 authenticated with
         # CLAUDE_KEY). The drift guard reads <alias>=<registry-secret> here and
         # pins the step to that provider's endpoint.
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link4_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link4_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
       - name: Run via Anthropic (Claude, chain link 5)
@@ -459,29 +608,45 @@ jobs:
           && steps.run_zai_1.outcome != 'success'
           && steps.run_zai_2.outcome != 'success'
           && steps.run_zai_3.outcome != 'success'
+          && steps.disable_sudo.outcome == 'success'
           && steps.run_anthropic_4.outcome != 'success'
         timeout-minutes: 120
         continue-on-error: true
         # registry-secret-alias: CLAUDE_KEY=ANTHROPIC_API_KEY — same alias as
         # link 4 (the marker must sit inside every step chunk the drift guard
         # reads).
-        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029  # v1
+        env:
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+        uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_KEY }}
-          github_token: ${{ secrets.GH_TOKEN }}
-          claude_args: --permission-mode bypassPermissions --model ${{ steps.chain.outputs.link5_model }} --effort max
+          github_token: ${{ github.token }}
+          claude_args: --permission-mode dontAsk --settings .claude/design-run-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link5_model }} --effort max
           prompt: "/design-run ${{ steps.select.outputs.issue }}"
 
-      - name: Withdraw a dead run's SHIP-LOCK
-        id: lock_cleanup
-        # The agent posts the SHIP-LOCK claim on the selected issue but cannot
-        # withdraw it when killed — the orphaned claim then excludes the issue
-        # from every later selection (issue #312). The script mirrors the
-        # selector's semantics and leaves a claim alone when a branch or
-        # closing PR corroborates it. Ambient github.token ON PURPOSE, not the
-        # GH_TOKEN PAT: GITHUB_TOKEN-authored comments never trigger
-        # issue_comment workflows (decide.yml, backlog-burn-config.yml,
-        # ci-gate-approve.yml) — a PAT here would.
+      # The agent can append to GITHUB_PATH and GITHUB_ENV. Those files are
+      # per-step: emptying them here would not undo PATH or BASH_ENV the
+      # runner already applied. Later trusted steps in this job pin PATH
+      # and the shell themselves. Label strip and lock cleanup run in the
+      # settle job, on a fresh runner.
+      #
+      # The agent step exits 0 when the model ends its turn, even if it
+      # never pushed (#538, #853). This step does not push and does not hold
+      # the PAT. It restores design-run-deliver.sh from the commit pinned
+      # before the agent ran and runs that copy with --write-bundle. The
+      # bundle is the only thing that leaves this runner. A fresh job checks
+      # the bundle and pushes. The settle job leaves the SHIP-LOCK in place
+      # while that metadata upload succeeded, so delivery can release it
+      # after the push. A failed upload is not pending, and settle withdraws.
+      #
+      # The script is NOT the worktree copy. bypassPermissions lets the agent
+      # rewrite scripts/design-run-deliver.sh (or replace it with a symlink)
+      # before this step. Same rule as the #670 lock-cleanup restore: read
+      # the blob from the commit pinned before the agent ran, refuse a
+      # symlink, and execute a regular file. The copy lives in $RUNNER_TEMP
+      # so a worktree symlink cannot redirect the write.
+      - name: Bundle the design commits
+        id: bundle
         if: >-
           always()
           && steps.policy.outputs.enabled == 'true'
@@ -489,91 +654,340 @@ jobs:
           && steps.policy.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ steps.select.outputs.issue }}
-          # .outcome, never .conclusion — continue-on-error rewrites a failed
-          # step's conclusion to success; outcome keeps the real result.
-          # The walk's three-valued outcome (#327, #544, #538): 'success' if
-          # ANY of the five links across both providers succeeded;
-          # 'not-run' only when EVERY link was skipped (no key for any
-          # provider — the agent never ran); 'failure' for everything else,
-          # INCLUDING an exit-0 link that delivered nothing. That last fold
-          # is the #538 point: claude-code-action exits 0 whenever the agent
-          # ended its turn without an API error, so a run link's 'success'
-          # outcome is indistinguishable here from its real thing — the
-          # DISPOSITION is derived downstream in routine-lock-cleanup.sh
-          # from what exists on GitHub (branch / closing PR / stop comment),
-          # and this value is diagnostic only. The not-run conjunction
-          # reads every link (not just the last), so a walk where the head
-          # links FAILED and only the keyless tail was skipped can never
-          # read 'not-run' — the cleanup would no-op on a dead run and
-          # leave its SHIP-LOCK standing, the #312 orphan-claim livelock
-          # through a different door. The drift guard
-          # (test_routine_walk_outcome_covers_every_link) simulates every
-          # outcome combination against the chain's link count and pins all
-          # three values, with a last-link-only not-run read as its
-          # negative control.
-          AGENT_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_zai_1.outcome == 'skipped' && steps.run_zai_2.outcome == 'skipped' && steps.run_zai_3.outcome == 'skipped' && steps.run_anthropic_4.outcome == 'skipped' && steps.run_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          # The start commit the checkout step left, captured before any agent
-          # step could move HEAD (#670).
           START_SHA: ${{ steps.start_ref.outputs.sha }}
+          DELIVER_SHA256: ${{ steps.start_ref.outputs.deliver_sha256 }}
+          # The restored script lives in RUNNER_TEMP. It must operate on the
+          # checkout, never on dirname($0)/.. (that is the runner work dir).
+          DELIVER_WORKTREE: ${{ github.workspace }}
+          # Step env wins over a GITHUB_ENV plant. The upload steps read
+          # runner.temp, so the shell must write the bundle to that same path.
+          RUNNER_TEMP: ${{ runner.temp }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          # Step output, not GITHUB_ENV: the agent can append to GITHUB_ENV.
+          # The hard-stop read uses this window and github.token, not the push PAT.
+          JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
+          ISSUE_READ_TOKEN: ${{ github.token }}
+          # bypassPermissions can append to GITHUB_ENV and GITHUB_PATH. Step
+          # env wins over those files, and an absolute shell is looked up
+          # before PATH. Empty LD_PRELOAD / BASH_ENV are ignored at process
+          # start; unsetting them inside the script is too late. GIT_DIR and
+          # GIT_WORK_TREE are blanked here and unset in the script before git
+          # runs: an empty GIT_DIR is still set, and git treats that as the
+          # git dir.
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_BIN: /usr/bin/git
+          GH_BIN: /usr/bin/gh
+          JQ_BIN: /usr/bin/jq
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PYTHONPATH: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          PATH: /usr/bin:/bin
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
-          # #670: the tree the walk leaves behind is untrusted for cleanup —
-          # restore the script from the commit this job started on (the
-          # default branch) and run THAT. The walk may have checked out a
-          # stacked feature branch whose older copy predates #538 and no-ops
-          # a dead 'success' (#627). git-show fallback for a tree whose index
-          # a killed agent left locked; a restore that fails entirely fails
-          # this step red — a cleanup that cannot run trusted code must not
-          # fall back to running untrusted code.
-          #
-          # Symlink-safe: bypassPermissions lets the agent leave
-          # scripts/routine-lock-cleanup.sh (or scripts/ itself) as a
-          # symlink, and the index-lock case makes the checkout below fail.
-          # Never open that path for write — a redirect follows the link and
-          # truncates whatever it points at, and chmod would follow it too.
-          # If scripts/ is a symlink, refuse (checkout and mv would write
-          # outside the workspace). If the script path is a symlink, unlink
-          # the link itself first (rm does not follow it) so checkout cannot
-          # be aimed at the target. The fallback writes the blob to a temp
-          # file outside the tree, unlinks a destination symlink again, then
-          # mv -f replaces the path (mv replaces the directory entry and does
-          # not follow a symlink). The result must be a regular file or this
-          # step fails red.
-          if [ -L scripts ]; then
-            echo "::error::refusing to restore lock-cleanup: scripts/ is a symlink" >&2
-            exit 1
-          fi
-          if [ -L scripts/routine-lock-cleanup.sh ]; then
-            rm -f scripts/routine-lock-cleanup.sh
-          fi
-          if ! git checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh; then
-            restore_tmp="$(mktemp)"
-            if ! git show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$restore_tmp"; then
-              rm -f "$restore_tmp"
-              exit 1
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+          # A detached child of the agent is reparented to init (ppid 1).
+          # setsid leaves a session leader whose parent may still not be
+          # init, and systemd-run parents the child under a transient
+          # run-*.scope. Kill those before the bundle is judged, and again
+          # after write_bundle returns, so a survivor cannot create the
+          # bundle file once this step has decided it is absent. Runner
+          # and systemd themselves are excluded by comm.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *design-run.bundle*|*model_registry*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
             fi
-            if [ -L scripts/routine-lock-cleanup.sh ]; then
-              rm -f scripts/routine-lock-cleanup.sh
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
             fi
-            mv -f "$restore_tmp" scripts/routine-lock-cleanup.sh
-          fi
-          if [ -L scripts/routine-lock-cleanup.sh ] || [ ! -f scripts/routine-lock-cleanup.sh ]; then
-            echo "::error::lock-cleanup restore did not leave a regular file" >&2
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1
           fi
-          chmod +x scripts/routine-lock-cleanup.sh
-          # JOB_WINDOW_START is stamped by "Note the job window start" into
-          # GITHUB_ENV before any agent step. Do not drop it: without a window
-          # a claimless DEFERRED cannot be attributed to this firing.
-          if [ -z "${JOB_WINDOW_START:-}" ]; then
-            echo "::error::JOB_WINDOW_START is empty — the job-window step did not run"
+          if [ -z "${DELIVER_SHA256:-}" ]; then
+            echo "::error::DELIVER_SHA256 is empty — the pin step did not hash the script" >&2
             exit 1
           fi
-          ./scripts/routine-lock-cleanup.sh --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
-            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine design-run \
-            --run-started-at "$JOB_WINDOW_START"
+          if [ -z "${DELIVER_WORKTREE:-}" ]; then
+            echo "::error::DELIVER_WORKTREE is empty" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore design-run-deliver: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/design-run-deliver.sh ]; then
+            echo "::error::refusing to restore design-run-deliver: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/design-run-deliver-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore design-run-deliver through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore design-run-deliver.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/design-run-deliver.sh"
+          if [ -L "$restore_tmp" ]; then
+            rm -f "$restore_tmp"
+          fi
+          mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x "$restore_tmp"
+          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$DELIVER_SHA256" ]; then
+            echo "::error::restored design-run-deliver.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          reap_agent_orphans
+          # --write-intents rides the same pinned script BEFORE the bundle
+          # logic: a declined run writes no bundle to ride, so the intents
+          # copy must complete first (the script copies the worktree's
+          # .design-run-intents.json whatever the bundle decision turns
+          # out to be).
+          "$restore_tmp" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --base "$START_SHA" --base-branch "$BASE_BRANCH" --run-url "$RUN_URL" \
+            --write-intents "${RUNNER_TEMP}/design-run-intents.json" \
+            --write-bundle "${RUNNER_TEMP}/design-run.bundle"
+          bundle_path="${RUNNER_TEMP}/design-run.bundle"
+          intents_path="${RUNNER_TEMP}/design-run-intents.json"
+          if [ -f "$bundle_path" ]; then
+            captured="$(sha256sum "$bundle_path" | awk '{print $1}')"
+          else
+            captured=""
+          fi
+          if [ -f "$intents_path" ]; then
+            intents_captured="$(sha256sum "$intents_path" | awk '{print $1}')"
+          else
+            intents_captured=""
+          fi
+          # write_bundle has returned. Anything still alive was not that
+          # script. Reap, then accept each file only when its digest is
+          # the one captured before the reap.
+          reap_agent_orphans
+          if [ -n "$captured" ] && [ -f "$bundle_path" ]; then
+            now="$(sha256sum "$bundle_path" | awk '{print $1}')"
+          else
+            now=""
+          fi
+          if [ -n "$intents_captured" ] && [ -f "$intents_path" ]; then
+            intents_now="$(sha256sum "$intents_path" | awk '{print $1}')"
+          else
+            intents_now=""
+          fi
+          if [ -z "$captured" ] || [ "$now" != "$captured" ]; then
+            rm -f "$bundle_path"
+          fi
+          if [ -z "$intents_captured" ] || [ "$intents_now" != "$intents_captured" ]; then
+            rm -f "$intents_path"
+          fi
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then
+            if [ -n "$captured" ] && [ "$now" = "$captured" ] && [ -f "$bundle_path" ]; then
+              echo "sha256=${now}" >> "$GITHUB_OUTPUT"
+              echo "pending=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "sha256=" >> "$GITHUB_OUTPUT"
+              echo "pending=false" >> "$GITHUB_OUTPUT"
+            fi
+            if [ -n "$intents_captured" ] && [ "$intents_now" = "$intents_captured" ] && [ -f "$intents_path" ]; then
+              echo "intents_sha256=${intents_now}" >> "$GITHUB_OUTPUT"
+              echo "intents_pending=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "intents_sha256=" >> "$GITHUB_OUTPUT"
+              echo "intents_pending=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Upload the design bundle
+        if: steps.bundle.outputs.pending == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: design-run-bundle
+          path: ${{ runner.temp }}/design-run.bundle
+          retention-days: 1
+          if-no-files-found: error
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Upload the design intents
+        # NOT gated on the bundle: a declined run writes no bundle but its
+        # stop intent still owes the thread its comment. Gated only on the
+        # trusted copy having survived the reap-and-digest check above.
+        if: steps.bundle.outputs.intents_pending == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: design-run-intents
+          path: ${{ runner.temp }}/design-run-intents.json
+          retention-days: 1
+          if-no-files-found: error
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Note the design intents upload
+        id: intents_upload
+        # Runs only when the upload step succeeded. settle's applier keys
+        # on this output as the artifact's provenance, exactly as delivery
+        # keys on the metadata upload note.
+        if: steps.bundle.outputs.intents_pending == 'true'
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Record delivery metadata
+        if: steps.bundle.outputs.pending == 'true'
+        env:
+          ISSUE: ${{ steps.select.outputs.issue }}
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
+          DELIVER_SHA256: ${{ steps.start_ref.outputs.deliver_sha256 }}
+          BUNDLE_SHA256: ${{ steps.bundle.outputs.sha256 }}
+          JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
+          WALK_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_zai_1.outcome == 'skipped' && steps.run_zai_2.outcome == 'skipped' && steps.run_zai_3.outcome == 'skipped' && steps.run_anthropic_4.outcome == 'skipped' && steps.run_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          meta_dir="${RUNNER_TEMP}/design-run-meta"
+          mkdir -p "$meta_dir"
+          meta="${meta_dir}/meta.json"
+          /usr/bin/jq -n \
+            --arg issue "$ISSUE" \
+            --arg start_sha "$START_SHA" \
+            --arg deliver_sha256 "$DELIVER_SHA256" \
+            --arg bundle_sha256 "$BUNDLE_SHA256" \
+            --arg job_window_start "$JOB_WINDOW_START" \
+            --arg walk_outcome "$WALK_OUTCOME" \
+            '{issue:$issue, start_sha:$start_sha, deliver_sha256:$deliver_sha256, bundle_sha256:$bundle_sha256, job_window_start:$job_window_start, walk_outcome:$walk_outcome}' \
+            > "$meta"
+          /usr/bin/jq -e '
+            (.issue | test("^[0-9]+$"))
+            and (.start_sha | test("^[0-9a-f]{40}$"))
+            and (.deliver_sha256 | test("^[0-9a-f]{64}$"))
+            and (.bundle_sha256 | test("^[0-9a-f]{64}$"))
+            and (.job_window_start | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+            and (.walk_outcome == "success" or .walk_outcome == "failure" or .walk_outcome == "not-run")
+          ' "$meta" >/dev/null
+
+      - name: Upload the delivery metadata
+        if: steps.bundle.outputs.pending == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: design-run-meta
+          path: ${{ runner.temp }}/design-run-meta/meta.json
+          retention-days: 1
+          if-no-files-found: error
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Note the delivery metadata upload
+        id: meta_upload
+        # Runs only when the upload step succeeded. Delivery treats this
+        # step's success, read back from the jobs API, as the provenance
+        # of design-run-meta. An earlier upload by the agent makes the
+        # trusted upload fail and this step does not run.
+        if: steps.bundle.outputs.pending == 'true'
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Note the agent window end
+        id: agent_window
+        # After the bundle step's reap. The settle job strips opt-in labels
+        # on the selected issue only when the bot added them inside
+        # [job window start, this stamp].
+        if: always()
+        run: echo "end=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Explain a skipped agentic run
         if: >-
@@ -614,10 +1028,9 @@ jobs:
           ENABLED: ${{ steps.policy.outputs.enabled }}
           POLICY_OUTCOME: ${{ steps.policy.outcome }}
           SELECT_OUTCOME: ${{ steps.select.outcome }}
-          # The walk's outcome (#327, #544, #538) — the same five-link
-          # walk expression as AGENT_OUTCOME (byte-identical, diagnostic
-          # only): success / not-run / failure. What the run actually DID
-          # is the lock cleanup's artifact-derived disposition below.
+          # The walk's outcome (#327, #544, #538) — diagnostic only. The
+          # settle job reads the same value as walk_outcome. What the run
+          # actually DID is that job's lock cleanup.
           RUN: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_zai_1.outcome == 'skipped' && steps.run_zai_2.outcome == 'skipped' && steps.run_zai_3.outcome == 'skipped' && steps.run_anthropic_4.outcome == 'skipped' && steps.run_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
           # Per-link outcomes + the chain the resolve step emitted, so the
           # summary can name WHICH link served and warn when the head
@@ -638,11 +1051,8 @@ jobs:
           P3: ${{ steps.chain.outputs.link3_provider }}
           P4: ${{ steps.chain.outputs.link4_provider }}
           P5: ${{ steps.chain.outputs.link5_provider }}
-          LOCK_WITHDRAWN: ${{ steps.lock_cleanup.outputs.withdrawn }}
-          # The artifact-derived disposition (#538) — what the run actually
-          # did, as distinct from what the agent links' exit codes said.
-          DELIVERED: ${{ steps.lock_cleanup.outputs.delivered }}
-          DECLINED: ${{ steps.lock_cleanup.outputs.declined }}
+          BUNDLE_FILE: ${{ steps.bundle.outputs.pending }}
+          META_UPLOADED: ${{ steps.meta_upload.outputs.ready }}
           # $GITHUB_STEP_SUMMARY does not auto-link a bare #N — build a real link.
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
@@ -673,80 +1083,435 @@ jobs:
               echo "- selected: [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE})"
               echo "- provider: ${PROVIDER} (head)"
               echo "- agent walk: ${RUN:-skipped} (diagnostic only)"
-              if [ "${DELIVERED}" = "true" ]; then
-                echo "- disposition: delivered — a corroborating branch or an open closing PR exists (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}) for the /design-run verdict and any draft PR)"
-              elif [ "${DECLINED}" = "true" ]; then
-                echo "- disposition: declined — the run stopped deliberately (see [#${ISSUE}](${SERVER}/${REPO}/issues/${ISSUE}))"
+              if [ "${META_UPLOADED}" = "true" ]; then
+                echo "- disposition: handed to the delivery workflow — the trusted metadata upload succeeded; delivery verifies the bundle and pushes"
+              elif [ "${BUNDLE_FILE}" = "true" ]; then
+                echo "- disposition: bundle written but the trusted metadata upload did not succeed — the settle job releases the SHIP-LOCK and fails the run"
               else
-                echo "- disposition: dead — nothing delivered, nothing declined; the red gate below fails this run"
+                echo "- disposition: no bundle — the settle job releases a dead SHIP-LOCK or records a decline"
               fi
               if [ -n "${served}" ]; then
                 echo "- served by: ${served}"
               fi
-              if [ "${LOCK_WITHDRAWN}" = "true" ]; then
-                echo "- lock cleanup: withdrew the dead run's SHIP-LOCK on #${ISSUE} so the next firing can re-select it"
-              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Before failing the run, recover WHY the chain exhausted — the agent steps
-      # hide their provider error — and route it: out of credit / out of tokens /
-      # bad key escalate to ONE deduped needs-decision issue (so a scheduled red
-      # nobody is watching becomes a human-actionable ask), a bad model id or a
-      # transient blip is just diagnosed in the log. Advisory — it never fails the
-      # job; the red gate below still fails it, and the lock cleanup above already
-      # released the SHIP-LOCK. Same disposition condition as that gate. The
-      # Anthropic key is the CLAUDE_KEY alias (as the run_anthropic_4/5 steps
-      # wire); both keys go in so classify probes both halves of the chain.
+  settle:
+    name: Apply intents and release the SHIP-LOCK on a fresh runner
+    needs: run
+    # Fresh runner. Nothing the agent wrote is on this machine, and this
+    # job does not execute a worktree path. The script blob is read from
+    # the run's start commit after that commit is shown to be in the
+    # default-branch history.
+    #
+    # This job holds issues: write — #862 keeps it away from the agent —
+    # and spends it in trusted steps only: applying the agent's intents
+    # (selected issue + label allowlist, never off-issue), stripping
+    # bot-added opt-in labels, and the lock cleanup.
+    if: always() && needs.run.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    outputs:
+      delivered: ${{ steps.lock_cleanup.outputs.delivered }}
+      declined: ${{ steps.lock_cleanup.outputs.declined }}
+    steps:
+      - name: Checkout the default branch
+        if: needs.run.outputs.start_sha != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        timeout-minutes: 2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Download the design intents
+        # Same-run artifact: no run-id needed, and the agent's token could
+        # not have uploaded it (no actions: write). The upload is trusted
+        # only because the run job's note step set intents_uploaded after
+        # the pinned upload action succeeded.
+        if: >-
+          always()
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && needs.run.outputs.intents_uploaded == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        timeout-minutes: 2
+        with:
+          name: design-run-intents
+          path: ${{ runner.temp }}/design-run-intents
+        env:
+          NODE_OPTIONS: ""
+
+      - name: Apply the agent's issue intents
+        # #862: the agent job has no issues: write, so this trusted step is
+        # the ONLY surface that posts the run's issue comments and labels.
+        # The applier (scripts/design-run-deliver.sh --apply-intents,
+        # restored from the same pre-agent pin the bundle step used and
+        # hashed against it) posts an intent only when it targets the
+        # SELECTED issue and its label is allowlisted (needs-decision);
+        # off-issue and non-allowlisted intents are dropped with a
+        # ::warning:: and never posted. It runs BEFORE the lock cleanup so
+        # the claim (and any stop) is on the thread lock cleanup reads.
+        if: >-
+          always()
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && needs.run.outputs.intents_uploaded == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.run.outputs.issue }}
+          START_SHA: ${{ needs.run.outputs.start_sha }}
+          DELIVER_SHA256: ${{ needs.run.outputs.deliver_sha256 }}
+          INTENTS_PATH: ${{ runner.temp }}/design-run-intents/design-run-intents.json
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          # The applier operates on the default-branch checkout, never on
+          # dirname($0)/.. (the runner work dir) — the bundle step's rule.
+          DELIVER_WORKTREE: ${{ github.workspace }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PYTHONPATH: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_BIN: /usr/bin/git
+          GH_BIN: /usr/bin/gh
+          JQ_BIN: /usr/bin/jq
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+          if [ -z "${START_SHA:-}" ] || [ -z "${DELIVER_SHA256:-}" ]; then
+            echo "::error::START_SHA or DELIVER_SHA256 is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          case "$START_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::START_SHA is not a commit id" >&2; exit 1 ;;
+          esac
+          if ! /usr/bin/git --no-replace-objects cat-file -e "${START_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::START_SHA is not in the default-branch history — refusing to fetch it" >&2
+            exit 1
+          fi
+          if [ "$START_SHA" != "$GITHUB_SHA" ]; then
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"; then
+              echo "::error::START_SHA is not the workflow commit or a descendant of it" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"; then
+              echo "::error::START_SHA is not on ${BASE_BRANCH}" >&2
+              exit 1
+            fi
+          fi
+          if [ -L scripts ] || [ -L scripts/design-run-deliver.sh ]; then
+            echo "::error::refusing to restore design-run-deliver: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/design-run-deliver-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore design-run-deliver through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore design-run-deliver.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/design-run-deliver-apply.sh"
+          if [ -L "$restore_tmp" ]; then
+            rm -f "$restore_tmp"
+          fi
+          mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::design-run-deliver restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x "$restore_tmp"
+          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$DELIVER_SHA256" ]; then
+            echo "::error::restored design-run-deliver.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          "$restore_tmp" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --base "$START_SHA" --base-branch "$BASE_BRANCH" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --apply-intents "$INTENTS_PATH"
+
+      - name: Strip bot-added opt-in labels
+        # issues: write cannot be split into "comment" vs "labels". Deny
+        # rules miss a request that does not spell the label name. This
+        # step removes design-brief and autonomy-ok on the selected issue
+        # only, and only when github-actions[bot] added them inside the
+        # agent window. Other issues are left alone: every workflow's
+        # GITHUB_TOKEN is that same bot, so a wider scan deletes a
+        # wright sign-off. A label that was already on the selected issue
+        # has an older event and stays. needs-decision is never removed.
+        if: >-
+          always()
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+        env:
+          ISSUE: ${{ needs.run.outputs.issue }}
+          JOB_WINDOW_START: ${{ needs.run.outputs.job_window_start }}
+          AGENT_WINDOW_END: ${{ needs.run.outputs.agent_window_end }}
+          GH_TOKEN: ${{ github.token }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          if [ -z "${JOB_WINDOW_START:-}" ] || [ -z "${AGENT_WINDOW_END:-}" ] || [ -z "${ISSUE:-}" ]; then
+            echo "::error::label strip is missing the issue or the agent window" >&2
+            exit 1
+          fi
+          case "$ISSUE" in
+            ''|*[!0-9]*) echo "::error::issue is not a number" >&2; exit 1 ;;
+          esac
+          events="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/events?per_page=100" | /usr/bin/jq -c 'add // []')"
+          for label in design-brief autonomy-ok; do
+            added="$(printf '%s\n' "$events" | /usr/bin/jq -r --arg label "$label" --arg since "$JOB_WINDOW_START" --arg until "$AGENT_WINDOW_END" '[.[] | select(.event=="labeled" and .label.name==$label and .actor.login=="github-actions[bot]" and .created_at >= $since and .created_at <= $until)] | length')"
+            case "$added" in
+              ''|*[!0-9]*) echo "::error::could not count ${label} events" >&2; exit 1 ;;
+            esac
+            if [ "$added" = "0" ]; then
+              continue
+            fi
+            if ! gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/labels/${label}" >/dev/null; then
+              if gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/labels/${label}" --jq .name >/dev/null 2>&1; then
+                echo "::error::failed to strip ${label} from #${ISSUE}" >&2
+                exit 1
+              fi
+            fi
+            echo "stripped ${label} from #${ISSUE} (bot-added during the agent window)"
+          done
+
+      - name: Withdraw a dead run's SHIP-LOCK
+        id: lock_cleanup
+        # Skipped when the trusted metadata upload succeeded. Delivery
+        # pushes, then releases the lock. Withdrawing here would drop the
+        # claim before that push. A missing upload, including a bundle the
+        # agent published under the artifact name, is not pending: this
+        # step still runs. github.token, not the push PAT.
+        if: >-
+          always()
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && needs.run.outputs.bundle_pending != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.run.outputs.issue }}
+          AGENT_OUTCOME: ${{ needs.run.outputs.walk_outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          START_SHA: ${{ needs.run.outputs.start_sha }}
+          JOB_WINDOW_START: ${{ needs.run.outputs.job_window_start }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE || true
+          if [ -z "${JOB_WINDOW_START:-}" ] || [ -z "${START_SHA:-}" ]; then
+            echo "::error::JOB_WINDOW_START or START_SHA is empty" >&2
+            exit 1
+          fi
+          case "$START_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::START_SHA is not a commit id" >&2; exit 1 ;;
+          esac
+          if ! /usr/bin/git --no-replace-objects cat-file -e "${START_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::START_SHA is not in the default-branch history — refusing to fetch it" >&2
+            exit 1
+          fi
+          if [ "$START_SHA" != "$GITHUB_SHA" ]; then
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"; then
+              echo "::error::START_SHA is not the workflow commit or a descendant of it" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"; then
+              echo "::error::START_SHA is not on ${BASE_BRANCH}" >&2
+              exit 1
+            fi
+          fi
+          script="${RUNNER_TEMP}/routine-lock-cleanup.sh"
+          rm -f "$script"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$script"; then
+            rm -f "$script"
+            exit 1
+          fi
+          if [ -L "$script" ] || [ ! -f "$script" ]; then
+            echo "::error::lock-cleanup restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x "$script"
+          "$script" --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" \
+            --agent-outcome "$AGENT_OUTCOME" --run-url "$RUN_URL" --routine design-run \
+            --run-started-at "$JOB_WINDOW_START"
+
+      - name: Turn a dead agentic run red
+        # continue-on-error on the agent steps keeps this job reachable,
+        # but alone it would leave a dead run green. #538: the gate reads
+        # the lock cleanup's artifact-derived disposition, never the walk's
+        # outcome string. bundle_pending is the trusted metadata upload, so
+        # a bundle the agent published without that upload still fails here.
+        if: >-
+          always()
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.lock_cleanup.outputs.delivered != 'true'
+          && steps.lock_cleanup.outputs.declined != 'true'
+          && needs.run.outputs.bundle_pending != 'true'
+        env:
+          ISSUE: ${{ needs.run.outputs.issue }}
+          AGENT_OUTCOME: ${{ needs.run.outputs.walk_outcome }}
+        run: |
+          echo "::error::the /design-run run for #${ISSUE} neither delivered nor declined (agent walk: ${AGENT_OUTCOME} — diagnostic only) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
+          exit 1
+
+  triage:
+    name: Diagnose an exhausted design run
+    needs: [run, settle]
+    # Fresh runner. The agent's workspace is not on this machine. Checkout
+    # is START_SHA, verified against this workflow's commit. The andon leg
+    # is on the job: this step spends ZAI_KEY and CLAUDE_KEY. Emptying
+    # GITHUB_PATH here would not undo an agent plant: those files belong
+    # to the run job's runner, which this job does not share.
+    if: >-
+      always()
+      && needs.run.result != 'skipped'
+      && needs.run.outputs.enabled == 'true'
+      && needs.run.outputs.key_present == '1'
+      && vars.AI_ANDON_CORD != 'pulled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.run.outputs.start_sha }}
+
+      - name: Verify the triage checkout
+        id: verify_triage
+        env:
+          START_SHA: ${{ needs.run.outputs.start_sha }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          BASH_ENV: ""
+          ENV: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE || true
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — provider-triage was not checked out" >&2
+            exit 1
+          fi
+          case "$START_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::START_SHA is not a commit id" >&2; exit 1 ;;
+          esac
+          head_now="$(/usr/bin/git --no-replace-objects rev-parse HEAD)"
+          if [ "$head_now" != "$START_SHA" ]; then
+            echo "::error::checkout HEAD is not START_SHA" >&2
+            exit 1
+          fi
+          if [ "$START_SHA" != "$GITHUB_SHA" ]; then
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$GITHUB_SHA" "$START_SHA"; then
+              echo "::error::START_SHA is not the workflow commit or a descendant of it" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects merge-base --is-ancestor "$START_SHA" "origin/${BASE_BRANCH}"; then
+              echo "::error::START_SHA is not on ${BASE_BRANCH}" >&2
+              exit 1
+            fi
+          fi
+          if [ ! -f .github/actions/provider-triage/action.yml ]; then
+            echo "::error::provider-triage action is missing from START_SHA" >&2
+            exit 1
+          fi
+
       - name: Diagnose the exhausted chain (billing / tokens / technical)
         id: triage
         if: >-
           always()
-          && steps.policy.outputs.enabled == 'true'
-          && steps.select.outputs.issue != ''
-          && steps.policy.outputs.key_present == '1'
+          && needs.run.outputs.enabled == 'true'
+          && needs.run.outputs.issue != ''
+          && needs.run.outputs.key_present == '1'
           && github.event.inputs.dry_run != 'true'
-          && steps.lock_cleanup.outputs.delivered != 'true'
-          && steps.lock_cleanup.outputs.declined != 'true'
+          && needs.settle.outputs.delivered != 'true'
+          && needs.settle.outputs.declined != 'true'
+          && needs.run.outputs.bundle_pending != 'true'
+          && steps.verify_triage.outcome == 'success'
         uses: ./.github/actions/provider-triage
+        env:
+          PYTHONSAFEPATH: "1"
+          PYTHONNOUSERSITE: "1"
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          PATH: /usr/bin:/bin
         with:
           chain: design-run
           zai-key: ${{ secrets.ZAI_KEY }}
           anthropic-key: ${{ secrets.CLAUDE_KEY }}
           github-token: ${{ github.token }}
-          # Quoted: unquoted, YAML reads " #" as a comment and the issue number
-          # never reaches the escalation (#637 read "(issue —").
-          context: "the design-run routine (issue #${{ steps.select.outputs.issue }})"
+          context: "the design-run routine (issue #${{ needs.run.outputs.issue }})"
           escalate: "true"
-
-      - name: Turn a dead agentic run red
-        # continue-on-error on the agent steps keeps the cleanup above
-        # reachable, but alone it would leave a dead run green — and
-        # green/cancelled starvation looking like health is exactly the
-        # livelock's disguise (issue #312). #538: the gate reads the lock
-        # cleanup's artifact-derived disposition (delivered / declined),
-        # NEVER the walk's outcome string — claude-code-action exits 0
-        # whenever the agent ends its turn without an API error, so gating
-        # on `(walk) != 'success'` scored an exit-0 run that claimed but
-        # pushed nothing as a success. Fires unless the run is provably
-        # delivered or provably declined, whatever the exit codes said.
-        if: >-
-          always()
-          && steps.policy.outputs.enabled == 'true'
-          && steps.select.outputs.issue != ''
-          && steps.policy.outputs.key_present == '1'
-          && github.event.inputs.dry_run != 'true'
-          && steps.lock_cleanup.outputs.delivered != 'true'
-          && steps.lock_cleanup.outputs.declined != 'true'
-        env:
-          ISSUE: ${{ steps.select.outputs.issue }}
-          # The walk's outcome (#327, #544, #538) — byte-identical to
-          # AGENT_OUTCOME in the lock cleanup above (the drift guard pins
-          # that). Diagnostic only: the disposition above decides.
-          AGENT_OUTCOME: ${{ steps.run_zai_1.outcome == 'success' && 'success' || steps.run_zai_2.outcome == 'success' && 'success' || steps.run_zai_3.outcome == 'success' && 'success' || steps.run_anthropic_4.outcome == 'success' && 'success' || steps.run_anthropic_5.outcome == 'success' && 'success' || (steps.run_zai_1.outcome == 'skipped' && steps.run_zai_2.outcome == 'skipped' && steps.run_zai_3.outcome == 'skipped' && steps.run_anthropic_4.outcome == 'skipped' && steps.run_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
-        run: |
-          echo "::error::the /design-run run for #${ISSUE} neither delivered nor declined (agent walk: ${AGENT_OUTCOME} — diagnostic only) — its SHIP-LOCK cleanup ran above; failing the job so the death is visible"
-          exit 1
 
   disarmed-notice:
     name: Explain a disarmed run
