@@ -114,7 +114,9 @@ a **220×220 mm** bed (the seam coupon is the longest single dimension at
 164 mm); the recommended layout on a **256 mm bed** is **two plates**: the four
 ball halves alone (they pack 2×2 with shared settings — the long plate), then
 segment + both ends + core + both plugs on a second plate that packs tightly —
-lay it out in the slicer first (the coffee-break plate).
+lay it out in the slicer first (the coffee-break plate). If your printer's
+profile greys out the front-left corner (stock X1/P1 carve an exclusion there),
+nudge the layout up-left before slicing.
 - `mock-drive` — a single representative reduction gear, kept as a gated
   printability sample of the (otherwise preview-only) drivetrain. It is not a
   placed assembly part and is not included on the production plate.
@@ -152,8 +154,9 @@ the default render is the assembled clock.
   slightly drooled strips inside the window are the print, not a defect
   (turning supports on to "fix" them is the weld-the-seam failure mode).
   The truss ridge chords also bridge ~32 mm between posts (bay length at
-  `bays=4`) — expect underside sag on those spans; keep supports off, because
-  anything painted inside the lattice can never be removed.
+  `bays=4`) — in PLA expect up to ~1 mm of underside droop and a few loose
+  strands on those spans; that's the print, not a failure. Keep supports off,
+  because anything painted inside the lattice can never be removed.
 - **Brim:** **on by default for `base-segment` and `base-end`** (line-contact
   chords lift easily); the ball halves have big flat pole faces and can stay
   off. Safe on every other part if a tip lifts. No fit on this design touches
@@ -243,11 +246,13 @@ bed**; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
 rattle — then render the halves with that value. If the coupon's male ring feels
 tight only at the very start of the turn, that's **first-layer squish on the
 coupon**, not the fit — don't loosen `seam_tol` for it; the production seam
-never touches the bed.
+never touches the bed. If a seam threads on but won't seat flat, it's
+**cross-threaded** — back it all the way off and restart; don't loosen
+`seam_tol` for that either.
 
-**Stalks (v0 display):** seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
-in the Ø4.9 mm `base-end` bosses — snug is right; don't ream unless you chose
-the Ø5 path. The **ball halves have no printed pole socket yet** — the hero
+**Stalks (v0 display):** trial-fit the rod dry in the `base-end` boss before
+final assembly, then seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
+in the Ø4.9 mm bosses — snug is right; don't ream unless you chose the Ø5 path. The **ball halves have no printed pole socket yet** — the hero
 preview unions a cylinder into the shell that no printable part carries. Until
 the hub lands in [#604](https://github.com/shaiss/print-bench/issues/604), stand each assembled ball on its flat pole
 pentagon beside the base, or rest it on the rod tip without claiming a retained
@@ -265,9 +270,11 @@ each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into each 
 port access. Print the plugs on the coffee-break plate with the other base parts,
 never solo (a Ø5 mm part is easy to lose; a spare is cheap insurance). Weigh the
 pour first (~55 g total starting fill); pour in **~10 g stages and tap between
-stages** (tapping while pouring fights the funnel). A folded-paper funnel with
-the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port is only about
-one and a half pellets wide, so shot will jam and arch. A strong magnet held
+stages** (tapping while pouring fights the funnel — the first pour is about
+five minutes of tapping, and that duration is normal, not a broken part). A
+folded-paper funnel with the tip cut to ~3 mm keeps shot off the desk — the
+Ø3.2 mm port is only about one and a half pellets wide, so shot will jam and
+arch. A strong magnet held
 against the pocket wall settles an arch and drags shot around through a couple
 of mm of plastic — worth a try (chrome-steel shot only; stainless bearing balls
 won't follow a magnet). Once the fill that lands STABLE is final, a few drops of

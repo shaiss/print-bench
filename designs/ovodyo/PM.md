@@ -96,3 +96,6 @@ then waits only on #601's stencil numerals.
 | 2026-10-24 | CAMERAS.md: base-mech-in-situ mid-base pose / #604 re-seat caveat; what-ships renderer-tint clause | Jane / PM triage |
 | 2026-10-24 | Heft: ~20 g/ball unmeasured first guess; both-halves / seam-centred pack; tumbles-to-reading wording | Drik / PM triage |
 | 2026-10-24 | #601 eyetest also covers slot-rim polish/patina after a month of handling | Drik / PM queue |
+| 2026-10-24 | cameras.conf slot-corner comment synced to CAMERAS.md (freeze holds) | Jane / PM triage |
+| 2026-10-24 | Ridge-chord finished look (~1 mm PLA droop); cross-thread diagnostic; X1/P1 front-left nudge; rod dry-fit; pour ~5 min tapping | Jane/Drik / PM triage |
+| 2026-10-24 | #601 eyetest gains showroom-squint evidence (render "4"/"00" misread) + rim-wear look | Drik / PM queue |
