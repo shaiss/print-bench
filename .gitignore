@@ -21,3 +21,9 @@ site/preview/media-rework-embedded.html
 # `python3 -m andon decide` writes the rendered issue body / closing comment
 # here for the workflow's one write step to carry — never committed.
 .andon/
+
+# The design-run agent's issue intents (issue #862): the comments/labels it
+# owes the thread, carried out of the agent job by the trusted bundle step
+# and applied by settle. Never committed — a committed copy would ride the
+# delivered PR back to main and poison later runs with a stale stop intent.
+.design-run-intents.json

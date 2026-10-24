@@ -10,7 +10,7 @@
 # stop blocking while the model — and every gate reading it — stays green.
 #
 # The action SHA does not bundle the CLI. It installs a version-pinned CLI
-# at run time (`curl https://claude.ai/install.sh | bash -s -- 2.1.287`,
+# at run time (`curl https://claude.ai/install.sh | bash -s -- 2.1.301`,
 # hardcoded in the action's src/entrypoints/run.ts). That is not a moving
 # latest, so the SHA pin DOES pin the matcher as long as install.sh honors
 # the version argument. This canary re-proves that pin on the installed
@@ -18,7 +18,7 @@
 # if a denied probe is not refused.
 #
 # Usage:
-#   scripts/reviewer-deny-canary.sh            # live: need claude 2.1.287
+#   scripts/reviewer-deny-canary.sh            # live: need claude 2.1.301
 #   scripts/reviewer-deny-canary.sh --selftest # harness pass + fail, no CLI
 #
 # The live path is what .github/workflows/reviewer-deny-canary.yml runs
@@ -27,10 +27,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The SHA auto-review.yml pins today (dependabot #765, v1.0.239). The issue
-# text named an older SHA (9171db3e…); record a bump here if that pin moves.
-PINNED_ACTION_SHA="97c53473391bff1901034d4b454b5bac7ab7a029"
-PINNED_CLI_VERSION="2.1.287"
+# The SHA auto-review.yml pins today (dependabot #850, v1.0.251). Prior pin
+# was 2dca132… / CLI 2.1.295 (dependabot #830, v1.0.247). Record a bump
+# here if that pin moves — and re-verify the matcher on the new CLI first.
+PINNED_ACTION_SHA="374f254f5efaf968abfe15d399fd90972e8138b9"
+PINNED_CLI_VERSION="2.1.301"
 
 python3 - "$PINNED_ACTION_SHA" "$PINNED_CLI_VERSION" "${1:-}" <<'PY'
 import json, os, re, subprocess, sys, textwrap
@@ -43,14 +44,16 @@ REVIEWER = ROOT / ".claude/reviewer-settings.json"
 COACH = ROOT / ".claude/design-coach-settings.json"
 AUTO_REVIEW = ROOT / ".github/workflows/auto-review.yml"
 
-# Byte markers of the 2.1.287 matcher module (contiguous ASCII in the native
-# CLI). Absence = this build no longer carries the three syntax families.
-EXTRACT_START = b'var Hg=new RegExp("\\x00ESCAPED_STAR\\x00","g")'
-EXTRACT_END = b"function Okn("
-KWE_NEEDLE = b"function kwe(e){return e.match(/^(.+):\\*$/)"
-V8R_NEEDLE = b"function V8r(e){if(e.endsWith(\":*\"))"
-DOLLAR8_NEEDLE = b"function $8(e,n,s=!1,r=!1)"
-ZQE_NEEDLE = b"function ZQe(e){let n=kwe(e);"
+# Byte markers of the 2.1.301 matcher module (contiguous ASCII in the native
+# CLI). Minified names moved from 2.1.295's oxe/BEo/V7/sxe/$g/oWn to
+# qMe/yNo/Kte/YMe/d_/d3n — same semantics, re-verified 2026-10-18. Absence
+# = this build no longer carries the three syntax families.
+EXTRACT_START = b'var d_=new RegExp("\\x00ESCAPED_STAR\\x00","g")'
+EXTRACT_END = b"function d3n("
+KWE_NEEDLE = b"function qMe(e){return e.match(/^(.+):\\*$/)"
+V8R_NEEDLE = b"function yNo(e){if(e.endsWith(\":*\"))"
+DOLLAR8_NEEDLE = b"function Kte(e,n,r=!1,s=!1)"
+ZQE_NEEDLE = b"function YMe(e){let n=qMe(e);"
 
 # One probe per syntax family the backstops spell. (rule, probe, family,
 # which committed file must contain the rule).
@@ -90,9 +93,10 @@ def parse_rule(rule: str) -> tuple[str, str | None]:
     return m.group(1), m.group(2)
 
 
-# --- transcription of the 2.1.287 matcher (kwe / V8r / $8 / ZQe / prefix).
-# Live runs ALSO eval the bytes extracted from the installed CLI via node and
-# require agreement; this copy is the harness when node is absent (selftest).
+# --- transcription of the 2.1.301 matcher (qMe / yNo / Kte / YMe / prefix;
+# same algorithm as 2.1.295's oxe / BEo / V7 / sxe). Live runs ALSO eval the
+# bytes extracted from the installed CLI via node and require agreement; this
+# copy is the harness when node is absent (selftest).
 
 def kwe(spec: str) -> str | None:
     m = re.match(r"^(.+):\*$", spec)
@@ -175,7 +179,7 @@ def bash_denied(spec: str, command: str) -> bool:
 
 
 def edit_denied(spec: str, path: str) -> bool:
-    # File-pattern rules use the same $8 glob engine the Bash wildcard
+    # File-pattern rules use the same Kte glob engine the Bash wildcard
     # family uses. Probe with the path spelling the rule names (./.git/…).
     return dollar8(spec, path, case_insensitive=True, collapse_ws=False)
 
@@ -228,15 +232,15 @@ def extract_matcher(blob: bytes) -> str:
     if start < 0 or end < 0 or end <= start:
         raise MatcherMissing(
             f"Claude Code {PINNED_CLI} binary does not contain the matcher "
-            f"module (kwe/V8r/$8/ZQe). The pinned build lacks one or more "
+            f"module (qMe/yNo/Kte/YMe). The pinned build lacks one or more "
             f"syntax families — bump the action pin to a build that has them "
             f"and record it in docs/actions-security.md."
         )
     for needle, name in (
-        (KWE_NEEDLE, ":* prefix (kwe)"),
-        (V8R_NEEDLE, "mid-string * classifier (V8r)"),
-        (DOLLAR8_NEEDLE, "glob engine ($8)"),
-        (ZQE_NEEDLE, "rule classifier (ZQe)"),
+        (KWE_NEEDLE, ":* prefix (qMe)"),
+        (V8R_NEEDLE, "mid-string * classifier (yNo)"),
+        (DOLLAR8_NEEDLE, "glob engine (Kte)"),
+        (ZQE_NEEDLE, "rule classifier (YMe)"),
     ):
         if needle not in blob[start:end]:
             raise MatcherMissing(
@@ -247,7 +251,7 @@ def extract_matcher(blob: bytes) -> str:
 
 
 def node_eval(extracted_js: str, rule: str, probe: str) -> bool:
-    """Run one probe through the extracted 2.1.287 functions via node."""
+    """Run one probe through the extracted 2.1.301 functions via node."""
     tool, spec = parse_rule(rule)
     js = extracted_js + textwrap.dedent(f"""
     const tool = {json.dumps(tool)};
@@ -258,13 +262,13 @@ def node_eval(extracted_js: str, rule: str, probe: str) -> bool:
       return cl === pl || cl.startsWith(pl + " ");
     }}
     function denies() {{
-      const C = ZQe(spec);
+      const C = YMe(spec);
       if (tool === "Bash") {{
         if (C.type === "exact") return C.command.toLowerCase() === probe.toLowerCase();
         if (C.type === "prefix") return prefixMatch(C.prefix, probe);
-        return $8(C.pattern, probe, true, true);
+        return Kte(C.pattern, probe, true, true);
       }}
-      if (tool === "Edit") return $8(spec, probe, true, false);
+      if (tool === "Edit") return Kte(spec, probe, true, false);
       return false;
     }}
     process.stdout.write(denies() ? "1" : "0");
@@ -331,7 +335,7 @@ def run_probes(extracted_js: str | None, label: str) -> None:
 
 
 def fake_binary(js: str) -> bytes:
-    return b"PAD" * 50 + js.encode("ascii") + b"function Okn(e,n){return 1}"
+    return b"PAD" * 50 + js.encode("ascii") + b"function d3n(e,n){return 1}"
 
 
 def selftest() -> None:
@@ -346,34 +350,34 @@ def selftest() -> None:
     # Minimal original matcher with the same export names the extractor looks
     # for, so the extract path is proven without vendoring the CLI.
     stub = (
-        'var Hg=new RegExp("\\x00ESCAPED_STAR\\x00","g"),'
-        'Kg=new RegExp("\\x00ESCAPED_BACKSLASH\\x00","g"),'
-        r"jg=/\/(?:\*\*\/)+/g,"
-        'Fg=new RegExp("\\x00GLOBSTAR\\x00","g");'
-        "function kwe(e){return e.match(/^(.+):\\*$/)?.[1]??null}"
-        'function V8r(e){if(e.endsWith(":*"))return!1;'
-        'for(let n=0;n<e.length;n++)if(e[n]==="*"){let s=0,r=n-1;'
-        'while(r>=0&&e[r]==="\\\\")s++,r--;if(s%2===0)return!0}return!1}'
-        "function enr(e){return!1}"
-        "function $8(e,n,s=!1,r=!1){"
+        'var d_=new RegExp("\\x00ESCAPED_STAR\\x00","g"),'
+        'c_=new RegExp("\\x00ESCAPED_BACKSLASH\\x00","g"),'
+        r"u_=/\/(?:\*\*\/)+/g,"
+        'p_=new RegExp("\\x00GLOBSTAR\\x00","g");'
+        "function qMe(e){return e.match(/^(.+):\\*$/)?.[1]??null}"
+        'function yNo(e){if(e.endsWith(":*"))return!1;'
+        'for(let n=0;n<e.length;n++)if(e[n]==="*"){let r=0,s=n-1;'
+        'while(s>=0&&e[s]==="\\\\")r++,s--;if(r%2===0)return!0}return!1}'
+        "function xNr(e){return!1}"
+        "function Kte(e,n,r=!1,s=!1){"
         "if(e.includes('\\x00'))return!1;"
-        "let i=e.trim(),d=r?i.replace(/[ \\t]+/g,' '):i,"
-        "c=r?n.replace(/[ \\t]+/g,' '):n;"
+        "let i=e.trim(),d=s?i.replace(/[ \\t]+/g,' '):i,"
+        "c=s?n.replace(/[ \\t]+/g,' '):n;"
         "let S=d.replace(/[.+?^${}()|[\\]\\\\'\"]/g,'\\\\$&')"
         ".replaceAll('*','.*');"
-        "let v='s'+(s?'i':'');"
+        "let v='s'+(r?'i':'');"
         "return new RegExp('^'+S+'$',v).test(c)}"
-        "function ZQe(e){let n=kwe(e);if(n!==null)"
-        'return{type:"prefix",prefix:n};if(V8r(e))'
+        "function YMe(e){let n=qMe(e);if(n!==null)"
+        'return{type:"prefix",prefix:n};if(yNo(e))'
         'return{type:"wildcard",pattern:e};'
         'return{type:"exact",command:e}}'
     )
     extracted = extract_matcher(fake_binary(stub))
     n += 1
-    print("ok    selftest: extractor finds kwe/V8r/$8/ZQe in a fixture binary")
+    print("ok    selftest: extractor finds qMe/yNo/Kte/YMe in a fixture binary")
 
     try:
-        extract_matcher(b"XXXX" + b"function nope(){}" + b"function Okn(")
+        extract_matcher(b"XXXX" + b"function nope(){}" + b"function d3n(")
     except MatcherMissing:
         n += 1
         print("ok    selftest: missing matcher module fails loudly")
@@ -439,7 +443,7 @@ def live() -> None:
     except MatcherMissing as e:
         die(str(e))
     print(f"ok    extracted matcher ({len(extracted)} bytes) from {binary}")
-    run_probes(extracted, "extracted 2.1.287 matcher")
+    run_probes(extracted, f"extracted {PINNED_CLI} matcher")
     print(
         f"reviewer-deny-canary: {PINNED_CLI} matcher refuses every family "
         f"probe under the committed reviewer/coach backstops"

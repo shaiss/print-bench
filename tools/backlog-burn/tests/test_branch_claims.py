@@ -63,8 +63,9 @@ def snap(issues, *, branches=(), open_prs=(), ahead_by=None):
 
 def lock(hours_ago):
     return {
-        "body": "🚢 SHIP-LOCK — shipping this as one PR.",
+        "body": "🚢 SHIP-LOCK — shipping this as one PR.\n\n<!-- design-run-ship-lock:v1 -->",
         "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
+        "authorLogin": "github-actions[bot]", "authorType": "Bot",
     }
 
 

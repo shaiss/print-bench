@@ -125,7 +125,7 @@ def test_custom_label():
 
 def test_active_ship_lock_excludes():
     locked = issue(40, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — shipping this as one PR.", "createdAt": "2026-08-02T00:00:00Z"},
+        {"body": "🚢 SHIP-LOCK — shipping this as one PR.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2026-08-02T00:00:00Z", "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(snap([locked]))["selected"] is None
     assert select_issue(snap([locked]))["excluded"]["40"].startswith("an active")
@@ -134,8 +134,8 @@ def test_active_ship_lock_excludes():
 def test_withdrawn_lock_is_re_eligible():
     # Newest lock comment is a withdrawal -> the issue is claimable again.
     issue_ = issue(41, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": "2026-08-02T00:00:00Z"},
-        {"body": "🚢 SHIP-LOCK WITHDRAWN — yielding.", "createdAt": "2026-08-03T00:00:00Z"},
+        {"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2026-08-02T00:00:00Z", "authorLogin": "github-actions[bot]", "authorType": "Bot"},
+        {"body": "🚢 SHIP-LOCK WITHDRAWN — yielding.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2026-08-03T00:00:00Z", "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(snap([issue_]))["selected"] == 41
 
@@ -143,9 +143,9 @@ def test_withdrawn_lock_is_re_eligible():
 def test_latest_lock_wins_even_if_reclaimed():
     # withdrawn, then re-claimed by another run: newest is active -> excluded.
     issue_ = issue(42, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — a.", "createdAt": "2026-08-02T00:00:00Z"},
-        {"body": "🚢 SHIP-LOCK WITHDRAWN — a yields.", "createdAt": "2026-08-03T00:00:00Z"},
-        {"body": "🚢 SHIP-LOCK — b.", "createdAt": "2026-08-04T00:00:00Z"},
+        {"body": "🚢 SHIP-LOCK — a.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2026-08-02T00:00:00Z", "authorLogin": "github-actions[bot]", "authorType": "Bot"},
+        {"body": "🚢 SHIP-LOCK WITHDRAWN — a yields.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2026-08-03T00:00:00Z", "authorLogin": "github-actions[bot]", "authorType": "Bot"},
+        {"body": "🚢 SHIP-LOCK — b.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2026-08-04T00:00:00Z", "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(snap([issue_]))["selected"] is None
 
@@ -155,12 +155,12 @@ def test_stale_lock_with_no_branch_or_pr_is_takeable():
     # backing it (no branch, no closing PR), is the skill's takeover case:
     # the burn must not be frozen out of it.
     stale = issue(44, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=9))},
+        {"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": _iso(NOW - timedelta(hours=9)), "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(snap([stale]), now=NOW)["selected"] == 44
     # Negative control: the SAME lock, only an hour old, still blocks.
     fresh = issue(44, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=1))},
+        {"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": _iso(NOW - timedelta(hours=1)), "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(snap([fresh]), now=NOW)["selected"] is None
 
@@ -169,7 +169,7 @@ def test_stale_lock_still_blocked_when_a_branch_backs_it():
     # Old lock, but a claude/issue-<N>-* branch exists -> the run is alive /
     # real; the branch guard fires first and it stays excluded.
     stale = issue(45, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=9))},
+        {"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": _iso(NOW - timedelta(hours=9)), "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(
         snap([stale], branches=["claude/issue-45-wip"]), now=NOW
@@ -178,7 +178,7 @@ def test_stale_lock_still_blocked_when_a_branch_backs_it():
 
 def test_stale_lock_still_blocked_when_a_pr_backs_it():
     stale = issue(46, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": _iso(NOW - timedelta(hours=9))},
+        {"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": _iso(NOW - timedelta(hours=9)), "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(
         snap([stale], open_prs=[{"number": 9, "headRefName": "x", "body": "Closes #46"}]),
@@ -190,7 +190,7 @@ def test_no_now_treats_undated_lock_as_active():
     # Without a reference time, staleness cannot be judged; a claim is never
     # selected over (the conservative reading).
     old = issue(47, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK — shipping.", "createdAt": "2000-01-01T00:00:00Z"},
+        {"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2000-01-01T00:00:00Z", "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(snap([old]))["selected"] is None
 
@@ -202,6 +202,52 @@ def test_non_ship_lock_comment_does_not_lock():
     ])
     # First line does not START with the marker -> not a claim.
     assert select_issue(snap([issue_]))["selected"] == 43
+
+
+def test_ship_lock_without_html_marker_is_not_a_lock():
+    # Cipher (#864): a comment that starts with 🚢 SHIP-LOCK but lacks the
+    # settle HTML authenticity marker is NOT a lock — intents can post the
+    # visible line, never the marker.
+    issue_ = issue(48, "2026-08-01T00:00:00Z", comments=[
+        {"body": "🚢 SHIP-LOCK — spoofed via intent", "createdAt": "2026-08-02T00:00:00Z",
+         "authorType": "Bot"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 48
+
+
+@pytest.mark.parametrize("login,author_type", [
+    ("github-actions[bot]", "Bot"),  # settle (GITHUB_TOKEN)
+    ("shaiss", "User"),              # attended hand-run / PAT
+])
+def test_ship_lock_marker_plus_allowlisted_login_is_a_lock(login, author_type):
+    issue_ = issue(49, "2026-08-01T00:00:00Z", comments=[
+        {"body": "🚢 SHIP-LOCK — claim\n\n<!-- design-run-ship-lock:v1 -->",
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": login, "authorType": author_type},
+    ])
+    assert select_issue(snap([issue_]))["selected"] is None
+    assert select_issue(snap([issue_]))["excluded"]["49"].startswith("an active")
+
+
+def test_ship_lock_marker_plus_cursor_bot_is_not_a_lock():
+    # Cipher (#864): cursor[bot] is the shared Cursor App login (Bugbot,
+    # Security/Approval Agents, cloud agents) — not an attended claim.
+    issue_ = issue(147, "2026-08-01T00:00:00Z", comments=[
+        {"body": "🚢 SHIP-LOCK — forged\n\n<!-- design-run-ship-lock:v1 -->",
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "cursor[bot]", "authorType": "Bot"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 147
+
+
+def test_ship_lock_marker_plus_claude_bot_is_not_a_lock():
+    # Cipher (#864): no generic [bot] match — claude[bot] is not allowlisted.
+    issue_ = issue(148, "2026-08-01T00:00:00Z", comments=[
+        {"body": "🚢 SHIP-LOCK — forged\n\n<!-- design-run-ship-lock:v1 -->",
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "claude[bot]", "authorType": "Bot"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 148
 
 
 # --------------------------------------------------------------------------
@@ -302,16 +348,16 @@ def test_needs_decision_blocks_even_when_lock_is_stale():
     # lock check is what this proves.
     stale_locked = issue(
         91, "2026-08-01T00:00:00Z", labels=[LABEL, "needs-decision"],
-        comments=[{"body": "🚢 SHIP-LOCK — shipping.",
-                "createdAt": _iso(NOW - timedelta(hours=9))}],
+        comments=[{"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->",
+                "createdAt": _iso(NOW - timedelta(hours=9)), "authorLogin": "github-actions[bot]", "authorType": "Bot"}],
     )
     assert select_issue(snap([stale_locked]), now=NOW)["selected"] is None
     # Negative control: the SAME stale lock WITHOUT needs-decision is takeable,
     # so it is the decision label — not the lock — doing the exclusion above.
     stale_only = issue(
         91, "2026-08-01T00:00:00Z", labels=[LABEL],
-        comments=[{"body": "🚢 SHIP-LOCK — shipping.",
-                "createdAt": _iso(NOW - timedelta(hours=9))}],
+        comments=[{"body": "🚢 SHIP-LOCK — shipping.\n\n<!-- design-run-ship-lock:v1 -->",
+                "createdAt": _iso(NOW - timedelta(hours=9)), "authorLogin": "github-actions[bot]", "authorType": "Bot"}],
     )
     assert select_issue(snap([stale_only]), now=NOW)["selected"] == 91
 
@@ -368,7 +414,7 @@ def test_run_comment_newer_than_the_decline_does_not_re_arm():
     # withdrawals and the owner's answer are all one login), so none of them
     # may re-arm the cooldown — only owner activity does.
     for body in (
-        "🚢 SHIP-LOCK WITHDRAWN — yielding.",
+        "🚢 SHIP-LOCK WITHDRAWN — yielding.\n\n<!-- design-run-ship-lock:v1 -->",
         "🚦 DECISION NEEDED — `which-bottle`",
         "🏷️ Triaged: `autonomy-ok` — selector fix.",   # labeler emits the
         "🏷 Triaged: bare marker, no selector.",        # selector both ways
@@ -408,8 +454,8 @@ def test_withdrawn_lock_comment_is_not_a_decline():
     # not trip it (test_withdrawn_lock_is_re_eligible covers the undated
     # path).
     withdrawn = issue(108, "2026-08-01T00:00:00Z", comments=[
-        {"body": "🚢 SHIP-LOCK WITHDRAWN — yielding.",
-         "createdAt": _iso(NOW - timedelta(hours=1))},
+        {"body": "🚢 SHIP-LOCK WITHDRAWN — yielding.\n\n<!-- design-run-ship-lock:v1 -->",
+         "createdAt": _iso(NOW - timedelta(hours=1)), "authorLogin": "github-actions[bot]", "authorType": "Bot"},
     ])
     assert select_issue(snap([withdrawn]), now=NOW)["selected"] == 108
 
@@ -479,7 +525,7 @@ def test_run_comment_newer_than_the_defer_does_not_re_arm():
     # PAT-identity discipline the decline guard follows (#515): a later
     # DEFERRED is the state restarting the window, not the owner answering.
     for body in (
-        "🚢 SHIP-LOCK WITHDRAWN — yielding.",
+        "🚢 SHIP-LOCK WITHDRAWN — yielding.\n\n<!-- design-run-ship-lock:v1 -->",
         "🚢 DECLINED — needs a decision.",
         "🚦 DECISION NEEDED — `which-bottle`",
         "🏷️ Triaged: `autonomy-ok` — still blocked.",

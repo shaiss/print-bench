@@ -41,12 +41,20 @@ so the two never collide on the same issue.
 3. **Lock check** — the issue is taken if any of these hold, and the protocol is
    byte-for-byte the one `/ship-issue` §0 uses so a burn and a hand-run cannot
    both claim it:
-   - **an active claim marker** — read the *latest* `🚢 SHIP-LOCK` comment and
-     act on that one. `🚢 SHIP-LOCK` is active and the issue is taken;
-     `🚢 SHIP-LOCK WITHDRAWN` is released and blocks nothing. An active claim
-     more than a few hours old with **no** `claude/issue-<N>-*` branch carrying
-     unmerged work and **no** open PR closing the issue is *stale* — take it
-     over, naming the one you superseded.
+   - **an active claim marker** — read the *latest authentic* `🚢 SHIP-LOCK`
+     comment (it must carry the HTML marker
+     `<!-- design-run-ship-lock:v1 -->` **and** be authored by one of
+     `github-actions[bot]` (settle) or `shaiss` (attended/PAT); attended
+     runs post as `shaiss` or not at all — never `cursor[bot]`, the shared
+     Cursor App login; a bare `🚢 SHIP-LOCK` first line is never a lock,
+     nor is marker + `cursor[bot]` / `claude[bot]`) and act on that one.
+     An authentic `🚢 SHIP-LOCK` is
+     active and the issue is taken; `🚢 SHIP-LOCK WITHDRAWN` is released
+     and blocks nothing.
+     An active claim more than a few hours old with **no**
+     `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
+     closing the issue is *stale* — take it over, naming the one you
+     superseded.
    - **an open PR closes it** — read the issue's linked-PR metadata (GitHub's
      nine closing keywords, case-insensitive), don't grep the body.
    - **a remote branch `claude/issue-<N>-*` carrying unmerged work** — at least
@@ -55,11 +63,18 @@ so the two never collide on the same issue.
      commits ahead is an orphan whose work is already on the default branch: it
      blocks nothing. When you cannot tell, treat it as a claim. Same rule as
      `/ship-issue` §0.3, the selector and `scripts/routine-lock-cleanup.sh`.
-4. **Claim it** by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`,
-   **before you scaffold a single part**. Keep **one active claim** per issue at
-   a time — never delete a claim comment (the timestamps are the record),
-   withdraw it instead. The timestamp is the proof the contract predates the
-   diff.
+4. **Claim it** **before you scaffold a single part**. Keep **one active
+   claim** per issue at a time — never delete a claim comment (the timestamps
+   are the record), withdraw it instead. The timestamp is the proof the
+   contract predates the diff.
+   - **Attended** (your own credentials): post the §2 contract as a comment
+     led by `🚢 SHIP-LOCK`, and include the authenticity marker
+     `<!-- design-run-ship-lock:v1 -->` in the body (readers require it).
+   - **Unattended** (no `issues: write`, issue #862): do **not** put any
+     ship-lock form in intents — settle posts the claim itself from a
+     constant body with the HTML marker. Write the §2 contract as a plain
+     comment intent (no `SHIP-LOCK` / `ship-lock` / `ship lock` line) in
+     `.design-run-intents.json` per §8.
 5. **Re-read after claiming.** Check-then-post is not atomic. Re-read the
    comments; if another *active* claim predates yours, withdraw (edit your
    comment so its first line reads `🚢 SHIP-LOCK WITHDRAWN` — never delete it)
@@ -117,6 +132,8 @@ from the shape you already have in mind.
 
 ```markdown
 🚢 SHIP-LOCK — running this design to a gated draft PR.
+
+<!-- design-run-ship-lock:v1 -->
 
 **Design name:** <kebab-case>
 **Brief parts:** <the First-pass part breakdown, as the contract's part list>
@@ -224,12 +241,14 @@ telemetry, rather than forcing green.
        commit those. Most designs can satisfy the gate this way with no CI at
        all. (Path-traced `shots.conf` product shots need `bpy`/CI; don't
        hand-fake them.)
-    2. **If a required preview can only come from CI `regen`, it needs a PAT.**
-       The scheduled `design-run.yml` runs the agent with the default
-       `github.token`, and a push/PR authored by `github.token` **does not
-       trigger `ci.yml`** (the same reason `regen` uses `REGEN_TOKEN` — see
-       CLAUDE.md), so `regen` won't fire on your draft PR. With a PAT wired as
-       `github_token`, CI regenerates and commits the shot as usual.
+    2. **If a required preview can only come from CI `regen`, delivery needs the push PAT.**
+       The agent steps hold `github.token` only. A separate delivery workflow,
+       which runs no agent code, pushes with the repo secret `GH_TOKEN` and
+       opens the draft. A push or PR authored by the default `github.token`
+       **does not trigger `ci.yml`** (the same reason `regen` uses
+       `REGEN_TOKEN` — see CLAUDE.md), so `regen` would not fire. With that
+       PAT present, CI regenerates and commits the shot as usual. The
+       delivery step refuses to push when `GH_TOKEN` is empty.
     3. **No PAT and the gate still needs a CI-only shot?** Then `/preflight` is
        red and §8's hard stop applies: **do not open an image-less draft PR**
        that fails its own gate — stop, withdraw the claim (§0.6), and report the
@@ -259,22 +278,59 @@ Evidence means a re-derivation from the exported mesh (facet measurements,
 printcheck output, slice result), never the parameter you just typed — issue
 #37's lesson. Anything unmapped: revert it, or file it, before the PR exists.
 
-## 7. Ship
+## 7. Ship — leave a branch. A fresh runner delivers it.
 
-Draft PR, base = default branch, title stating what the design *is* (not
-"closes #96"). Body:
+Gate-green is not delivery. `design-run.yml`'s agent step exits 0 when you
+end the turn, and nothing you type in a comment creates a branch. The agent
+job does not push. Its next step writes a git bundle of the commits on
+`claude/issue-<N>-*`. A later job, on a fresh runner, checks out the commit
+the job started from, verifies that bundle, and only then runs
+`scripts/design-run-deliver.sh` from that checkout to push and open the
+draft PR. Nothing in the bundle is executed. The success comment is posted
+only after both of these are true:
 
-1. `Closes #<N>` on its own line.
-2. The frozen contract with every gate box passing, **linking the claim
-   comment** so a reader sees it predates the diff.
-3. The §6 brief-audit table — file → part, and *Must fit / hold* row → the
-   measured number off the export.
-4. The preview images (once CI has committed them), the `/preflight` verdict,
-   and anything deferred with its follow-up issue link.
+- `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
+- an open **draft** pull request in this repository, whose `headRefOid` is that tip, has a body that closes `#<N>`
 
-Then `subscribe_pr_activity` and drive it to green per the PR-ownership rules —
-a PR you opened is yours until it merges or closes. The human's job from here is
-what #96 promised: react to the previews and merge.
+Until both hold, do not post a comment that says the gates are green, the
+run succeeded, or a pull request exists. A mid-run note, if you need one on
+the thread, starts with `🚢 design-run progress` and ends with this line,
+exactly: `Not delivered — no remote branch or draft PR has been verified.`
+
+Before you end the turn:
+
+1. Check out `claude/issue-<N>-<design>` (create it from the default branch
+   if you have not already). Any other name, including the default branch,
+   is not pushed.
+2. Commit the design. The delivery step commits dirty files under `designs/`
+   and first-party `lib/` that you left behind, and it does not commit
+   `scripts/`, `.github/`, `.claude/`, `tools/`, or the vendored trees. It
+   refuses the push entirely when any commit since the job's start SHA
+   touches `.github/`, `scripts/`, `.claude/`, or `tools/`. A non-draft PR
+   already open on the branch is also a hard stop (`auto-arm.yml` arms
+   auto-merge on non-draft `claude/*` PRs). A tree with no commit ahead of
+   the job's start SHA and no safe dirty files is not delivered.
+3. Do not `git push` and do not `gh pr create`. This job's token cannot
+   push, those two commands are denied, and a pull request opened here
+   would not trigger CI. The delivery step pushes the branch and opens the
+   draft. Its body is `Closes #<N>` plus a pointer at the branch, so the
+   frozen contract, the claim-comment link, the §6 audit table with
+   measured numbers, and the `/preflight` verdict belong in the branch
+   (the design's NOTES) where a reviewer can read them.
+4. Stop. Do not post the success comment. The delivery step posts
+   `🚢 design-run delivered — branch and draft PR verified` with the branch
+   tip and the PR URL, and only after the two checks above pass. A failed
+   push posts nothing that reads as success. A `🚢 DECLINED`,
+   `🚦 DECISION NEEDED`, or `🚢 DEFERRED` comment from this run is a hard
+   stop: the delivery step does not bundle that work, does not push it,
+   and does not post success. Unattended, the same markers in your intents
+   file are that hard stop — the bundle step reads them before writing
+   anything.
+
+Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
+The delivery workflow opens it, and that PR does not exist yet when your turn ends.
+
+The human's job from here is what #96 promised: react to the previews and merge.
 
 ## 8. Unattended mode (the scheduled workflow invoked this)
 
@@ -294,8 +350,70 @@ Same skill, three tightenings — nobody is there to catch a wrong guess:
   the brief; a `Style: new` brief whose lift never landed. Stop and comment —
   never push a design you'd have to apologise for.
 - **The issue thread is the only log.** Assume nobody reads the run output.
-  Claim, amendments, the telemetry trend at a stop, declines, and the final
-  verdict all land as comments, each readable cold.
+  Claim, amendments, the telemetry trend at a stop, and declines all land as
+  comments, each readable cold. The success comment is not one of these:
+  §7 reserves it for the delivery step, which posts it only after the remote
+  branch and the draft PR have both been verified.
+
+**The intents protocol (unattended).** Your job token has no `issues: write`
+(issue #862): a prompt-injected turn must not be able to label or comment ANY
+issue. Every comment and label you owe the thread goes into
+`.design-run-intents.json` at the repo root — gitignored, never `git add`ed
+(the bundle path check refuses it, and a committed copy would ride the
+delivered PR to main and poison later runs). The trusted post-agent step
+carries the file out; the settle job applies it:
+
+```json
+{"version":1,"intents":[
+ {"issue":862,"action":"comment","body":"…the §2 contract (no ship-lock line)…"},
+ {"issue":862,"action":"comment","body":"Amendment: …"},
+ {"issue":862,"action":"label","label":"needs-decision"}
+]}
+```
+
+What the applier enforces (nothing you write can loosen it): settle posts
+the SHIP-LOCK claim first from a constant body carrying
+`<!-- design-run-ship-lock:v1 -->` — never from intent text. An intent then
+posts only when its `issue` is the **selected** one, and a `label` intent
+only when the label is `needs-decision` — the one label the HITL gate needs.
+Anything else (an off-issue comment, an `autonomy-ok` on the selected issue)
+is dropped with a workflow warning and never posted. Caps: 32 intents, 8
+comments, 2 labels, 8 KiB per comment body, 64 KiB for the whole intents
+file. Every comment body is NFKC-normalized (Cf / zero-width stripped,
+whitespace collapsed) before checks; any line matching `/ship[\s_-]*lock/i`
+is rejected (intents cannot author a lock; burn residual in #872), and so is any body containing HTML
+comment markers (`<!--` / `-->`). A malformed or oversize file, or a
+normalizer failure, applies nothing (fail closed).
+
+Consequences for the sections above:
+
+- **§0's claim is settle's, not yours.** Do not write a SHIP-LOCK intent —
+  settle posts the authentic claim. Put the §2 contract (without any
+  ship-lock line) as your first comment intent before scaffolding. The
+  claim lands only when settle runs — after your whole turn — so the §0.5
+  re-read is the one you do *before* writing intents (the design-run
+  concurrency group serializes design-runs against each other; a burn
+  racing the same both-labels issue is the residual window, and delivery
+  still refuses to move a branch a sibling run got to first). A run that
+  dies before the trusted step never posts a claim at all — nothing to
+  freeze the brief.
+- **Withdrawal is a stop intent, not a SHIP-LOCK rewrite.** Nothing has
+  been posted yet, so §0.6's withdrawal is: omit any claim-shaped intent
+  (settle will still post its lock, then lock-cleanup withdraws it on a
+  dead/declined outcome) and write a stop intent (below) when you are
+  walking away. Do not try to post `SHIP-LOCK WITHDRAWN` via intents — it
+  is rejected like every other ship-lock form.
+- **Stops are comment intents.** A `🚢 DECLINED`, `🚦 DECISION NEEDED`, or
+  `🚢 DEFERRED` first line in a comment intent is a hard stop the bundle step
+  honors: no bundle, no push — but the intents still travel, so settle posts
+  your stop and the thread keeps its record.
+- **§9's label is a label intent.** Skip the `ensure-label`/`gh issue edit`
+  dance; write `{"action":"label","label":"needs-decision"}` and settle
+  ensures and adds it.
+
+Attended runs (a human invoked `/design-run` in a session with their own
+credentials) post directly as before — the intents protocol is the unattended
+job's constraint, not the skill's.
 
 A stopped run costs nothing; a confidently wrong design PR costs a review and,
 worse, teaches the human to distrust the pipeline. When unsure, decline.
@@ -326,8 +444,11 @@ two live answers (decline and ask, don't enumerate).
    .claude/skills/chunk-issue/chunk-helper.sh ensure-label needs-decision
    gh issue edit <N> --add-label needs-decision
    ```
-   The label is unspoofable (write access to set) and is what the backlog-burn
-   selector keys its durable pause on.
+   **Unattended** you have no `issues: write`: write a label intent
+   (`{"action":"label","label":"needs-decision"}`) per §8 instead — `needs-decision`
+   is exactly the one label the applier's allowlist admits, and settle ensures
+   and adds it. The label is unspoofable (write access to set) and is what the
+   backlog-burn selector keys its durable pause on.
 3. Post a **`🚦 DECISION NEEDED — \`<id>\``** comment with **exactly two**
    options — the yes and the no — each saying what ships if chosen, enough
    context (what the gates/telemetry say) to answer without scrolling, and the
