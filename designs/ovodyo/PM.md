@@ -66,3 +66,5 @@ hero's "reaches the ball centre" is preview-only until the hub lands).
 | 2026-10-24 | Vitamins bless Ø4 mm rod + tape shim (boss Ø4.9); Ø5 ream alternative | Drik used-it / PM triage |
 | 2026-10-24 | What-ships monochrome preview beside banner (hero stays two-tone) | Drik used-it / PM triage D4 |
 | 2026-10-24 | #604 note: numeral shadow-hole legibility at 288 indexes/day is a hot path once driven | Drik customer-sense / PM queue |
+| 2026-10-24 | Re-rank #604: ball-side hub/socket **first** within the issue (demo ↔ chipped plaque) | Drik used-it / PM triage |
+| 2026-10-24 | #601 approach: swap `text()` numerals for `lib/stencil-glyphs.scad` `stencil_text()` | Jane bench-sense / PM queue |

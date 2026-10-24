@@ -87,8 +87,9 @@ The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf
 (built by `./scripts/plate.sh ovodyo` from `ci.plate`): the eight production
 parts as eight separate objects a slicer imports as parts — duplicate `base-end`
 and `base-plug` in the slicer to print two of each. On a **256 mm bed**, plan on
-**two plates**: the four ball halves alone (they pack 2×2 with shared settings),
-then segment + both ends + core + both plugs on a second plate with margin.
+**two plates**: the four ball halves alone (they pack 2×2 with shared settings —
+the long plate), then segment + both ends + core + both plugs on a second plate
+with margin (the coffee-break plate).
 - `mock-drive` — a single representative reduction gear, kept as a gated
   printability sample of the (otherwise preview-only) drivetrain. It is not a
   placed assembly part and is not included on the production plate.
@@ -114,7 +115,9 @@ the default render is the assembled clock.
   texture** on the chamfer facets ringing the pole — they sit ~52° off-axis
   when pole-down and print with slight droop, no support — so **keep
   auto-supports off**, or the slicer fills the open bowl and welds the seam
-  ring (the captive thread) shut.
+  ring (the captive thread) shut. The slot's rims bridge ~10 mm in PLA —
+  slightly drooled strips inside the window are the print, not a defect
+  (turning supports on to "fix" them is the weld-the-seam failure mode).
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render).
   The pole face carries a numeral, so **layer 1 is the stencil itself**; the
@@ -160,6 +163,13 @@ Customizer sections; override with `-D 'name=value'`):
 | `tip_d` | 5.6 mm | round nose at each wing tip (2 × `strut_d`) |
 | `foot_recess_d` | 4.9 mm | foot-pad recess, sized to a Ø5 mm stick-on bumper |
 
+**Font note (source re-renders):** the numerals currently use OpenSCAD
+`text(font="Liberation Sans:style=Bold")`. CI and the committed STLs resolve
+that face; a machine without Liberation Sans only WARNs and falls back, so
+glyph outlines can drift while the stencil bridges stay put. Install Liberation
+Sans before re-rendering from source — or wait for [#601](https://github.com/shaiss/print-bench/issues/601)/[#612](https://github.com/shaiss/print-bench/issues/612),
+which swap to font-free `lib/stencil-glyphs.scad`.
+
 The ball's faceting is `facet` in `ovodyo.scad` (default 1.05). Measured on the
 corrected corner normals ([#768](https://github.com/shaiss/print-bench/issues/768)):
 **1.0** → deepest cut (12 pentagons + 20 hexagons, max radius ≈ 42.3 mm at
@@ -195,9 +205,12 @@ the Ø5 path. The **ball halves have no printed pole socket yet** — the hero
 preview unions a cylinder into the shell that no printable part carries. Until
 the hub lands in [#604](https://github.com/shaiss/print-bench/issues/604), stand each assembled ball on its flat pole
 pentagon beside the base, or rest it on the rod tip without claiming a retained
-mount (there is no v0 "running feel" to tune — that fit is #604's). The three
+mount (there is no v0 "running feel" to tune — that fit is #604's). Stand each
+ball where a roll ends in carpet, or put a dab of museum putty under the pole
+face until #604 — the shells are light and will roll off a hard desk. The three
 truss segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603);
-tape or a dab of glue holds a temporary join).
+tape or a dab of glue holds a temporary join — place the assembly before the
+pour, and lift from the centre segment so the taped ends don't peel).
 
 **The red core goes in before the clock stands up, and the order matters: 1. fill
 each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into each port

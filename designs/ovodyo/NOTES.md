@@ -463,16 +463,18 @@ print, same material and profile as the halves.
   turn is right; grinding or needing to force it is too tight.
 - **Too tight / won't start:** raise `seam_tol` by 0.05 and reprint the
   coupon. **Rattles, wobbles, or spins back off:** lower it by 0.05.
-- **First-layer squish** tightens the first groove of a bore printed mouth-down
-  and fattens a ring's foot. The **female** puck prints bore-mouth-down like the
-  top half, so its fit is faithful. The **male** puck, though, stands on a flange
-  *on the bed*, while the production male ring prints at the *top* of the
-  pole-down bottom half — so the male coupon can show a first-flank elephant's
-  foot the ball never gets. If the male starts hard but runs free afterwards,
-  that is coupon-only flange foot: fix the first layer (z-offset / flow), and do
-  **not** loosen `seam_tol` to chase it — prefer the looser-feeling end of a
-  clean seat before locking the value for the halves. (Printing the coupon male
-  top-down like the half is a coupon-fidelity follow-up.)
+- **First-layer squish** fattens a ring's flange foot on the bed. The **female**
+  groove prints **mouth-up** at the top of the puck (same as the production top
+  half, whose seam face is the last plane printed), so first-layer squish never
+  touches it — that is why the female fit is faithful. The **male** coupon,
+  though, stands on a flange *on the bed*, while the production male ring prints
+  at the *top* of the pole-down bottom half — so the male coupon can show a
+  first-flank elephant's foot the ball never gets. If the male starts hard but
+  runs free afterwards, that is coupon-only flange foot: fix the first layer
+  (z-offset / flow), and do **not** loosen `seam_tol` to chase it — prefer the
+  looser-feeling end of a clean seat before locking the value for the halves.
+  (Printing the coupon male top-down like the half is a coupon-fidelity
+  follow-up.)
 - Then render the four halves with the winning value and print them
   pole-down (see Key decisions: Ball seam).
 
