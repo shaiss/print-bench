@@ -220,7 +220,8 @@ preview unions a cylinder into the shell that no printable part carries. Until
 the hub lands in [#604](https://github.com/shaiss/print-bench/issues/604), stand each assembled ball on its flat pole
 pentagon beside the base, or rest it on the rod tip without claiming a retained
 mount (there is no v0 "running feel" to tune — that fit is #604's). The shells are light and will roll off a hard desk — put a dab of museum putty
-under the pole face until #604, or keep them where a fall lands soft. The three
+on a facet *rim* (not across the cut-through numeral — putty in a void is hard
+to pick out) until #604, or keep them where a fall lands soft. The three
 truss segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603);
 tape or a dab of glue holds a temporary join — place the assembly before the
 pour, and lift from the centre segment so the taped ends don't peel).
@@ -233,14 +234,16 @@ port access. Print the plugs on the coffee-break plate with the other base parts
 never solo (a Ø5 mm part is easy to lose; a spare is cheap insurance). Weigh the
 pour first (~55 g total starting fill); pour in **~10 g stages and tap between
 stages** (tapping while pouring fights the funnel). A folded-paper funnel with
-the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm ports are a
-1.6-pellet throat and will arch. Press a Ø5 mm silicone bumper into each of the
-four foot recesses.
+the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port is only about
+one and a half pellets wide, so shot will jam and arch. Press a Ø5 mm silicone
+bumper into each of the four foot recesses.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
 wrapped in felt (or similar) inside a ball half before you screw it shut is a
-fine interim heft hack; **loose shot is forbidden** — it rattles against the
+fine interim heft hack — keep the pack against the seam, away from the numeral
+faces (the cuts are windows; a dark wrap shows less), and know a one-sided lump
+can bias which face parks. **Loose shot is forbidden** — it rattles against the
 numeral voids, and on this page rattle reads as broken. The heft arrives properly
 with the drive.
 
