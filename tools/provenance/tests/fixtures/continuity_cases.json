@@ -1,0 +1,1230 @@
+{
+ "cases": [
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "ok-tip-is-newest-checkpoint",
+   "parents": {},
+   "ref": "provenance",
+   "tip": "4343434343434343434343434343434343434343",
+   "why": ""
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000660,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000720,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1012,
+     "seq": 12,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000780,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1013,
+     "seq": 13,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000840,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1014,
+     "seq": 14,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000900,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1015,
+     "seq": 15,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000960,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1016,
+     "seq": 16,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001020,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1017,
+     "seq": 17,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001080,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1018,
+     "seq": 18,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001140,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1019,
+     "seq": 19,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001200,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1020,
+     "seq": 20,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001260,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1021,
+     "seq": 21,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001320,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1022,
+     "seq": 22,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001380,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1023,
+     "seq": 23,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001440,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1024,
+     "seq": 24,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001500,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1025,
+     "seq": 25,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001560,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1026,
+     "seq": 26,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001620,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1027,
+     "seq": 27,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001680,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1028,
+     "seq": 28,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001740,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1029,
+     "seq": 29,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001800,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1030,
+     "seq": 30,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001860,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1031,
+     "seq": 31,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001920,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1032,
+     "seq": 32,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001980,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1033,
+     "seq": 33,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791002040,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1034,
+     "seq": 34,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791002100,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1035,
+     "seq": 35,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "ok-quiet-day-25-noop-checkpoints",
+   "parents": {},
+   "ref": "provenance",
+   "tip": "4343434343434343434343434343434343434343",
+   "why": "25 no-op runs each re-upload tip-provenance-C; nothing expires (critique item 3)"
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "ok-disarmed-week-no-marks-since",
+   "parents": {},
+   "ref": "provenance",
+   "tip": "4343434343434343434343434343434343434343",
+   "why": "a week of disarmed (all-skipped) runs uploads nothing; the checkpoint still anchors"
+  },
+  {
+   "chain": [
+    "5858585858585858585858585858585858585858"
+   ],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000660,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "5858585858585858585858585858585858585858"
+    }
+   ],
+   "name": "ok-pushed-then-died-before-checkpoint",
+   "parents": {
+    "5858585858585858585858585858585858585858": "4343434343434343434343434343434343434343"
+   },
+   "ref": "provenance",
+   "tip": "5858585858585858585858585858585858585858",
+   "why": ""
+  },
+  {
+   "chain": [
+    "5959595959595959595959595959595959595959",
+    "5858585858585858585858585858585858585858"
+   ],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000660,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "5858585858585858585858585858585858585858"
+    },
+    {
+     "created": 1791000780,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1013,
+     "seq": 13,
+     "sha": "5959595959595959595959595959595959595959"
+    }
+   ],
+   "name": "ok-two-runs-died-in-a-row",
+   "parents": {
+    "5858585858585858585858585858585858585858": "4343434343434343434343434343434343434343",
+    "5959595959595959595959595959595959595959": "5858585858585858585858585858585858585858"
+   },
+   "ref": "provenance",
+   "tip": "5959595959595959595959595959595959595959",
+   "why": ""
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "foreign-forged-commit-on-top",
+   "parents": {
+    "4646464646464646464646464646464646464646": "4343434343434343434343434343434343434343"
+   },
+   "ref": "provenance",
+   "tip": "4646464646464646464646464646464646464646",
+   "why": ""
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000300,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1005,
+     "seq": 5,
+     "sha": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f"
+    },
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "foreign-rollback-to-older-checkpoint",
+   "parents": {
+    "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f": "5050505050505050505050505050505050505050"
+   },
+   "ref": "provenance",
+   "tip": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+   "why": "monotonic: only the newest checkpoint anchors (critique item 4)"
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000240,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1004,
+     "seq": 4,
+     "sha": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f"
+    },
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "foreign-rollback-to-older-intent",
+   "parents": {
+    "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f": "5050505050505050505050505050505050505050"
+   },
+   "ref": "provenance",
+   "tip": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+   "why": ""
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000540,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1009,
+     "seq": 9,
+     "sha": "5858585858585858585858585858585858585858"
+    },
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "foreign-intent-declared-before-the-checkpoint",
+   "parents": {
+    "5858585858585858585858585858585858585858": "4343434343434343434343434343434343434343"
+   },
+   "ref": "provenance",
+   "tip": "5858585858585858585858585858585858585858",
+   "why": "an intent older than the newest checkpoint never anchors"
+  },
+  {
+   "chain": [
+    "5959595959595959595959595959595959595959"
+   ],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000720,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1012,
+     "seq": 12,
+     "sha": "5959595959595959595959595959595959595959"
+    }
+   ],
+   "name": "foreign-undeclared-middle-of-chain",
+   "parents": {
+    "5959595959595959595959595959595959595959": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a": "4343434343434343434343434343434343434343"
+   },
+   "ref": "provenance",
+   "tip": "5959595959595959595959595959595959595959",
+   "why": ""
+  },
+  {
+   "chain": [
+    "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "5959595959595959595959595959595959595959"
+   ],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000660,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "5858585858585858585858585858585858585858"
+    },
+    {
+     "created": 1791000720,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1012,
+     "seq": 12,
+     "sha": "5959595959595959595959595959595959595959"
+    },
+    {
+     "created": 1791000780,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1013,
+     "seq": 13,
+     "sha": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "max_chain": 2,
+   "name": "foreign-chain-longer-than-max",
+   "parents": {
+    "5858585858585858585858585858585858585858": "4343434343434343434343434343434343434343",
+    "5959595959595959595959595959595959595959": "5858585858585858585858585858585858585858",
+    "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a": "5959595959595959595959595959595959595959"
+   },
+   "ref": "provenance",
+   "tip": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+   "why": ""
+  },
+  {
+   "expect": "deleted",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000660,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000720,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1012,
+     "seq": 12,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000780,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1013,
+     "seq": 13,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000840,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1014,
+     "seq": 14,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000900,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1015,
+     "seq": 15,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000960,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1016,
+     "seq": 16,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001020,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1017,
+     "seq": 17,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001080,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1018,
+     "seq": 18,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001140,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1019,
+     "seq": 19,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001200,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1020,
+     "seq": 20,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001260,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1021,
+     "seq": 21,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001320,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1022,
+     "seq": 22,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001380,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1023,
+     "seq": 23,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001440,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1024,
+     "seq": 24,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001500,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1025,
+     "seq": 25,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001560,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1026,
+     "seq": 26,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001620,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1027,
+     "seq": 27,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001680,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1028,
+     "seq": 28,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001740,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1029,
+     "seq": 29,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001800,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1030,
+     "seq": 30,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001860,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1031,
+     "seq": 31,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001920,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1032,
+     "seq": 32,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791001980,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1033,
+     "seq": 33,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791002040,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1034,
+     "seq": 34,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "deleted-ref-after-a-quiet-day",
+   "parents": {},
+   "ref": "provenance",
+   "tip": null,
+   "why": "never re-bootstrapped while a checkpoint exists (critique item 3)"
+  },
+  {
+   "expect": "bootstrap",
+   "marks": [],
+   "name": "bootstrap-absent-no-checkpoint",
+   "parents": {},
+   "ref": "provenance",
+   "tip": null,
+   "why": ""
+  },
+  {
+   "expect": "unanchored",
+   "marks": [],
+   "name": "unanchored-present-no-checkpoint",
+   "parents": {},
+   "ref": "provenance",
+   "tip": "4343434343434343434343434343434343434343",
+   "why": ""
+  },
+  {
+   "expect": "unanchored",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000660,
+     "kind": "intent",
+     "ref": "provenance-site",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "4343434343434343434343434343434343434343"
+    }
+   ],
+   "name": "other-refs-marks-are-ignored",
+   "parents": {},
+   "ref": "provenance",
+   "tip": "4343434343434343434343434343434343434343",
+   "why": "a provenance-site mark never vouches for the evidence ref"
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791002400,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 2000,
+     "seq": 40,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791003000,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1500,
+     "seq": 50,
+     "sha": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"
+    }
+   ],
+   "name": "upload-order-not-run-id",
+   "parents": {
+    "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e": "4343434343434343434343434343434343434343"
+   },
+   "ref": "provenance",
+   "tip": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e",
+   "why": "a late re-run attempt of an older run uploads later: upload-time (created_at) order wins, not the run id; the newer checkpoint descends from the older one"
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4343434343434343434343434343434343434343"
+    },
+    {
+     "created": 1791000300,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1005,
+     "seq": 5,
+     "sha": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f"
+    }
+   ],
+   "name": "upload-order-not-list-order",
+   "parents": {
+    "4343434343434343434343434343434343434343": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f"
+   },
+   "ref": "provenance",
+   "tip": "4343434343434343434343434343434343434343",
+   "why": "the newest checkpoint by upload time anchors wherever it sits in the list"
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4431443144314431443144314431443144314431"
+    }
+   ],
+   "name": "derived-ok-newest-checkpoint",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": "4431443144314431443144314431443144314431",
+   "why": ""
+  },
+  {
+   "chain": [
+    "4432443244324432443244324432443244324432"
+   ],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4431443144314431443144314431443144314431"
+    },
+    {
+     "created": 1791000660,
+     "kind": "intent",
+     "ref": "provenance-site",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "4432443244324432443244324432443244324432"
+    }
+   ],
+   "name": "derived-ok-intent-after-checkpoint",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": "4432443244324432443244324432443244324432",
+   "why": ""
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000300,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 1005,
+     "seq": 5,
+     "sha": "4430443044304430443044304430443044304430"
+    },
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4431443144314431443144314431443144314431"
+    }
+   ],
+   "name": "derived-foreign-rollback",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": "4430443044304430443044304430443044304430",
+   "why": ""
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000540,
+     "kind": "intent",
+     "ref": "provenance-site",
+     "run_id": 1009,
+     "seq": 9,
+     "sha": "4432443244324432443244324432443244324432"
+    },
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4431443144314431443144314431443144314431"
+    }
+   ],
+   "name": "derived-foreign-intent-before-checkpoint",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": "4432443244324432443244324432443244324432",
+   "why": ""
+  },
+  {
+   "expect": "deleted",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "4431443144314431443144314431443144314431"
+    }
+   ],
+   "name": "derived-deleted",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": null,
+   "why": ""
+  },
+  {
+   "expect": "bootstrap",
+   "marks": [],
+   "name": "derived-bootstrap",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": null,
+   "why": ""
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791132365,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 37217895189,
+     "seq": 11309400084,
+     "sha": "6161616161616161616161616161616161616161"
+    },
+    {
+     "created": 1791136190,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 37221929629,
+     "seq": 11309379790,
+     "sha": "6262626262626262626262626262626262626262"
+    },
+    {
+     "created": 1791136208,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 37221929629,
+     "seq": 11309379810,
+     "sha": "6262626262626262626262626262626262626262"
+    }
+   ],
+   "name": "upload-order-beats-artifact-id-genuine-newer-tip",
+   "parents": {
+    "6262626262626262626262626262626262626262": "6161616161616161616161616161616161616161"
+   },
+   "ref": "provenance",
+   "tip": "6262626262626262626262626262626262626262",
+   "why": "artifact ids are not monotonic in upload time: the measured worst inversion (2026-10-04) had a LOWER id uploaded 3,843 s later — upload time orders, the id only breaks a same-second tie; the genuine newer tip (lower id) is ok"
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791132365,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 37217895189,
+     "seq": 11309400084,
+     "sha": "6161616161616161616161616161616161616161"
+    },
+    {
+     "created": 1791136190,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 37221929629,
+     "seq": 11309379790,
+     "sha": "6262626262626262626262626262626262626262"
+    },
+    {
+     "created": 1791136208,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 37221929629,
+     "seq": 11309379810,
+     "sha": "6262626262626262626262626262626262626262"
+    }
+   ],
+   "name": "foreign-rollback-to-a-higher-id-older-checkpoint",
+   "parents": {
+    "6262626262626262626262626262626262626262": "6161616161616161616161616161616161616161"
+   },
+   "ref": "provenance",
+   "tip": "6161616161616161616161616161616161616161",
+   "why": "artifact ids are not monotonic in upload time: the measured worst inversion (2026-10-04) had a LOWER id uploaded 3,843 s later — upload time orders, the id only breaks a same-second tie; a force-push back to the older (higher-id) checkpoint is refused"
+  },
+  {
+   "chain": [
+    "6262626262626262626262626262626262626262"
+   ],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791132365,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 37217895189,
+     "seq": 11309400084,
+     "sha": "6161616161616161616161616161616161616161"
+    },
+    {
+     "created": 1791136208,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 37221929629,
+     "seq": 11309379790,
+     "sha": "6262626262626262626262626262626262626262"
+    }
+   ],
+   "name": "ok-died-before-checkpoint-intent-with-a-lower-id",
+   "parents": {
+    "6262626262626262626262626262626262626262": "6161616161616161616161616161616161616161"
+   },
+   "ref": "provenance",
+   "tip": "6262626262626262626262626262626262626262",
+   "why": "an intent uploaded after the checkpoint counts as newer although its artifact id is lower"
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791132365,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 37217895189,
+     "seq": 11309400085,
+     "sha": "6363636363636363636363636363636363636363"
+    },
+    {
+     "created": 1791136208,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 37221929629,
+     "seq": 11309379811,
+     "sha": "6464646464646464646464646464646464646464"
+    }
+   ],
+   "name": "derived-ok-upload-order-beats-artifact-id",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": "6464646464646464646464646464646464646464",
+   "why": "the derived ref orders by upload time too"
+  },
+  {
+   "chain": [],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791132365,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 37217895189,
+     "seq": 11309400085,
+     "sha": "6363636363636363636363636363636363636363"
+    },
+    {
+     "created": 1791136208,
+     "kind": "tip",
+     "ref": "provenance-site",
+     "run_id": 37221929629,
+     "seq": 11309379811,
+     "sha": "6464646464646464646464646464646464646464"
+    }
+   ],
+   "name": "derived-foreign-rollback-to-a-higher-id-older-checkpoint",
+   "parents": {},
+   "ref": "provenance-site",
+   "tip": "6363636363636363636363636363636363636363",
+   "why": "rolling the derived ref back to the older, higher-id checkpoint is refused"
+  },
+  {
+   "chain": [],
+   "expect": "ok",
+   "marks": [
+    {
+     "created": 1791000060,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "6565656565656565656565656565656565656565"
+    },
+    {
+     "created": 1791000060,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1011,
+     "seq": 11,
+     "sha": "6666666666666666666666666666666666666666"
+    }
+   ],
+   "name": "tie-on-created-breaks-on-artifact-id",
+   "parents": {
+    "6666666666666666666666666666666666666666": "6565656565656565656565656565656565656565"
+   },
+   "ref": "provenance",
+   "tip": "6666666666666666666666666666666666666666",
+   "why": "created_at has 1 s resolution: a same-second tie falls back to the artifact id"
+  },
+  {
+   "chain": [],
+   "conflicts": [
+    "6565656565656565656565656565656565656565"
+   ],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1020,
+     "seq": 20,
+     "sha": "6565656565656565656565656565656565656565"
+    },
+    {
+     "created": 1791001200,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "6666666666666666666666666666666666666666"
+    }
+   ],
+   "name": "foreign-checkpoint-order-conflict",
+   "parents": {
+    "6666666666666666666666666666666666666666": "6767676767676767676767676767676767676767"
+   },
+   "ref": "provenance",
+   "tip": "6666666666666666666666666666666666666666",
+   "why": "the clock-free cross-check: the evidence ref is fast-forward-only, so the newest checkpoint must descend from every other verified checkpoint; one it does not descend from is a mark-order conflict"
+  },
+  {
+   "chain": [
+    "6868686868686868686868686868686868686868"
+   ],
+   "conflicts": [
+    "6565656565656565656565656565656565656565"
+   ],
+   "expect": "foreign",
+   "marks": [
+    {
+     "created": 1791000600,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1020,
+     "seq": 20,
+     "sha": "6565656565656565656565656565656565656565"
+    },
+    {
+     "created": 1791001200,
+     "kind": "tip",
+     "ref": "provenance",
+     "run_id": 1010,
+     "seq": 10,
+     "sha": "6666666666666666666666666666666666666666"
+    },
+    {
+     "created": 1791001800,
+     "kind": "intent",
+     "ref": "provenance",
+     "run_id": 1009,
+     "seq": 9,
+     "sha": "6868686868686868686868686868686868686868"
+    }
+   ],
+   "name": "foreign-checkpoint-order-conflict-under-a-declared-chain",
+   "parents": {
+    "6666666666666666666666666666666666666666": "6767676767676767676767676767676767676767",
+    "6868686868686868686868686868686868686868": "6666666666666666666666666666666666666666"
+   },
+   "ref": "provenance",
+   "tip": "6868686868686868686868686868686868686868",
+   "why": "a chain onto a conflicted checkpoint is not accepted either"
+  }
+ ],
+ "doc": "docs/provenance.md §Tip continuity. The ONE table both tools/provenance (gitstore.continuity_verdict) and tools/reeve (provenance-foreign-tip) must agree on, row for row. Shas are synthetic 40-hex spellings of a short tag. Every mark carries 'created' (the artifact's created_at as a UTC epoch — marks order by (created, seq), upload time first) and 'seq' (the artifact id). 'parents' answers first_parent AND, by a first-parent walk, is_ancestor (the evidence ref is linear). 'chain' is the accepted (ok) or partially walked (foreign) intent chain; 'conflicts' (default []) the verified evidence checkpoints the newest one does not descend from.",
+ "format": "continuity-cases@2"
+}

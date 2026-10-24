@@ -1,0 +1,80 @@
+{
+ "closed_at": null,
+ "created_at": "2026-09-09T08:00:00Z",
+ "design_name": "beta-hinge",
+ "events": [
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "E0:brief:530",
+   "fields": {
+    "design_name": null
+   },
+   "head_sha": null,
+   "id": "issue:530:filed",
+   "issue": 530,
+   "kind": "brief.filed",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "claimed",
+   "trust_basis": "marker:edited",
+   "ts": "2026-09-09T08:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/issues/530"
+  }
+ ],
+ "evidence": {
+  "raw": "raw/brief/530.json.gz",
+  "raw_sha256": "33ab9fae1bc5971835ab1c0afb5b6b06997a33b63b85e569e3eb4344f1614963",
+  "receipts": [],
+  "revision": 1,
+  "source": "evidence"
+ },
+ "extractor": "provenance-extract 1",
+ "format": "record@1",
+ "incomplete": [
+  "brief-open"
+ ],
+ "issue": 530,
+ "key": "530",
+ "kind": "brief",
+ "labels": [
+  "design-brief"
+ ],
+ "prs": [],
+ "state": "open",
+ "state_reason": null
+}

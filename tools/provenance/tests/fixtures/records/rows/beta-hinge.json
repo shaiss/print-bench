@@ -1,0 +1,58 @@
+[
+ {
+  "after_merge": false,
+  "edges": {
+   "verifies": []
+  },
+  "episode": "D:2026-09-10",
+  "fields": {
+   "added_in_pr": null,
+   "added_in_sha": "d63588d44d5248bae73e9487528a9387c269726b",
+   "file": "NOTES.md",
+   "line": 8,
+   "line_sha256": "99598792501a6ebb9ac0f0233053931037de0f8c9aa89fe6ec3418b67502154c"
+  },
+  "head_sha": null,
+  "id": "row:beta-hinge:NOTES.md:99598792501a6ebb:0",
+  "issue": null,
+  "kind": "changelog",
+  "pr": null,
+  "runtime": {
+   "attempt": null,
+   "chain": null,
+   "chain_link": null,
+   "harness": null,
+   "job": null,
+   "job_id": null,
+   "links_not_served": null,
+   "model": null,
+   "model_basis": "none",
+   "platform": "unknown",
+   "provider": null,
+   "role": null,
+   "run_id": null,
+   "workflow": null
+  },
+  "sha": "d63588d44d5248bae73e9487528a9387c269726b",
+  "signals": {
+   "app": null,
+   "commit_author_email": null,
+   "commit_author_name": null,
+   "committer_login": null,
+   "login": null,
+   "login_type": null,
+   "marker": null,
+   "regen_identity": false,
+   "status_context": null,
+   "trailer_coauthors": [],
+   "trailer_session": null
+  },
+  "stale_sha": false,
+  "trust": "none",
+  "trust_basis": "none",
+  "ts": "2026-09-10T00:00:00Z",
+  "ts_precision": "day",
+  "tz": "UTC",
+  "url": "https://github.com/shaiss/print-bench/blob/d63588d44d5248bae73e9487528a9387c269726b/designs/beta-hinge/NOTES.md#L8"
+ }
+]
