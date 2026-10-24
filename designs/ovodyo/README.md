@@ -46,11 +46,11 @@ re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
 
 ![What ships (single-material)](previews/what-ships.png)
 
-*What a single-material print looks like (OpenSCAD default yellow — one colour).
-Shells with void numerals and the bare truss; no gear theatre. Balls sit on
-their pole pentagons in front of the base (clear of the wing tips), the interim
-display until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained mount. The two-tone
-hero above is the intent.*
+*What a single-material print looks like (OpenSCAD default yellow). Shells with
+void numerals and the bare truss; no gear theatre. Green inside the cuts is the
+renderer's inside-face colour, not a second filament. Balls sit on their pole
+pentagons in front of the base (clear of the wing tips), the interim display
+until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained mount. The two-tone hero above is the intent.*
 
 ![4-view contact sheet](previews/contact-sheet.png)
 

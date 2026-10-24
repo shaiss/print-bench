@@ -14,9 +14,9 @@ fixed once reviewed; a new region gets a new line).
   story is carried by `slot-path` after Drik R2 noted this framing). Description
   corrected to match the committed pixels — freeze rule: no reframe.
 - **slot-path** — near-equator view of the helical slot band cutting across
-  corner facets (the #768 corner-cut money shot). CGAL `render` so cut faces
-  stay one colour. Added after Drik R2 noted `slot-corner` framed numerals;
-  new line, not a reframe.
+  corner facets (the #768 corner-cut money shot). CGAL `render` (inside-face
+  green may still show in the void — renderer tint, not filament). Added after
+  Drik R2 noted `slot-corner` framed numerals; new line, not a reframe.
 - **base-mech** — the base drivetrain alone: geared stepper + reduction train at
   each pod, bevel take-off up each stalk, central electronics bay.
 - **base-mech-in-situ** — the same drivetrain seated in the truss so the gears
