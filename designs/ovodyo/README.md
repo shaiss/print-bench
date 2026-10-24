@@ -62,7 +62,8 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 
 ![Helical window broadside](previews/slot-window.png)
 
-*Looking into the 10 mm helical window — red interior is preview colour.*
+*Looking into the 10 mm helical window — preview red reads through the cut;
+OpenCSG cut walls may tint green (renderer, not filament).*
 
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
 
@@ -86,7 +87,8 @@ whole clock would print as one fused lump):
   35, 25, 45, 55, 15**, bottom **30, 05, 40, 20, 00, 50** (00–55 in 5s). Until
   the drive lands ([#604](https://github.com/shaiss/print-bench/issues/604)), it's a **desk die you set by hand** —
   tumble until the face you want parks on a flat pentagon — not yet a running
-  clock face.
+  clock face. The 10 mm helical slot is also where you grip the ball to tumble
+  it (thumb or fingernail in the window).
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
   (a Ø5.6 mm round nose) and carry a bored stalk boss over the motor pod, with
@@ -102,10 +104,12 @@ whole clock would print as one fused lump):
 The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf`
 (built by `./scripts/plate.sh ovodyo` from `ci.plate`): the eight production
 parts as eight separate objects a slicer imports as parts — duplicate `base-end`
-and `base-plug` in the slicer to print two of each. On a **256 mm bed**, plan on
-**two plates**: the four ball halves alone (they pack 2×2 with shared settings —
-the long plate), then segment + both ends + core + both plugs on a second plate
-that packs tightly — lay it out in the slicer first (the coffee-break plate).
+and `base-plug` in the slicer to print two of each. Every part's footprint clears
+a **220×220 mm** bed (the seam coupon is the longest single dimension at
+164 mm); the recommended layout on a **256 mm bed** is **two plates**: the four
+ball halves alone (they pack 2×2 with shared settings — the long plate), then
+segment + both ends + core + both plugs on a second plate that packs tightly —
+lay it out in the slicer first (the coffee-break plate).
 - `mock-drive` — a single representative reduction gear, kept as a gated
   printability sample of the (otherwise preview-only) drivetrain. It is not a
   placed assembly part and is not included on the production plate.
@@ -142,6 +146,9 @@ the default render is the assembled clock.
   ring (the captive thread) shut. The slot's rims bridge ~10 mm in PLA —
   slightly drooled strips inside the window are the print, not a defect
   (turning supports on to "fix" them is the weld-the-seam failure mode).
+  The truss ridge chords also bridge ~32 mm between posts (bay length at
+  `bays=4`) — expect underside sag on those spans; keep supports off, because
+  anything painted inside the lattice can never be removed.
 - **Brim:** safe on every part — if the truss tips lift, turn the brim on.
   No fit on this design touches the bed (the seam rings print at the top of
   the pole-down halves; the core sockets exit vertical faces).

@@ -73,3 +73,8 @@ hero's "reaches the ball centre" is preview-only until the hub lands).
 | 2026-10-24 | Kinematics proof table resolved (landing-flat 10–11 empty; ctrls 236/108) | Drik hunch / NOTES hygiene |
 | 2026-10-24 | Numeral legibility is a **v0** hot path (reads/day start day one), not only post-#604 | Drik used-it / PM triage → #601 |
 | 2026-10-24 | New `slot-window` camera sells the aperture; base-mech embedded | Drik/Jane / PM triage |
+| 2026-10-24 | `slot-window` reframed while unfrozen; three-description sync (README / cameras.conf / CAMERAS.md) — promise what the pixels show, not "red lit" | Drik used-it / PM triage |
+| 2026-10-24 | Ridge-chord ~32 mm bridge disclosure in Print settings; `bays` retaste queued to #603 | Jane bench-sense / PM triage |
+| 2026-10-24 | 220×220 extents note (every part clears; coupon longest); 256 mm two-plate stays recommended | Drik customer-sense / PM triage |
+| 2026-10-24 | Slot-as-grip line on the desk-die usage path | Drik customer-sense / PM triage |
+| 2026-10-24 | #604 test note: does a bare empty ball rest pole-down on a plaque without wandering? | Drik hunch / PM decline→queue |

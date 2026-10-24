@@ -16,11 +16,14 @@ fixed once reviewed; a new region gets a new line).
   corrected to match the committed pixels — freeze rule: no reframe.
 - **slot-path** — near-equator view of the helical slot band cutting across
   corner facets (the #768 corner-cut money shot). CGAL `render` (inside-face
-  green may still show in the void — renderer tint, not filament). The tight
+  green may still show in the void — renderer tint, not filament). Scale in
+  frame: adjacent numeral = 14 mm cap height; slot = 10 mm wide. The tight
   pass-by a numeral plaque is the measured #768 clearance. Added after Drik R2
   noted `slot-corner` framed numerals; new line, not a reframe.
-- **slot-window** — broadside into the 10 mm helical window with the red
-  interior lit (sells the aperture as a window, not a slit). New line.
+- **slot-window** — looking into the 10 mm helical window (aperture as a
+  window, not a slit). OpenCSG so preview-coloured ball_core can read through
+  the cut; cut walls may tint green (renderer, not filament). New line;
+  reframed while unfrozen so the aperture fills the frame.
 - **base-mech** — the base drivetrain alone: geared stepper + reduction train at
   each pod, bevel take-off up each stalk, central electronics bay.
 - **base-mech-in-situ** — the same drivetrain seated in the truss so the gears
