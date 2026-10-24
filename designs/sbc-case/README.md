@@ -33,13 +33,18 @@ view lower down shows the green board and gold header pins seated just below the
   (~95 × 76 × 2.5 mm plate + 7 mm bosses)
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
   first to tune the fits (~33 × 76 × 26 mm)
+- `foot` — one press-/glue-in tread + plug (print four); only mates a `base`
+  sliced with `printed_feet = true` (the stock base has no bed-face sockets)
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
-cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan, and four
-adhesive rubber feet. The screws come out of one standard **M2.5 / M3
-assortment**; add one bag of **M3 heat-set inserts**, that single fan, and a
-strip of **adhesive feet** — **four carts, not five** separate hardware orders.
+cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan, and either
+four **adhesive rubber feet** (default) or **four printed foot parts** you
+enable in the Customizer (`printed_feet = true` — slice `base` plus four copies
+of `part="foot"`; no rubber-dot BOM line). The screws come out of
+one standard **M2.5 / M3 assortment**; add one bag of **M3 heat-set inserts**,
+that single fan, and a strip of **adhesive feet** unless you print the feet —
+**four carts, not five** separate hardware orders when you use adhesive dots.
 
 ## Print settings
 
@@ -72,8 +77,21 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   nests the lid and base crops on one plate? A **global** elephant-foot setting is
   fine — the base crop's fit is a vertical cavity wall the compensation never
   touches, and its floor-and-skirt footprint hides the 0.1–0.2 mm shave.
-- **Feet:** stick four **adhesive rubber feet** on the floor — the case sits on
-  a flat base, and feet keep it from walking when you plug a cable in one-handed.
+- **Feet:** by default, stick four **adhesive rubber feet** on the floor — the
+  case sits on a flat base, and feet are meant to keep it from walking when you
+  plug a cable in one-handed (that grip is a **[hunch]** until the B10 field
+  test logs a real print). Or set **`printed_feet = true`** before you slice:
+  the `base` gains four shallow blind sockets on the exterior bed face (the
+  socket ceiling is a short first-layer bridge inside the 2 mm floor), and you
+  print **four** `foot` parts (tread on the bed, plug standing up) and install
+  each into a socket so the tread stands **below** the flat bottom — real lift
+  and corner contact without bridging the whole floor. The plug is a **slip
+  fit** (7.76 mm plug in an 8.00 mm socket, 1 mm engagement): **press-fit in
+  TPU**; for **PLA or PETG feet, use CA glue** — do not rely on friction alone.
+  **TPU** is the best bet for grip; tune `foot_fit_clearance` if your printer
+  runs tight. Each socket mouth carries a small bed-face flare so first-layer
+  elephant foot is less likely to pinch the 0.12 mm radial clearance. Default
+  off leaves the stock `base`, renders, and coupon unchanged.
 
 The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
@@ -91,6 +109,11 @@ The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 | `fan_center` | (−10, 0) mm | fan position; biased toward the SoC |
 | `board_clr` | 0.75 mm | board-to-wall clearance |
 | `wall` / `floor_t` / `lid_t` | 2.0 / 2.0 / 2.5 mm | shell thicknesses |
+| `printed_feet` | `false` | blind corner sockets in the `base` + separate `foot` parts |
+| `foot_socket_d` / `foot_socket_depth` | 8 / 1.0 mm | socket bore and depth in the floor (depth ≤ `floor_t`) |
+| `foot_protrusion` / `foot_tread_d` | 2 / 10 mm | tread below the bed face when installed; tread diameter |
+| `foot_fit_clearance` / `foot_corner_inset` | 0.12 / 12 mm | plug = socket_d − 2·clearance; corner inset ( −X feet shift +X to clear board bosses) |
+| `foot_feature_margin` / `foot_socket_mouth_chamfer` | 0.5 / 0.2 mm | boss/post wall; bed-face socket flare when feet enabled |
 
 All parameters are at the top of `sbc-case.scad` in Customizer sections;
 override on the command line with `-D 'fit_clearance=0.3'`.
