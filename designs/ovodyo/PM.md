@@ -71,3 +71,5 @@ hero's "reaches the ball centre" is preview-only until the hub lands).
 | 2026-10-24 | v0 desk-die framing adopted (until #604) | Drik customer-sense / PM triage |
 | 2026-10-24 | Interim ballast-in-balls: packed pour blessed, loose shot forbidden (rattle) | Drik customer-sense / PM ruling |
 | 2026-10-24 | Kinematics proof table resolved (landing-flat 10–11 empty; ctrls 236/108) | Drik hunch / NOTES hygiene |
+| 2026-10-24 | Numeral legibility is a **v0** hot path (reads/day start day one), not only post-#604 | Drik used-it / PM triage → #601 |
+| 2026-10-24 | New `slot-window` camera sells the aperture; base-mech embedded | Drik/Jane / PM triage |

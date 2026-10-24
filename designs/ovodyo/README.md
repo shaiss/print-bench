@@ -3,15 +3,17 @@
 A desk clock that will tell the time on two slowly tumbling faceted balls: the
 left ball shows the hour, the right ball the minutes in five-minute steps, each
 number sitting on one of twelve pentagon plaques. A helical slot cut through each
-shell frames the gears inside, so the mechanism is the ornament. This is a
-clean-room re-creation, in print-bench, of the "ovodyo" clock by Mectolab —
-built as a **v0 base** the improvement backlog ([#599](https://github.com/shaiss/print-bench/issues/599)) refines.
+shell will frame the gears inside (until [#604](https://github.com/shaiss/print-bench/issues/604) the slot looks into
+the empty shell), so the mechanism is the ornament. This is a clean-room
+re-creation, in print-bench, of the "ovodyo" clock by Mectolab — built as a
+**v0 base** the improvement backlog ([#599](https://github.com/shaiss/print-bench/issues/599)) refines.
 
 > **v0 — a working substrate, not the finished clock.** The geometry renders,
 > gates and slices, and the signature look is here: chunky faceted dice-balls
 > (chamfered dodecahedra — twelve flush pentagon faces plus hexagonal corner
-> facets at the default `facet`), **bold numerals cut clean through** each shell to a red interior
-> (stencilised so no counter drops out), and the reference's **exposed gearing in
+> facets at the default `facet`), **numerals cut clean through** each shell to a
+> red interior (stencilised so no counter drops out; in a single-material print
+> they read as dark cut-outs), and the reference's **exposed gearing in
 > the base** — a geared stepper and reduction gear-train at each pod, a bevel
 > take-off up each stalk, and a central electronics bay. The base drivetrain and
 > the red interior are shown as **preview-only coloured parts** (a single-material
@@ -58,10 +60,17 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 
 ![Helical slot path across corners](previews/slot-path.png)
 
+![Helical window broadside](previews/slot-window.png)
+
+*The 10 mm helical slot as a window into the interior (red is preview colour).*
+
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
 
-*Preview-only gears seated in the lattice — scale and home for the identity shot
-(`base-mech` is the close-up without the truss).*
+*Preview-only gears seated in the lattice — scale and home for the identity shot.*
+
+![Base drivetrain close-up](previews/base-mech.png)
+
+*The same drivetrain without the truss.*
 
 ## What you get
 
@@ -114,10 +123,14 @@ the default render is the assembled clock.
 - **Material:** PLA (white shell + red interior/mechanism is the intent; v0 is
   single-material).
 - **Layer height:** 0.2 mm for the base parts; **0.16 mm for the four ball
-  halves** — the near-pole facets sit ~52° and a finer step softens the show
-  surface. A faint texture band around each pole (and slightly translucent
-  lines along facet edges) is the known [#600](https://github.com/shaiss/print-bench/issues/600) caveat, not a slicing
-  mistake — don't chase it with supports.
+  halves** (and for the seam coupon — print it on the halves' profile so the
+  `seam_tol` that fits is the one the halves get) — the near-pole facets sit
+  ~52° and a finer step softens the show surface. A faint texture band around
+  each pole (and slightly translucent lines along facet edges) is the known
+  [#600](https://github.com/shaiss/print-bench/issues/600) caveat, not a slicing mistake — don't chase it with supports.
+  The pole-face stencil is layer 1: a small *elephant-foot compensation*
+  (0.1–0.15 mm) or first-layer flow trim keeps those ties matching the rest —
+  cosmetic only (the cut is through; nothing functional moves).
 - **Infill:** 15–20 %.
 - **Supports:** none. The truss and mock drive print support-free, and the
   ball halves print **pole-down** (see Orientation), which makes the cavity an
@@ -209,11 +222,12 @@ flat faces meet; the facets line up again as they close and the seam reads as
 one fine line. No glue, no dowels, and it unscrews the same way to reach the
 mechanism. **Print the seam coupon first** (`ovodyo-coupon.scad`: a male ring
 and a female puck side by side; the strip is **164 mm wide — needs a ≥170 mm
-bed**) and tune `seam_tol` in 0.05 mm steps until the puck runs on by hand with
-light drag and seats without rattle — then render the halves with that value. If
-the coupon's male ring feels tight only at the very start of the turn, that's
-**first-layer squish on the coupon**, not the fit — don't loosen `seam_tol` for
-it; the production seam never touches the bed.
+bed**; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
+0.05 mm steps until the puck runs on by hand with light drag and seats without
+rattle — then render the halves with that value. If the coupon's male ring feels
+tight only at the very start of the turn, that's **first-layer squish on the
+coupon**, not the fit — don't loosen `seam_tol` for it; the production seam
+never touches the bed.
 
 **Stalks (v0 display):** seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
 in the Ø4.9 mm `base-end` bosses — snug is right; don't ream unless you chose
@@ -237,8 +251,10 @@ never solo (a Ø5 mm part is easy to lose; a spare is cheap insurance). Weigh th
 pour first (~55 g total starting fill); pour in **~10 g stages and tap between
 stages** (tapping while pouring fights the funnel). A folded-paper funnel with
 the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port is only about
-one and a half pellets wide, so shot will jam and arch. Press a Ø5 mm silicone
-bumper into each of the four foot recesses.
+one and a half pellets wide, so shot will jam and arch. A strong magnet held
+against the pocket wall settles an arch and drags shot around through a couple
+of mm of plastic — worth a try (steel shot only). Press a Ø5 mm silicone bumper
+into each of the four foot recesses.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
