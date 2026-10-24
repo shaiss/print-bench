@@ -34,6 +34,23 @@ comment on the ONE PR the workflow selected":
     (JANE_SIGNOFF vs DRIK_SIGNOFF vs PM_TRIAGE) is derived from it server-side,
     so a Jane session cannot forge Drik's sign-off, a PM session cannot post a
     reviewer sign-off, and no input can post an unrecognised marker family;
+  * the PR HEAD sha the marker may carry is pinned by REVIEWER_HEAD_SHA (the
+    workflow's ``pull_request.head.sha``) in every unattended run — the model's
+    ``sha`` argument must match it byte-for-byte (after lower-casing). Format-
+    only validation used to accept any 40-hex string, so a reviewer that copied
+    a stale sha from an older thread comment could post, burn the one-post-per-
+    run cap, and leave ``reviewer-posted.sh`` ``served=false`` for the real head
+    (run 37530117408 on PR #559: Drik posted ``073fd1af…`` while head was
+    ``169898ab…``; later links including a clean glm-5.1 exit could not post).
+    A mismatch is refused BEFORE the GitHub write, so it does not consume the
+    cap and the agent can retry with the pinned value in the same turn.
+    The design-coach is the exception that *moves* the head: it git-pushes
+    iterations inside a round, so a later ``post_coach`` must carry the new
+    head. The workflow keeps a pin file (``REVIEWER_HEAD_SHA_PIN``) that
+    trusted restore steps advance from the live PR head before each later
+    chain link; within a link, ``post_coach`` may advance that same pin only
+    when the caller's sha equals the live head from the GitHub API — never
+    an arbitrary model-supplied value. Jane/Drik/PM cannot advance the pin;
   * Jane/Drik markers are ASSEMBLED from validated fields (40-hex sha,
     pass|block verdict, none|acknowledged fuse) — the fail-closed
     reviewer-signoff gate's "malformed marker" failure mode is unreachable
@@ -144,6 +161,18 @@ COACH_LOCK_LINE = "🎓 COACH-LOCK"
 # test_cap_state_wiring.py) reads CAP_STATE_ENV from this file and fails
 # pre-merge if a link step that launches this server does not set it.
 CAP_STATE_ENV = "REVIEWER_POST_STATE"
+# Trusted PR-head pin (sibling of REVIEWER_PR / REVIEWER_ID). Unattended ship
+# steps must export the workflow's pull_request.head.sha here; the model's
+# sha argument is checked against it so a stale 40-hex cannot burn the cap.
+# The backstop wiring drift guard reads HEAD_SHA_ENV the same way.
+HEAD_SHA_ENV = "REVIEWER_HEAD_SHA"
+# Optional pin *file* the design-coach workflow advances between rounds
+# (and that post_coach may advance in-process when the live PR head moves).
+# When set and readable, it overrides HEAD_SHA_ENV so a later coach link
+# sees the head a prior push created. Jane/Drik/PM ship steps omit it.
+HEAD_SHA_PIN_ENV = "REVIEWER_HEAD_SHA_PIN"
+# Selftest-only override for the live-head GET (never set in the workflow).
+FAKE_LIVE_HEAD_ENV = "REVIEWER_MCP_FAKE_LIVE_HEAD"
 
 
 def _cap_state_path():
@@ -401,14 +430,140 @@ def _validate_body(tool, body):
     return None
 
 
-def _validate_sha(tool, sha):
+def _read_head_pin_file():
+    """Return the 40-hex pin from REVIEWER_HEAD_SHA_PIN, or None."""
+    path = os.environ.get(HEAD_SHA_PIN_ENV, "").strip()
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            val = fh.read().strip().lower()
+    except OSError:
+        return None
+    if len(val) == 40 and set(val) <= _SHA_CHARS:
+        return val
+    return None
+
+
+def _expected_head_sha():
+    """The trusted head pin: pin file (coach) overrides the env seed."""
+    pinned = _read_head_pin_file()
+    if pinned is not None:
+        return pinned
+    return os.environ.get(HEAD_SHA_ENV, "").strip().lower()
+
+
+def _write_head_pin(sha_l):
+    """Advance the trusted pin (file when present, else process env).
+
+    Called only after the live PR head from the GitHub API confirmed
+    ``sha_l`` — never on a caller-supplied value alone.
+    """
+    os.environ[HEAD_SHA_ENV] = sha_l
+    path = os.environ.get(HEAD_SHA_PIN_ENV, "").strip()
+    if not path:
+        return
+    parent = os.path.dirname(path) or "."
+    try:
+        fd, tmp = tempfile.mkstemp(prefix="reviewer-head-", dir=parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(sha_l + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except OSError as e:
+        log(f"WARNING: could not advance {HEAD_SHA_PIN_ENV} ({e}); "
+            f"in-process {HEAD_SHA_ENV} is {sha_l[:12]}")
+
+
+def _live_pr_head_sha():
+    """Current PR head oid from GitHub — trusted, not model-supplied.
+
+    Selftest sets REVIEWER_MCP_FAKE + REVIEWER_MCP_FAKE_LIVE_HEAD so this
+    never hits the network. Production uses GET /repos/.../pulls/{n}.
+    """
+    if os.environ.get("REVIEWER_MCP_FAKE"):
+        fake = os.environ.get(FAKE_LIVE_HEAD_ENV, "").strip().lower()
+        if len(fake) == 40 and set(fake) <= _SHA_CHARS:
+            return fake
+        raise RuntimeError(
+            f"{FAKE_LIVE_HEAD_ENV} must be a 40-hex sha when "
+            "REVIEWER_MCP_FAKE is set (selftest wiring)")
+    path = f"/repos/{_repo()}/pulls/{_pr_number()}"
+    data = _api("GET", path)
+    sha = (data.get("head") or {}).get("sha", "")
+    if not isinstance(sha, str):
+        sha = ""
+    sha_l = sha.strip().lower()
+    if len(sha_l) != 40 or not set(sha_l) <= _SHA_CHARS:
+        raise RuntimeError(
+            f"GitHub pull head.sha is not 40-hex (got {sha!r})")
+    return sha_l
+
+
+def _validate_sha(tool, sha, *, coach_live_advance=False):
+    """Format-check ``sha`` and, when pinned, require the trusted PR head.
+
+    Returns ``(normalized_sha, None)`` on success or ``(None, error_result)``
+    on refusal. Normalization is lower-case so a mixed-case argument that
+    matches REVIEWER_HEAD_SHA still assembles the marker the artifact check
+    looks for (GitHub head shas are lower-case; the suffix match is exact).
+
+    When ``coach_live_advance`` is true (``post_coach`` only), a sha that
+    does not match the pin is still accepted if it equals the live PR head
+    from the GitHub API — the pin then advances to that value. An arbitrary
+    model-supplied sha that is neither the pin nor the live head is refused.
+    """
     if not isinstance(sha, str) or len(sha) != 40 \
             or not set(sha.lower()) <= _SHA_CHARS:
-        return _tool_error(
+        return None, _tool_error(
             f"{tool}: 'sha' must be the PR's current head commit as 40 "
-            "lower-case hex characters (read it from `gh pr view`); got "
-            f"{sha!r}")
-    return None
+            "lower-case hex characters (the value the workflow prompt pins "
+            f"as PR head sha / `{HEAD_SHA_ENV}`); got {sha!r}")
+    sha_l = sha.lower()
+    expected = _expected_head_sha()
+    if os.environ.get("GITHUB_RUN_ID", "").strip() and not expected:
+        return None, _tool_error(
+            f"{tool}: {HEAD_SHA_ENV} is not set but this is an unattended "
+            "run (GITHUB_RUN_ID is set) — the workflow must pin "
+            "pull_request.head.sha so a stale/wrong sha cannot burn the "
+            "one-post cap and leave reviewer-posted.sh served=false for "
+            "the real head")
+    if expected:
+        if len(expected) != 40 or not set(expected) <= _SHA_CHARS:
+            return None, _tool_error(
+                f"{tool}: {HEAD_SHA_ENV}/{HEAD_SHA_PIN_ENV} is not a 40-hex "
+                f"sha (workflow bug); got {expected!r}")
+        if sha_l != expected:
+            if coach_live_advance:
+                try:
+                    live = _live_pr_head_sha()
+                except RuntimeError as e:
+                    return None, _tool_error(
+                        f"{tool}: cannot verify live PR head to advance "
+                        f"the pin after a push ({e})")
+                if sha_l == live:
+                    _write_head_pin(sha_l)
+                    log(f"advanced trusted head pin to {sha_l[:12]} "
+                        "(matches live PR head after coach push)")
+                    return sha_l, None
+            return None, _tool_error(
+                f"{tool}: 'sha' {sha_l!r} is not the PR head pinned by "
+                f"{HEAD_SHA_ENV}/{HEAD_SHA_PIN_ENV} ({expected}) — posting "
+                "a stale sha would burn the one-post-per-run cap while "
+                "reviewer-posted.sh still reads served=false for the real "
+                "head; use the exact 40-hex from the prompt's 'PR head "
+                "sha' line (or, after a coach push, the live "
+                "`gh pr view --json headRefOid`). This refusal did not "
+                "post and did not consume the cap.")
+    return sha_l, None
 
 
 def _cap_preflight(tool):
@@ -497,7 +652,7 @@ def _post_review(arguments):
     err = _validate_body("post_review", body)
     if err is not None:
         return err
-    err = _validate_sha("post_review", sha)
+    sha, err = _validate_sha("post_review", sha)
     if err is not None:
         return err
     if verdict not in ("pass", "block"):
@@ -534,7 +689,7 @@ def _post_triage(arguments):
     err = _validate_body("post_triage", body)
     if err is not None:
         return err
-    err = _validate_sha("post_triage", sha)
+    sha, err = _validate_sha("post_triage", sha)
     if err is not None:
         return err
     designs, err = _parse_designs(design)
@@ -650,11 +805,12 @@ def _post_coach(arguments):
             "PM_TRIAGE, PM_TRIAGE_DONE, COACH_LOCK or COACH_DONE HTML "
             "comment — those markers are assembled server-side")
     sha = args.get("sha")
-    err = _validate_sha("post_coach", sha)
+    # Coach may push mid-round; accept the new head only when it matches
+    # the live PR head (API), advancing the trusted pin — never an
+    # arbitrary caller sha (CodeRabbit major on PR #829).
+    sha, err = _validate_sha("post_coach", sha, coach_live_advance=True)
     if err is not None:
         return err
-    # Canonicalise to lower-case hex (the artifact check is case-sensitive).
-    sha = sha.lower()
 
     try:
         _require_coach()
@@ -717,9 +873,11 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first. "
-                        "A marker for a superseded head is treated as stale "
-                        "by the merge gate."
+                        "characters — use the exact value from the prompt's "
+                        "'PR head sha' line (pinned by the workflow as "
+                        "REVIEWER_HEAD_SHA). Do not copy a sha from an older "
+                        "comment or commit on the thread; a stale sha is "
+                        "refused and does not count as posted."
                     ),
                 },
                 "verdict": {
@@ -786,9 +944,9 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first. "
-                        "Also assembled into the PM_TRIAGE_DONE "
-                        "completion marker (issue #770)."
+                        "characters — use the prompt's 'PR head sha' line "
+                        "(REVIEWER_HEAD_SHA). Also assembled into the "
+                        "PM_TRIAGE_DONE completion marker (issue #770)."
                     ),
                 },
             },
@@ -824,7 +982,11 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "The PR's current head commit, 40 lower-case hex "
-                        "characters — read it from `gh pr view <n>` first. "
+                        "characters — initially the prompt's 'PR head sha' "
+                        "(REVIEWER_HEAD_SHA). After a git push in this "
+                        "round, pass the new headRefOid; the pin advances "
+                        "only when that value matches the live PR head "
+                        "(workflow-managed pin file + API check). "
                         "Assembled into the COACH_DONE completion marker."
                     ),
                 },
@@ -911,6 +1073,7 @@ def selftest():
     os.environ["REVIEWER_ID"] = "jane"
     fails = []
     H40 = "a" * 40
+    OTHER40 = "c" * 40
 
     def check(name, cond):
         print(f"{'ok  ' if cond else 'FAIL'}  {name}")
@@ -925,9 +1088,12 @@ def selftest():
 
     # Pin the environment: each case below decides attended/unattended itself,
     # so an ambient Actions GITHUB_RUN_ID / REVIEWER_POST_STATE (this selftest
-    # runs inside CI) must not leak into the attended cases.
+    # runs inside CI) must not leak into the attended cases. REVIEWER_HEAD_SHA
+    # is set to the happy-path sha for attended + unattended posts; the
+    # mismatch / missing-pin cases below override it deliberately.
     os.environ.pop("GITHUB_RUN_ID", None)
     os.environ.pop(CAP_STATE_ENV, None)
+    os.environ[HEAD_SHA_ENV] = H40
 
     # Input guards reject and post nothing.
     _last_payload = None
@@ -949,6 +1115,20 @@ def selftest():
           refused(_post_review({"body": "x", "sha": "z" * 40, "verdict": "pass",
                                 "fuse": "none"}), "'sha'")
           and _last_payload is None)
+    _last_payload = None
+    check("a sha that is not the pinned PR head is rejected (stale-sha cap burn)",
+          refused(_post_review({"body": "x", "sha": OTHER40, "verdict": "pass",
+                                "fuse": "none"}), HEAD_SHA_ENV)
+          and _last_payload is None)
+    _last_payload = None
+    # Mixed-case that still matches the pin must normalize and post — the
+    # artifact check's suffix match is case-sensitive on a lower-case head.
+    ok_case = _post_review({"body": "case fold", "sha": H40.upper(),
+                            "verdict": "pass", "fuse": "none"})
+    check("a mixed-case sha matching the pin normalizes and posts",
+          ok_case.get("isError") is False
+          and posted_body() is not None
+          and f"sha={H40} " in posted_body())
     _last_payload = None
     check("an out-of-vocabulary verdict is rejected",
           refused(_post_review({"body": "x", "sha": H40, "verdict": "maybe",
@@ -1135,6 +1315,17 @@ def selftest():
 
     # The walk-spanning one-review cap, inside an Actions run.
     os.environ["GITHUB_RUN_ID"] = "selftest-run"
+    os.environ[HEAD_SHA_ENV] = H40
+
+    # Unwired head pin: run id set but no REVIEWER_HEAD_SHA. Fail closed —
+    # format-only validation is exactly the stale-sha hole this pin closes.
+    os.environ.pop(HEAD_SHA_ENV, None)
+    _last_payload = None
+    r = _post_review({"body": "unpinned head", "sha": H40, "verdict": "pass",
+                      "fuse": "none"})
+    check("an unattended run without REVIEWER_HEAD_SHA refuses (fail closed)",
+          refused(r, HEAD_SHA_ENV) and _last_payload is None)
+    os.environ[HEAD_SHA_ENV] = H40
 
     # Unwired: run id set but no state path. Fail closed — per-process
     # counting is exactly the per-link reset the state file replaces.
@@ -1147,6 +1338,16 @@ def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         state = os.path.join(tmp, "reviewer-posts")
         os.environ[CAP_STATE_ENV] = state
+
+        # A stale-sha refusal must not consume the cap — otherwise a wrong
+        # first attempt would strand later links the same way a successful
+        # wrong-sha post did on PR #559.
+        _last_payload = None
+        r = _post_review({"body": "stale", "sha": OTHER40, "verdict": "pass",
+                          "fuse": "none"})
+        check("a stale-sha refusal does not consume the cap",
+              refused(r, HEAD_SHA_ENV) and _last_payload is None
+              and _cap_state_count(state) == 0)
 
         # A post that FAILS does not consume the cap — the record is appended
         # only after a successful write.
@@ -1309,6 +1510,71 @@ def selftest():
               r.get("isError") is True and _last_payload is None)
     os.environ.pop(CAP_STATE_ENV, None)
     os.environ.pop("GITHUB_RUN_ID", None)
+
+    # Coach pin advance after a push (PR #829 / CodeRabbit major): the
+    # workflow seeds REVIEWER_HEAD_SHA_PIN; a later post_coach with the
+    # NEW head is accepted only when that sha equals the live PR head
+    # (API), and the pin file advances so artifact checks / later links
+    # see it. An arbitrary non-live sha stays refused and does not
+    # consume the cap. Jane cannot take this path.
+    os.environ["GITHUB_RUN_ID"] = "selftest-coach-pin-advance"
+    os.environ["REVIEWER_ID"] = "coach"
+    os.environ[HEAD_SHA_ENV] = H40
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "coach-pin-posts")
+        pin = os.path.join(tmp, "reviewer-head-sha")
+        with open(pin, "w", encoding="utf-8") as fh:
+            fh.write(H40 + "\n")
+        os.environ[CAP_STATE_ENV] = state
+        os.environ[HEAD_SHA_PIN_ENV] = pin
+        os.environ[FAKE_LIVE_HEAD_ENV] = OTHER40
+
+        _last_payload = None
+        # Stale / invented sha that is neither the pin nor the live head.
+        ghost = "d" * 40
+        r = _post_coach({"body": "ghost head", "sha": ghost})
+        check("coach refuses a sha that is neither pin nor live head",
+              refused(r, HEAD_SHA_ENV) and _last_payload is None
+              and _cap_state_count(state) == 0
+              and _read_head_pin_file() == H40)
+
+        # After a push the live head is OTHER40; post_coach advances the pin.
+        r = _post_coach({"body": "round summary after push", "sha": OTHER40})
+        check("coach accepts the live head after a push (pin advances)",
+              r.get("isError") is False and _last_payload is not None)
+        check("COACH_DONE carries the advanced head, not the event seed",
+              "<!-- COACH_DONE sha=" + OTHER40 + " -->" in (posted_body() or ""))
+        check("the pin file advanced to the live head",
+              _read_head_pin_file() == OTHER40)
+        check("in-process REVIEWER_HEAD_SHA advanced with the pin file",
+              os.environ.get(HEAD_SHA_ENV) == OTHER40)
+        check("a live-head advance consumes one cap slot (not a refusal)",
+              _cap_state_count(state) == 1)
+
+        # A subsequent post with the advanced pin succeeds without re-GET.
+        os.environ.pop(FAKE_LIVE_HEAD_ENV, None)
+        r = _post_coach({"body": "follow-up on new head", "sha": OTHER40})
+        check("coach posts against the advanced pin without another live GET",
+              r.get("isError") is False)
+
+        # Jane must not advance even when the "live" head would match.
+        os.environ["REVIEWER_ID"] = "jane"
+        os.environ[HEAD_SHA_ENV] = H40
+        with open(pin, "w", encoding="utf-8") as fh:
+            fh.write(H40 + "\n")
+        os.environ[FAKE_LIVE_HEAD_ENV] = OTHER40
+        _last_payload = None
+        r = _post_review({"body": "jane no advance", "sha": OTHER40,
+                          "verdict": "pass", "fuse": "none"})
+        check("jane cannot advance the pin via a live-head mismatch",
+              refused(r, HEAD_SHA_ENV) and _last_payload is None
+              and _read_head_pin_file() == H40)
+
+    os.environ.pop(CAP_STATE_ENV, None)
+    os.environ.pop(HEAD_SHA_PIN_ENV, None)
+    os.environ.pop(FAKE_LIVE_HEAD_ENV, None)
+    os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ[HEAD_SHA_ENV] = H40
     os.environ["REVIEWER_ID"] = "jane"
 
     check("tools/list exposes post_review, post_triage and post_coach",
@@ -1334,7 +1600,10 @@ def selftest_cap_child(state_path):
     os.environ["REVIEWER_ID"] = "jane"
     os.environ["GITHUB_RUN_ID"] = "selftest-link-n+1"
     os.environ[CAP_STATE_ENV] = state_path
-    r = _post_review({"body": "cross-process probe", "sha": "b" * 40,
+    # Pin the head to the sha this probe posts — unattended runs require it.
+    child_sha = "b" * 40
+    os.environ[HEAD_SHA_ENV] = child_sha
+    r = _post_review({"body": "cross-process probe", "sha": child_sha,
                       "verdict": "pass", "fuse": "none"})
     outcome = "REFUSED" if r.get("isError") else "POSTED"
     print(f"{outcome}: {r['content'][0]['text']}")

@@ -91,7 +91,7 @@ def test_gather_snapshot_normalizes_and_filters(monkeypatch):
         },
     ]
     comments_payload = [
-        {"body": "🚢 SHIP-LOCK — claimed", "created_at": "2026-08-04T00:00:00Z",
+        {"body": "🚢 SHIP-LOCK — claimed\n\n<!-- design-run-ship-lock:v1 -->", "created_at": "2026-08-04T00:00:00Z",
          "user": {"login": "bot-pat", "type": "User"}},
         {"body": "just a normal comment", "created_at": "2026-08-05T00:00:00Z",
          "user": {"login": "owner", "type": "User"}},
@@ -132,14 +132,14 @@ def test_gather_snapshot_normalizes_and_filters(monkeypatch):
     # the marker-free leg of the run-vs-owner test (a deleted author types
     # as "", which policy reads as a human).
     assert issue5["comments"] == [
-        {"body": "🚢 SHIP-LOCK — claimed", "createdAt": "2026-08-04T00:00:00Z",
-         "authorType": "User"},
+        {"body": "🚢 SHIP-LOCK — claimed\n\n<!-- design-run-ship-lock:v1 -->", "createdAt": "2026-08-04T00:00:00Z",
+         "authorType": "User", "authorLogin": "bot-pat", "ownerLogin": "owner"},
         {"body": "just a normal comment", "createdAt": "2026-08-05T00:00:00Z",
-         "authorType": "User"},
+         "authorType": "User", "authorLogin": "owner", "ownerLogin": "owner"},
         {"body": "status update from a workflow", "createdAt": "2026-08-06T00:00:00Z",
-         "authorType": "Bot"},
+         "authorType": "Bot", "authorLogin": "github-actions[bot]", "ownerLogin": "owner"},
         {"body": "author deleted", "createdAt": "2026-08-07T00:00:00Z",
-         "authorType": ""},
+         "authorType": "", "authorLogin": "", "ownerLogin": "owner"},
     ]
     # A comment-free issue gets an empty thread — and, the guard that keeps
     # gather cheap, no comment request is made for it at all.

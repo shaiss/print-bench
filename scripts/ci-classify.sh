@@ -261,8 +261,13 @@ classify() {
         # The precedent-log seed (issue #445) joins for the same reason: the
         # golden round-trip test reads the committed file itself, so a hand
         # edit that broke the parse/render identity must re-run these tests.
+        # So does the data-branch Vercel guard (.github/data-branch-guard/):
+        # the two branch builders hash it into the telemetry tree, and
+        # test_learning_wiring.py pins both its content and its 100755 mode.
+        # It moves no mesh, no pixels and no site byte (Vercel skips .github/),
+        # so nothing else runs for it.
         tools/reeve/*|.github/reeve.conf|\
-        telemetry/reeve-greenlights.ndjson|\
+        telemetry/reeve-greenlights.ndjson|.github/data-branch-guard/*|\
         .github/workflows/reeve.yml|scripts/preview-budget.sh|\
         .github/workflows/ci.yml) rvtests=true ;;
       esac
@@ -679,6 +684,14 @@ selftest() {
   # round-trip test reads the committed file itself.
   out="$(run "telemetry/reeve-greenlights.ndjson")"
   check "reeve-precedent-seed-drift" "$out" "reeve_tests=true"
+  # The data-branch Vercel guard is a drift-guard input the same way (the
+  # wiring tests pin its bytes and mode) — and nothing more: it reaches no
+  # mesh, no preview and no served byte, so a guard-only change runs reeve's
+  # tests alone (ci-ok accepts the skipped jobs, the docs-only precedent).
+  out="$(run ".github/data-branch-guard/vercel-ignore-build.sh")"
+  check "reeve-data-branch-guard-drift" "$out" \
+    "reeve_tests=true" "gate=false" "gate_designs=" "scad=false" "regen=false" \
+    "printcheck_tests=false" "model_registry_tests=false"
 
   # 4g. brief-sources (#438, deterministic half of the #245 spike-to-brief
   #     converter) is soft-infra like its tool siblings: its own tests run and

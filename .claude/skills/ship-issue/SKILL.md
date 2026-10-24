@@ -26,8 +26,13 @@ workflow did). Section 7 says what changes when nobody is watching.
    when you posted it.
 3. **Lock check** — an issue is taken if any of these hold:
    - **an active claim marker.** The marker is a state, not a flag: read the
-     *latest* `🚢 SHIP-LOCK` comment and act on that one.
-     `🚢 SHIP-LOCK` is active, and the issue is taken.
+     *latest authentic* `🚢 SHIP-LOCK` comment and act on that one.
+     Authentic means the body carries `<!-- design-run-ship-lock:v1 -->`
+     and the author login is `github-actions[bot]` (settle) or `shaiss`
+     (attended/PAT) — attended runs post as `shaiss` or not at all; never
+     `cursor[bot]` (shared Cursor App). A bare `🚢 SHIP-LOCK` first line
+     is never enough, nor is marker + `cursor[bot]` / `claude[bot]`. An
+     authentic `🚢 SHIP-LOCK` is active, and the issue is taken.
      `🚢 SHIP-LOCK WITHDRAWN` is released, and blocks nothing.
      An active claim more than a few hours old with **no**
      `claude/issue-<N>-*` branch carrying unmerged work and **no** open PR
@@ -49,10 +54,12 @@ workflow did). Section 7 says what changes when nobody is watching.
      cannot tell (the count fails), treat the branch as a claim. The burn's
      selector (`tools/backlog-burn`) and its lock cleanup
      (`scripts/routine-lock-cleanup.sh`) read the same rule.
-4. Claim it by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`.
-   One per issue, ever. The comment's timestamp is the proof the contract
-   predates the diff — that is the whole anti-retrofit mechanism, so post it
-   **before** you read a line of implementation code.
+4. Claim it by posting the §2 contract as a comment led by `🚢 SHIP-LOCK`,
+   including the authenticity marker `<!-- design-run-ship-lock:v1 -->` in
+   the body (readers require marker + trusted author — a bare first line is
+   never enough). One per issue, ever. The comment's timestamp is the proof
+   the contract predates the diff — that is the whole anti-retrofit
+   mechanism, so post it **before** you read a line of implementation code.
 5. **Re-read after claiming.** Check-then-post is not atomic: two runs can
    both pass step 3 and both post. So re-read the comments afterwards, and if
    another *active* claim predates yours, withdraw and stop — last writer
@@ -113,6 +120,8 @@ asked for.
 
 ```markdown
 🚢 SHIP-LOCK — shipping this as one PR.
+
+<!-- design-run-ship-lock:v1 -->
 
 **Chosen approach:** <the option the issue picked, or the only one on offer>
 
@@ -244,6 +253,55 @@ Same skill, three tightenings — nobody is there to catch a wrong guess:
 - **The issue thread is the only log.** Assume nobody reads the run output.
   Claim, amendments, declines, and the final verdict all land as comments,
   each one readable cold.
+
+### Shipping in the scheduled burn — leave a branch, a fresh runner delivers it
+
+When the invoker is `backlog-burn.yml`, §6's "Draft PR … then
+`subscribe_pr_activity`" is not yours to do. The agent job runs with
+`github.token` and cannot push; a PAT could have steered more than the
+issue it was handed, so it holds none (issue #863, the #859/#861
+pattern). The agent job's next step writes a git bundle of the commits on
+`claude/issue-<N>-*`; a separate deliver workflow, running no agent code,
+checks out the commit the job started from, verifies that bundle, and only
+then pushes the branch and opens the draft PR. Nothing in the bundle is
+executed. The success comment is posted only after both of these are true:
+
+- `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
+- an open **draft** pull request in this repository, whose `headRefOid` is
+  that tip, has a body that closes `#<N>`
+
+Before you end the turn:
+
+1. Check out `claude/issue-<N>-<slug>` (create it from the default branch
+   if you have not already). Any other name, including the default branch,
+   is not pushed.
+2. Commit the work. The delivery step commits the dirty files you left
+   behind too — but only outside the protected prefixes. Both backlog-burn
+   and design-run refuse `.github/**`, `.claude/**`, `scripts/**` and
+   `tools/**` (issue #869); backlog-burn may still deliver `docs/`,
+   `designs/`, `lib/`, `people/` and other non-protected paths, while
+   design-run stays designs-only. A non-draft PR already open on the
+   branch is a hard stop (`auto-arm.yml` arms auto-merge on non-draft
+   `claude/*` PRs). A tree with no commit ahead of the job's start SHA and
+   no dirty files is not delivered.
+3. Do not `git push` and do not `gh pr create`. This job's token cannot
+   push, those two commands are denied, and a pull request opened here
+   would not trigger CI. The delivery step pushes the branch and opens the
+   draft. Its body is `Closes #<N>` plus a pointer at the branch, so the
+   frozen contract, the claim-comment link, the §5 audit table with
+   measured numbers, and the `/preflight` verdict belong on the issue
+   thread, where a reviewer can read them.
+4. Stop. Do not post the success comment. The delivery step posts
+   `🚢 backlog-burn delivered — branch and draft PR verified` with the
+   branch tip and the PR URL, and only after the two checks above pass. A
+   failed push posts nothing that reads as success. A `🚢 DECLINED`,
+   `🚦 DECISION NEEDED`, or `🚢 DEFERRED` comment from this run is a hard
+   stop: the delivery step does not bundle that work, does not push it,
+   and does not post success.
+
+Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
+The delivery workflow opens it, and that PR does not exist yet when your
+turn ends.
 
 ## 8. Decisions that need a human (the HITL decision gate)
 

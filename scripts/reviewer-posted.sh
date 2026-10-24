@@ -47,6 +47,17 @@
 #     Exit 1 = the artifact read itself failed: a check that cannot read must
 #     fail loud, never guess — a silent `false` here would fail the walk open.
 #
+#   scripts/reviewer-posted.sh diagnose --pr <N> --sha <40hex> --reviewer …
+#       [--since <ISO8601>] [--link <n>] [--cap-state <path>]
+#       [--execution-log <path>] [--repo <owner/name>] [--comments-file <path>]
+#     Advisory (always exit 0 unless the args are unusable): when a link's
+#     artifact check reads served=false, print why — whether post_review
+#     (etc.) appears in the claude-code-action execution log, which tools
+#     were denied, whether a bot comment landed with a *wrong* sha (the
+#     PR #559 / run 37530117408 Drik failure: posted 073fd1af… while head
+#     was 169898ab…, burning the one-post cap), and whether the walk cap
+#     state file already records a post. Does not weaken the check.
+#
 #   scripts/reviewer-posted.sh --selftest
 #     The decision rows (posted / not posted / wrong sha / wrong author /
 #     planted suffix / sibling family / stale-since / malformed) plus the
@@ -91,6 +102,9 @@ usage() {  # [message]
   cat >&2 <<'EOF'
 usage: scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
            [--repo <owner/name>] [--comments-file <path>] [--since <ISO8601>]
+       scripts/reviewer-posted.sh diagnose --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
+           [--since <ISO8601>] [--link <n>] [--cap-state <path>]
+           [--execution-log <path>] [--repo <owner/name>] [--comments-file <path>]
        scripts/reviewer-posted.sh --selftest
 EOF
   exit 2
@@ -259,6 +273,301 @@ check() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'served=%s\n' "$verdict" >>"$GITHUB_OUTPUT"
   fi
+}
+
+# Advisory diagnosis after a served=false artifact check. Never fails the
+# walk — the check already decided; this only makes the log say why.
+diagnose() {
+  local reviewer="" pr="" sha="" repo="${GITHUB_REPOSITORY:-}" comments_file="" \
+        since="" link="" cap_state="${REVIEWER_POST_STATE:-}" \
+        execution_log="${RUNNER_TEMP:+$RUNNER_TEMP/claude-execution-output.json}"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pr) pr="${2:?}"; shift 2 ;;
+      --sha) sha="${2:?}"; shift 2 ;;
+      --reviewer) reviewer="${2:?}"; shift 2 ;;
+      --repo) repo="${2:?}"; shift 2 ;;
+      --comments-file) comments_file="${2:?}"; shift 2 ;;
+      --since) since="${2:?}"; shift 2 ;;
+      --link) link="${2:?}"; shift 2 ;;
+      --cap-state) cap_state="${2:?}"; shift 2 ;;
+      --execution-log) execution_log="${2:?}"; shift 2 ;;
+      *) usage "unknown option: $1" ;;
+    esac
+  done
+  case "$reviewer" in
+    jane|drik|pm|coach) ;;
+    *) usage "--reviewer must be jane, drik, pm or coach (got: ${reviewer:-empty})" ;;
+  esac
+  [[ "$pr" =~ ^[0-9]+$ ]] || usage "--pr must be a number (got: ${pr:-empty})"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || usage "--sha must be 40 hex chars (got: ${sha:-empty})"
+
+  local label="reviewer-posted diagnose"
+  [[ -n "$link" ]] && label="$label (link $link)"
+  echo "::group::$label — why served=false for ${reviewer} @ ${sha:0:12}"
+
+  # 1) Execution log: denials, whether the post tool was invoked, errors.
+  if [[ -n "$execution_log" && -f "$execution_log" ]]; then
+    local _py
+    _py="$(mktemp)"
+    cat >"$_py" <<'PY'
+import json, os, re
+
+path = os.environ["REVIEWER_DIAG_LOG"]
+who = os.environ["REVIEWER_DIAG_WHO"]
+post_tools = {
+    "jane": "mcp__reviewer__post_review",
+    "drik": "mcp__reviewer__post_review",
+    "pm": "mcp__reviewer__post_triage",
+    "coach": "mcp__reviewer__post_coach",
+}
+want = post_tools.get(who, "mcp__reviewer__post_review")
+try:
+    raw = open(path, encoding="utf-8", errors="replace").read()
+except OSError as e:
+    print("execution-log: unreadable (%s)" % e)
+    raise SystemExit(0)
+
+objs = []
+raw_s = raw.strip()
+if raw_s.startswith("["):
+    try:
+        objs = json.loads(raw_s)
+    except json.JSONDecodeError:
+        objs = []
+elif raw_s.startswith("{"):
+    try:
+        objs = [json.loads(raw_s)]
+    except json.JSONDecodeError:
+        objs = []
+if not objs:
+    dec = json.JSONDecoder()
+    idx = 0
+    while idx < len(raw_s):
+        while idx < len(raw_s) and raw_s[idx].isspace():
+            idx += 1
+        if idx >= len(raw_s):
+            break
+        try:
+            obj, end = dec.raw_decode(raw_s, idx)
+        except json.JSONDecodeError:
+            break
+        objs.append(obj)
+        idx = end
+
+text = raw
+denials = []
+for obj in objs:
+    if not isinstance(obj, dict):
+        continue
+    if obj.get("type") == "result":
+        print(
+            "execution-log result: is_error=%s num_turns=%s "
+            "permission_denials_count=%s cost_usd=%s subtype=%s"
+            % (
+                obj.get("is_error"),
+                obj.get("num_turns"),
+                obj.get("permission_denials_count"),
+                obj.get("total_cost_usd"),
+                obj.get("subtype"),
+            )
+        )
+        res = obj.get("result") or obj.get("errors") or ""
+        if isinstance(res, str) and res.strip():
+            print("execution-log result text (first 800 chars):")
+            print(res.strip()[:800])
+        elif isinstance(res, list):
+            print("execution-log errors:", res[:5])
+        dens = obj.get("permission_denials") or obj.get("permissionDenials") or []
+        if dens:
+            denials = dens
+        mu = obj.get("modelUsage") or obj.get("model_usage") or {}
+        if mu:
+            print("execution-log models:", ", ".join(mu.keys()))
+    for key in ("permission_denials", "permissionDenials"):
+        if isinstance(obj.get(key), list):
+            denials.extend(obj[key])
+
+posted = want in text
+print(
+    "execution-log post tool %r: %s"
+    % (want, "mentioned in log" if posted else "NOT mentioned in log")
+)
+
+names = []
+for d in denials:
+    if isinstance(d, dict):
+        n = d.get("tool_name") or d.get("toolName") or d.get("name") or d.get("tool")
+        names.append(str(n) if n else json.dumps(d)[:200])
+    else:
+        names.append(str(d)[:200])
+if not names:
+    for m in re.finditer(
+        r"(?:denied|permission_denial)[^\n]{0,120}"
+        r"(Bash\([^)]*\)|Write|Edit|mcp__\w+|NotebookEdit|Agent)",
+        text,
+        re.I,
+    ):
+        names.append(m.group(1))
+if names:
+    seen = set()
+    uniq = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            uniq.append(n)
+    print("execution-log denied tools:", "; ".join(uniq[:20]))
+else:
+    print(
+        "execution-log denied tools: (none listed — enable show_full_output "
+        "on the ship step if you need the per-tool list)"
+    )
+
+for pat in (
+    r"You have reached your specified API usage limits[^\"]*",
+    r"credit balance is too low[^\"]*",
+    r"invalid_api_key[^\"]*",
+    r"HTTP 4\d\d[^\n]{0,200}",
+):
+    m = re.search(pat, text)
+    if m:
+        print("execution-log provider error:", m.group(0)[:300])
+        break
+PY
+    REVIEWER_DIAG_LOG="$execution_log" REVIEWER_DIAG_WHO="$reviewer" \
+      "$PYTHON3" -I "$_py" || true
+    rm -f -- "$_py"
+  else
+    echo "execution-log: not found${execution_log:+ at $execution_log}"
+  fi
+
+  # 2) Cap state — a prior (possibly wrong-sha) post strands later links.
+  if [[ -n "$cap_state" ]]; then
+    if [[ -f "$cap_state" || -f "${cap_state}.posted" ]]; then
+      echo "cap-state: PRESENT at $cap_state (a post already recorded this run;"
+      echo "  later links cannot post — if that post used a stale sha, the"
+      echo "  artifact check stays served=false for the real head)"
+      if [[ -f "$cap_state" ]]; then
+        head -n 5 -- "$cap_state" | sed 's/^/cap-state record: /' || true
+      fi
+      if [[ -f "${cap_state}.posted" ]]; then
+        echo "cap-state: .posted sidecar present"
+      fi
+    else
+      echo "cap-state: empty (no successful post recorded this run yet)"
+    fi
+  else
+    echo "cap-state: REVIEWER_POST_STATE unset"
+  fi
+
+  # 3) Thread scan — bot comments with this family, any sha, since SINCE.
+  local comments family
+  case "$reviewer" in
+    jane|drik) family="${reviewer^^}_SIGNOFF" ;;
+    pm)        family="PM_TRIAGE_DONE" ;;
+    coach)     family="COACH_DONE" ;;
+  esac
+  if [[ -n "$comments_file" ]]; then
+    comments="$(cat -- "$comments_file")"
+  elif [[ -n "${GH_TOKEN:-}" && -n "$repo" ]] && command -v gh >/dev/null 2>&1; then
+    comments="$(gh_comments "$repo" "$pr" 2>/dev/null || true)"
+  else
+    comments=""
+  fi
+  if [[ -n "$comments" ]]; then
+    local _py2
+    _py2="$(mktemp)"
+    cat >"$_py2" <<'PY'
+import json, os, re
+
+def is_actions_bot(comment):
+    user = comment.get("user") or {}
+    login = (user.get("login") or "").strip().lower()
+    if login.endswith("[bot]"):
+        login = login[:-5]
+    return login == "github-actions"
+
+
+def load_comments(raw):
+    raw = raw.strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        dec = json.JSONDecoder()
+        idx = 0
+        out = []
+        while idx < len(raw):
+            while idx < len(raw) and raw[idx].isspace():
+                idx += 1
+            if idx >= len(raw):
+                break
+            obj, end = dec.raw_decode(raw, idx)
+            if isinstance(obj, list):
+                out.extend(obj)
+            else:
+                out.append(obj)
+            idx = end
+        return out
+    if isinstance(data, list):
+        if data and all(isinstance(p, list) for p in data):
+            return [c for page in data for c in page]
+        return data
+    return [data]
+
+
+family = os.environ["REVIEWER_DIAG_FAMILY"]
+want = os.environ["REVIEWER_DIAG_SHA"].lower()
+since = os.environ.get("REVIEWER_DIAG_SINCE", "").strip()
+footer = os.environ["REVIEWER_DIAG_FOOTER"]
+pat = re.compile(r"<!-- " + re.escape(family) + r" sha=([0-9a-fA-F]{40})[^>]*-->")
+found = []
+for c in load_comments(os.environ["REVIEWER_DIAG_COMMENTS"]):
+    if not is_actions_bot(c):
+        continue
+    body = c.get("body") or ""
+    created = (c.get("created_at") or "").strip()
+    if since and (not created or created < since):
+        continue
+    for m in pat.finditer(body):
+        sha = m.group(1).lower()
+        ends = body.rstrip().endswith(footer.rstrip()) or body.endswith(footer)
+        found.append((sha, created, ends, sha == want))
+
+if not found:
+    when = since if since else "(any time)"
+    print("thread: no Actions-bot %s marker since %s" % (family, when))
+else:
+    any_ok = False
+    any_bad = False
+    for sha, created, ends, ok in found:
+        any_ok = any_ok or ok
+        any_bad = any_bad or (not ok)
+        match = "YES" if ok else "NO — STALE/WRONG SHA"
+        footer_s = "yes" if ends else "no"
+        print(
+            "thread: %s sha=%s created=%s footer_suffix=%s matches_head=%s"
+            % (family, sha, created, footer_s, match)
+        )
+    if any_bad and not any_ok:
+        print(
+            "thread: a review DID post, but with the wrong sha — that burns "
+            "the one-post cap while served=false for the real head. "
+            "REVIEWER_HEAD_SHA pinning refuses this before the write."
+        )
+PY
+    REVIEWER_DIAG_COMMENTS="$comments" REVIEWER_DIAG_FAMILY="$family" \
+      REVIEWER_DIAG_SHA="$sha" REVIEWER_DIAG_SINCE="$since" \
+      REVIEWER_DIAG_FOOTER="$REVIEWER_FOOTER" \
+      "$PYTHON3" -I "$_py2" || true
+    rm -f -- "$_py2"
+  else
+    echo "thread: could not read issue comments (no GH_TOKEN/repo or empty)"
+  fi
+
+  echo "::endgroup::"
+  return 0
 }
 
 # --- selftest: every rule with its negative control ----------------------------
@@ -516,6 +825,26 @@ raise SystemExit("FOOTER not found")
     else bad "skills/$skill-review no longer documents the ${skill^^}_SIGNOFF marker"; fi
   done
 
+  # diagnose is advisory and must not fail the walk; pin a stale-sha
+  # report so a future edit that drops the thread scan is caught.
+  cat >"$tmp/diag-comments.json" <<JSON
+[{"user":{"login":"github-actions[bot]"},"created_at":"2026-10-10T13:03:36Z","body":"## Drik\n\n<!-- DRIK_SIGNOFF sha=073fd1af8d7087d25869571d225fb8f8a4e004d9 verdict=pass fuse=none -->\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"}]
+JSON
+  diag_out="$tmp/diag-out.txt"
+  if ./scripts/reviewer-posted.sh diagnose \
+        --pr 559 --sha 169898ab5a64b42697738e803fc583aeff938445 \
+        --reviewer drik --since 2026-10-10T12:44:10Z --link 1 \
+        --comments-file "$tmp/diag-comments.json" \
+        >"$diag_out" 2>&1; then
+    if grep -q 'STALE/WRONG SHA' "$diag_out"; then
+      ok "diagnose flags a bot post with the wrong sha"
+    else
+      bad "diagnose missed the stale-sha thread finding ($(cat "$diag_out"))"
+    fi
+  else
+    bad "diagnose exited non-zero (must stay advisory): $(cat "$diag_out")"
+  fi
+
   if [[ "$fail" -eq 0 ]]; then
     echo "ok    reviewer-posted --selftest: the artifact check passes a trusted MCP post and refuses planted/wrong-author markers"
   else
@@ -526,6 +855,7 @@ raise SystemExit("FOOTER not found")
 
 case "${1:-}" in
   check) shift; check "$@" ;;
+  diagnose) shift; diagnose "$@" ;;
   --selftest) selftest "$0" ;;
   *) usage "unknown mode: ${1:-none}" ;;
 esac
