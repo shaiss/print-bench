@@ -67,7 +67,8 @@ any green on the cut walls is a preview artifact, not your filament.*
 
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
 
-*Preview-only gears seated in the lattice — scale and home for the identity shot.*
+*Preview-only gears seated in the lattice — scale and home for the identity shot.
+The pods aren't mirrors: hours and minutes reductions differ (450° vs 90° index).*
 
 ![Base drivetrain close-up](previews/base-mech.png)
 
