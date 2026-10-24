@@ -27,8 +27,11 @@ fixed once reviewed; a new region gets a new line).
 - **base-mech** — the base drivetrain alone: geared stepper + reduction train at
   each pod, bevel take-off up each stalk, central electronics bay.
 - **base-mech-in-situ** — the same drivetrain seated in the truss so the gears
-  have scale and a home (companion to frozen `base-mech`; new line).
+  have scale and a home (companion to frozen `base-mech`; new line). Drivetrain
+  shown at its mid-base authored pose — the outer pods can read as clipping the
+  needle taper; the #604 drive re-seats the pods into the taper.
 - **what-ships** — single-material honesty shot: shells + bare truss, balls
   standing pole-down *in front of* the base on a shared ground plane (clear of
   wing tips — an earlier on-axis placement nested the nose under the pole).
-  CGAL `render`. Beside the v0 banner; must not replace the hero.
+  CGAL `render` (inside-face green may still show in the voids — renderer tint,
+  not filament). Beside the v0 banner; must not replace the hero.

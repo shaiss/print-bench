@@ -93,3 +93,6 @@ then waits only on #601's stencil numerals.
 | 2026-10-24 | what-ships camera frozen as-is — caption carries grounded-ness; no reframe | Jane / PM triage |
 | 2026-10-24 | CA-lock ballast after STABLE fill; brim-ON default for base-segment/base-end; slot-path green-artifact caption | Jane/Drik / PM triage |
 | 2026-10-24 | #601 gains reading-distance land-check + new close-up camera when glyphs change; #603 gains bumper-recess lead-in | Jane/Drik / PM queue |
+| 2026-10-24 | CAMERAS.md: base-mech-in-situ mid-base pose / #604 re-seat caveat; what-ships renderer-tint clause | Jane / PM triage |
+| 2026-10-24 | Heft: ~20 g/ball unmeasured first guess; both-halves / seam-centred pack; tumbles-to-reading wording | Drik / PM triage |
+| 2026-10-24 | #601 eyetest also covers slot-rim polish/patina after a month of handling | Drik / PM queue |

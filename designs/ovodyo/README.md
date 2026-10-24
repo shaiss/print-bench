@@ -278,12 +278,14 @@ bumper into each of the four foot recesses.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
-wrapped in felt (or similar) inside a ball half before you screw it shut is a
-fine interim heft hack — keep the pack against the seam, away from the numeral
-faces (the cuts are windows; a dark wrap shows less), and know a one-sided lump
-can bias which face parks. **Loose shot is forbidden** — it rattles against the
-numeral voids, and on this page rattle reads as broken. The heft arrives properly
-with the drive.
+wrapped in felt (or similar) inside the halves before you screw them shut is a
+fine interim heft hack — start around **~20 g per ball** (unmeasured first guess;
+you may need to adjust), split across **both halves** or centred on the seam
+plane (not one-sided), kept against the seam and away from the numeral faces
+(the cuts are windows; a dark wrap shows less). A one-sided lump doesn't just
+bias parking — in v0 it changes how many tumbles it takes to set a reading.
+**Loose shot is forbidden** — it rattles against the numeral voids, and on this
+page rattle reads as broken. The heft arrives properly with the drive.
 
 **Care:** cut-through numerals, the 10 mm slot, and the airy truss collect desk
 dust — unscrew a ball (one full turn) and wipe the cavity when it looks dull;
