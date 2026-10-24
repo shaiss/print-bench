@@ -45,10 +45,13 @@ were produced in-session (design study + `ovodyo-improvement-brainstorm.md`).
   **design-local for now** — issue #600 promotes it to `lib/geodesic-ball.scad`
   with demo/guards/mates.
 - **Helical slot outer bound (#768):** `gb_slot` clips to the dodecahedron
-  circumradius `1.2584·r` plus a margin (and extends the swept blade to match).
-  The pre-#768 clip at `r+2` / blade end at `1.1·r` left solid bridges wherever
-  the helix crossed a corner (15 pieces remaining under the issue's
-  shell-inside-swept-blade − `gb_slot` measurement).
+  circumradius `1.2584·r` plus a 2 mm margin and extends the swept blade to
+  match; extrude height/twist stay at the pre-#768 pitch (`360·turns` over
+  `2·r+4`). Measured (shell ∩ swept-blade − `gb_slot`, `d=78`, `width=10`,
+  `turns=0.5`): **before** (old `r+2` clip / `1.1·r` blade, mirrored normals) →
+  12 significant leftover bodies (>1 mm³), max radius 46.1 mm (issue reported
+  15 / 46.1 — same failure mode, $fn/split variance); **after** → 0 significant
+  bodies (3 CGAL slivers totaling <1 mm³).
 - **Numerals:** **cut clean through** the shell to the red interior (the
   reference's read-through red numbers), stencilised so no enclosed counter
   (0/4/6/8/9, and 0/6/8/9 offset from centre in a two-digit "10"/"00") drops
