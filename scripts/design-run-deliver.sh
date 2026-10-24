@@ -2549,6 +2549,7 @@ EOF
   stop_unicode_ws_case nbsp '\u00a0'
   stop_unicode_ws_case ideographic '\u3000'
   stop_unicode_ws_case linesep '\u2028'
+  stop_unicode_ws_case nel '\u0085'
 
   # Cipher L2 (#884 case b): a stop intent that fails validation (HTML
   # comment marker) must NOT silently skip the lock — fall back to posting it.
