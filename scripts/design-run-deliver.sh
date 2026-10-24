@@ -1106,16 +1106,18 @@ body_is_stop_comment() {
 # applied last (Cipher, #894): skip-lock settle leaves the thread claimless,
 # and lock-cleanup's claimless_stop requires the latest comment to be the
 # stop — array order stop-then-other would otherwise post the other comment
-# with a higher id and score the run dead. One intent posts only when: it
-# targets THIS issue, its action is comment or label, its label is in
-# INTENTS_ALLOWLIST, and the per-run caps hold. Comment bodies are
-# NFKC-normalized (Cf stripped, whitespace collapsed) before the ship-lock
-# regex; HTML comment markers and oversize bodies are rejected (Cipher, #864).
-# Everything else is dropped with a ::warning:: naming why. Exit 0 for
-# agent-side problems (the run's disposition comes from the thread, not
-# from here); exit 1 only for an unreadable/oversized file, a normalizer
-# failure, or broken arguments — an applier that cannot read its input
-# must not look like "no intents".
+# with a higher id and score the run dead. When a stop is indicated, one
+# comment slot under INTENTS_MAX_COMMENTS is reserved for it so the cap
+# never cuts a valid stop queued last (Cipher LOW, #910). One intent posts
+# only when: it targets THIS issue, its action is comment or label, its
+# label is in INTENTS_ALLOWLIST, and the per-run caps hold. Comment bodies
+# are NFKC-normalized (Cf stripped, whitespace collapsed) before the
+# ship-lock regex; HTML comment markers and oversize bodies are rejected
+# (Cipher, #864). Everything else is dropped with a ::warning:: naming why.
+# Exit 0 for agent-side problems (the run's disposition comes from the
+# thread, not from here); exit 1 only for an unreadable/oversized file, a
+# normalizer failure, or broken arguments — an applier that cannot read its
+# input must not look like "no intents".
 apply_intents() {
   local path="$1" i applied=0 rejected=0 comments=0 labels=0
   local intent_issue action body label size normalized order
@@ -1243,7 +1245,16 @@ apply_intents() {
           rejected=$((rejected + 1))
           continue
         fi
-        if [ "$comments" -ge "$INTENTS_MAX_COMMENTS" ]; then
+        # When a hard stop is indicated, reserve one slot under the
+        # comment cap for a stop applied last (#910). Without this, 8
+        # non-stop notes fill the cap and the stop is rejected; settle
+        # then falls back to SHIP-LOCK and lock-cleanup scores claimed
+        # instead of declined.
+        local comment_cap="$INTENTS_MAX_COMMENTS"
+        if [ "$defer_settle_lock" -eq 1 ] && ! body_is_stop_comment "$body"; then
+          comment_cap=$((INTENTS_MAX_COMMENTS - 1))
+        fi
+        if [ "$comments" -ge "$comment_cap" ]; then
           echo "::warning::comment intent ${i} exceeds the ${INTENTS_MAX_COMMENTS}-comment cap — rejected" >&2
           rejected=$((rejected + 1))
           continue
@@ -2673,6 +2684,60 @@ EOF
   printf '%s\n' "$stderr_stop" | grep -q 'intents entry 1 is malformed' || {
     echo "selftest: intents_stop_indicated did not warn about a malformed entry" >&2
     printf '%s\n' "$stderr_stop" >&2
+    exit 1
+  }
+
+  # Cipher LOW (#910): 8 non-stop notes + 1 stop must still post the stop
+  # (one slot reserved under the comment cap). Without the reserve, the
+  # stop is cut after #909's stop-last ordering and settle falls back to
+  # SHIP-LOCK — lock-cleanup then scores claimed instead of declined.
+  ifile="${tmp}/intents-cap-reserve-stop.json"
+  {
+    printf '%s\n' '{"version":1,"intents":['
+    for ci in 1 2 3 4 5 6 7 8; do
+      printf ' {"issue":853,"action":"comment","body":"note %d gate text"},\n' "$ci"
+    done
+    printf ' {"issue":853,"action":"comment","body":"🚢 DECLINED — needs a decision\\n\\nparked"}\n'
+    printf '%s\n' ']}'
+  } > "$ifile"
+  run_intents "$ifile" 0
+  # 7 notes (one cut for the reserved slot) + stop; no settle lock.
+  [ "$(comment_posts)" -eq 8 ] || {
+    echo "selftest: 8-notes+stop expected 7 notes + stop (posted $(comment_posts))" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  grep -q -- 'DECLINED — needs a decision' "${tmp}/gh.log" || {
+    echo "selftest: 8-notes+stop did not post the stop (cap cut it)" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  grep -qF -- "$SHIP_LOCK_HTML_MARKER" "${tmp}/gh.log" && {
+    echo "selftest: 8-notes+stop fell back to settle SHIP-LOCK (would score claimed)" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  note_n="$(grep -c -- 'note [0-9] gate text' "${tmp}/gh.log" || true)"
+  [ "$note_n" -eq 7 ] || {
+    echo "selftest: 8-notes+stop expected 7 notes under the reserved cap (got ${note_n})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  last_note_line="$(grep -n -- 'note [0-9] gate text' "${tmp}/gh.log" | tail -1 | cut -d: -f1)"
+  stop_line="$(grep -n -- 'DECLINED — needs a decision' "${tmp}/gh.log" | head -1 | cut -d: -f1)"
+  [ -n "$last_note_line" ] && [ -n "$stop_line" ] && [ "$last_note_line" -lt "$stop_line" ] || {
+    echo "selftest: 8-notes+stop did not keep stop last (note=${last_note_line:-?} stop=${stop_line:-?})" >&2
+    cat "${tmp}/gh.log" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+    echo "selftest: 8-notes+stop path did not skip the settle lock after posting the stop" >&2
+    printf '%s\n' "$stderr" >&2
+    exit 1
+  }
+  printf '%s\n' "$stderr" | grep -q 'exceeds the .*comment cap' || {
+    echo "selftest: 8-notes+stop did not warn about the cut non-stop under the reserved cap" >&2
+    printf '%s\n' "$stderr" >&2
     exit 1
   }
 
