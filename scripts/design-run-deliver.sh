@@ -1632,8 +1632,8 @@ if [ "\$1" = "api" ]; then
     # (used by the #884 stop-post-failure selftest). Settle lock posts omit
     # the match string so the fallback lock still succeeds.
     if [ -n "\${FAIL_COMMENT_POST_MATCH:-}" ] \
-      && printf '%s\n' "\$*" | grep -q -- '--method POST' \
-      && printf '%s\n' "\$*" | grep -qF -- "\${FAIL_COMMENT_POST_MATCH}"; then
+      && printf '%s\n' "\$*" | grep -- '--method POST' >/dev/null \
+      && printf '%s\n' "\$*" | grep -F -- "\${FAIL_COMMENT_POST_MATCH}" >/dev/null; then
       echo "comment post refused" >&2
       exit 1
     fi
@@ -1642,7 +1642,7 @@ if [ "\$1" = "api" ]; then
   fi
   # Hard-stop read: one JSON array of comments. Empty when the fixture
   # has not planted a thread.
-  if printf '%s\n' "\$*" | grep -q 'created_at'; then
+  if printf '%s\n' "\$*" | grep 'created_at' >/dev/null; then
     if [ -f "${tmp}/comments.json" ]; then
       cat "${tmp}/comments.json"
     else
@@ -1651,8 +1651,8 @@ if [ "\$1" = "api" ]; then
     exit 0
   fi
   # --jq path: one count per page, 1 when a prior success comment exists.
-  if printf '%s\n' "\$*" | grep -q -- '--jq'; then
-    if [ -f "${tmp}/comment.body" ] && head -n 1 "${tmp}/comment.body" | grep -q 'design-run delivered'; then
+  if printf '%s\n' "\$*" | grep -- '--jq' >/dev/null; then
+    if [ -f "${tmp}/comment.body" ] && head -n 1 "${tmp}/comment.body" | grep 'design-run delivered' >/dev/null; then
       printf '%s\n' 1
     else
       printf '%s\n' 0
@@ -1767,7 +1767,7 @@ EOF
   # -z so a quote or space in a path is not C-quoted by ls-tree.
   tree_has() {
     git_cmd --git-dir="$bare" ls-tree -r -z --name-only refs/heads/claude/issue-853-nuggs-ladder \
-      | grep -zqxF "$1"
+      | grep -zxF "$1" >/dev/null
   }
   tree_has 'designs/old/my file.scad' || {
     echo "selftest: space in path was not pushed" >&2
@@ -1879,11 +1879,11 @@ EOF
     printf '%s\n' "$stderr" >&2
     exit 1
   fi
-  if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+  if printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null; then
     echo "selftest: GIT_CONFIG_GLOBAL refusal printed the file" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$stderr" | grep -q 'refusing to run with GIT_CONFIG_GLOBAL set'; then
+  if ! printf '%s\n' "$stderr" | grep 'refusing to run with GIT_CONFIG_GLOBAL set' >/dev/null; then
     echo "selftest: GIT_CONFIG_GLOBAL did not report the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -1905,8 +1905,8 @@ EOF
     --base-branch main --run-url https://example.test/run/1 --push-url "$bare" 2>&1 >/dev/null)"
   rc=$?
   set -e
-  if [ "$rc" -ne 1 ] || printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN' \
-      || ! printf '%s\n' "$stderr" | grep -q 'refusing to run with GIT_CONFIG_SYSTEM set'; then
+  if [ "$rc" -ne 1 ] || printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null \
+      || ! printf '%s\n' "$stderr" | grep 'refusing to run with GIT_CONFIG_SYSTEM set' >/dev/null; then
     echo "selftest: GIT_CONFIG_SYSTEM was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -1965,11 +1965,11 @@ EOF
     echo "selftest: url rewrite exited ${rc}, expected 1" >&2
     exit 1
   fi
-  if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+  if printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null; then
     echo "selftest: url rewrite printed the config value" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$stderr" | grep -q 'url\.\*'; then
+  if ! printf '%s\n' "$stderr" | grep 'url\.\*' >/dev/null; then
     echo "selftest: url rewrite did not report the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2002,7 +2002,7 @@ JSON
     echo "selftest: non-draft PR was pushed" >&2
     exit 1
   }
-  if [ -f "${tmp}/comment.body" ] || grep -q 'pr create' "${tmp}/gh.log"; then
+  if [ -f "${tmp}/comment.body" ] || grep 'pr create' "${tmp}/gh.log" >/dev/null; then
     echo "selftest: non-draft PR created a PR or posted success" >&2
     exit 1
   fi
@@ -2015,7 +2015,7 @@ JSON
   PR_SEED="${tmp}/wrong-oid.json"
   run_case 'draft oid mismatch' 1 fresh
   unset PR_SEED
-  if [ -f "${tmp}/comment.body" ] || grep -q 'pr create' "${tmp}/gh.log"; then
+  if [ -f "${tmp}/comment.body" ] || grep 'pr create' "${tmp}/gh.log" >/dev/null; then
     echo "selftest: oid mismatch created another PR or posted success" >&2
     exit 1
   fi
@@ -2034,7 +2034,7 @@ JSON
     echo "selftest: cross-repo case moved the remote" >&2
     exit 1
   }
-  if [ -f "${tmp}/comment.body" ] || grep -q 'pr create' "${tmp}/gh.log"; then
+  if [ -f "${tmp}/comment.body" ] || grep 'pr create' "${tmp}/gh.log" >/dev/null; then
     echo "selftest: cross-repo PR created another PR or posted success" >&2
     exit 1
   fi
@@ -2113,11 +2113,11 @@ JSON
       echo "selftest: ${hostile_key} exited ${rc}, expected 1" >&2
       exit 1
     fi
-    if printf '%s\n' "$stderr" | grep -q 'SECRETTOKEN'; then
+    if printf '%s\n' "$stderr" | grep 'SECRETTOKEN' >/dev/null; then
       echo "selftest: ${hostile_key} printed the config value" >&2
       exit 1
     fi
-    if ! printf '%s\n' "$stderr" | grep -q 'hostile local git config'; then
+    if ! printf '%s\n' "$stderr" | grep 'hostile local git config' >/dev/null; then
       echo "selftest: ${hostile_key} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -2210,7 +2210,7 @@ JSON
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: wrong bundle sha exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'bundle sha256 does not match' || {
+  printf '%s\n' "$stderr" | grep 'bundle sha256 does not match' >/dev/null || {
     echo "selftest: wrong bundle sha did not report the refusal" >&2
     exit 1
   }
@@ -2250,7 +2250,7 @@ p.write_bytes(data)
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: tampered bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -Eq 'git bundle verify failed|could not fetch the bundle' || {
+  printf '%s\n' "$stderr" | grep -E 'git bundle verify failed|could not fetch the bundle' >/dev/null || {
     echo "selftest: tampered bundle was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2275,7 +2275,7 @@ p.write_bytes(data)
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: orphan bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'ancestry does not start at START_SHA' || {
+  printf '%s\n' "$stderr" | grep 'ancestry does not start at START_SHA' >/dev/null || {
     echo "selftest: orphan bundle did not refuse the ancestry" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2312,7 +2312,7 @@ p.write_bytes(data)
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: older-prerequisite bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'ancestry does not start at START_SHA' || {
+  printf '%s\n' "$stderr" | grep 'ancestry does not start at START_SHA' >/dev/null || {
     echo "selftest: older prerequisite was accepted" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2404,7 +2404,7 @@ EOF
   [ "$(label_posts)" -eq 0 ] || { echo "selftest: an off-issue label intent was posted" >&2; exit 1; }
   # settle lock + the surviving on-issue comment
   [ "$(comment_posts)" -eq 2 ] || { echo "selftest: the on-issue comment was dropped with the off-issue label (posted $(comment_posts))" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q "targets issue '999', not the selected #853" || {
+  printf '%s\n' "$stderr" | grep "targets issue '999', not the selected #853" >/dev/null || {
     echo "selftest: the off-issue rejection did not name the reason" >&2
     exit 1
   }
@@ -2419,7 +2419,7 @@ EOF
   run_intents "$ifile" 0
   # settle lock only — the off-issue comment never posts
   [ "$(comment_posts)" -eq 1 ] || { echo "selftest: an off-issue comment intent was posted (posted $(comment_posts))" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q "targets issue '999'" || {
+  printf '%s\n' "$stderr" | grep "targets issue '999'" >/dev/null || {
     echo "selftest: the off-issue comment rejection did not name the reason" >&2
     exit 1
   }
@@ -2435,7 +2435,7 @@ EOF
 EOF
   run_intents "$ifile" 0
   [ "$(label_posts)" -eq 0 ] || { echo "selftest: a non-allowlisted label intent was posted" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q "not in the allowlist" || {
+  printf '%s\n' "$stderr" | grep "not in the allowlist" >/dev/null || {
     echo "selftest: the allowlist rejection did not name the reason" >&2
     exit 1
   }
@@ -2471,7 +2471,7 @@ EOF
       echo "selftest: ship-lock case '$1' dropped its safe sibling" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q 'matches ship-lock after normalization' || {
+    printf '%s\n' "$stderr" | grep 'matches ship-lock after normalization' >/dev/null || {
       echo "selftest: ship-lock case '$1' did not name the reason" >&2
       exit 1
     }
@@ -2509,7 +2509,7 @@ EOF
     echo "selftest: DECLINED-only intents did not post the stop comment" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+  printf '%s\n' "$stderr" | grep 'skipping settle SHIP-LOCK — validated stop posted' >/dev/null || {
     echo "selftest: DECLINED-only path did not note skipping the settle lock after a posted stop" >&2
     exit 1
   }
@@ -2535,11 +2535,11 @@ EOF
     echo "selftest: rejected-stop intents still posted the invalid stop body" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'HTML comment marker' || {
+  printf '%s\n' "$stderr" | grep 'HTML comment marker' >/dev/null || {
     echo "selftest: rejected-stop path did not name the HTML rejection" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'stop indicated but none posted — posting settle SHIP-LOCK' || {
+  printf '%s\n' "$stderr" | grep 'stop indicated but none posted — posting settle SHIP-LOCK' >/dev/null || {
     echo "selftest: rejected-stop path did not note the lock fallback" >&2
     exit 1
   }
@@ -2568,11 +2568,11 @@ EOF
     echo "selftest: failed-stop-post never attempted the stop comment" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'failed to post' || {
+  printf '%s\n' "$stderr" | grep 'failed to post' >/dev/null || {
     echo "selftest: failed-stop-post path did not warn about the post failure" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'stop indicated but none posted — posting settle SHIP-LOCK' || {
+  printf '%s\n' "$stderr" | grep 'stop indicated but none posted — posting settle SHIP-LOCK' >/dev/null || {
     echo "selftest: failed-stop-post path did not note the lock fallback" >&2
     exit 1
   }
@@ -2604,7 +2604,7 @@ EOF
     cat "${tmp}/gh.log" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+  printf '%s\n' "$stderr" | grep 'skipping settle SHIP-LOCK — validated stop posted' >/dev/null || {
     echo "selftest: stop-then-other path did not skip the settle lock after posting the stop" >&2
     exit 1
   }
@@ -2647,17 +2647,17 @@ EOF
     cat "${tmp}/gh.log" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'intents entry 0 is malformed' || {
+  printf '%s\n' "$stderr" | grep 'intents entry 0 is malformed' >/dev/null || {
     echo "selftest: malformed-entries did not warn about the null entry" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'intents entry 2 is malformed' || {
+  printf '%s\n' "$stderr" | grep 'intents entry 2 is malformed' >/dev/null || {
     echo "selftest: malformed-entries did not warn about the non-string body" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'skipping settle SHIP-LOCK — validated stop posted' || {
+  printf '%s\n' "$stderr" | grep 'skipping settle SHIP-LOCK — validated stop posted' >/dev/null || {
     echo "selftest: malformed-entries path did not skip the settle lock after posting the stop" >&2
     exit 1
   }
@@ -2670,7 +2670,7 @@ EOF
     printf '%s\n' "$stderr_stop" >&2
     exit 1
   }
-  printf '%s\n' "$stderr_stop" | grep -q 'intents entry 1 is malformed' || {
+  printf '%s\n' "$stderr_stop" | grep 'intents entry 1 is malformed' >/dev/null || {
     echo "selftest: intents_stop_indicated did not warn about a malformed entry" >&2
     printf '%s\n' "$stderr_stop" >&2
     exit 1
@@ -2692,7 +2692,7 @@ EOF
     echo "selftest: the sibling of an HTML-marker body was dropped" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'HTML comment marker' || {
+  printf '%s\n' "$stderr" | grep 'HTML comment marker' >/dev/null || {
     echo "selftest: HTML-marker rejection did not name the reason" >&2
     exit 1
   }
@@ -2711,7 +2711,7 @@ EOF
     echo "selftest: the sibling of an over-length body was dropped" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'over-length body' || {
+  printf '%s\n' "$stderr" | grep 'over-length body' >/dev/null || {
     echo "selftest: over-length body rejection did not name the reason" >&2
     exit 1
   }
@@ -2727,7 +2727,7 @@ EOF
     echo "selftest: an oversized intents file still posted" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'refusing to apply' || {
+  printf '%s\n' "$stderr" | grep 'refusing to apply' >/dev/null || {
     echo "selftest: an oversized intents file did not fail closed" >&2
     exit 1
   }
@@ -2739,14 +2739,14 @@ EOF
     echo "selftest: a malformed intents file still posted" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'intents file is malformed' || {
+  printf '%s\n' "$stderr" | grep 'intents file is malformed' >/dev/null || {
     echo "selftest: a malformed intents file did not warn" >&2
     exit 1
   }
 
   # A missing file is an infra failure (exit 1), never a silent no-op.
   run_intents "${tmp}/intents-absent.json" 1
-  printf '%s\n' "$stderr" | grep -q 'missing or not a regular file' || {
+  printf '%s\n' "$stderr" | grep 'missing or not a regular file' >/dev/null || {
     echo "selftest: a missing intents file did not fail loudly" >&2
     exit 1
   }
@@ -2830,7 +2830,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: a committed intents file exited ${rc}, expected 1" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'design-run-intents.json' || {
+  printf '%s\n' "$stderr" | grep 'design-run-intents.json' >/dev/null || {
     echo "selftest: a committed intents file did not name the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2938,7 +2938,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: dangling-prerequisite bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'is not an ancestor of START_SHA' || {
+  printf '%s\n' "$stderr" | grep 'is not an ancestor of START_SHA' >/dev/null || {
     echo "selftest: dangling prerequisite was accepted" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -2971,7 +2971,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: merged scripts bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/from-main.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/from-main.sh' >/dev/null || {
     echo "selftest: merged scripts path was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -3031,7 +3031,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: evil-merge bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/evil.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/evil.sh' >/dev/null || {
     echo "selftest: merge-only protected path was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -3061,7 +3061,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: protected-path bundle exited ${rc}" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/evil.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/evil.sh' >/dev/null || {
     echo "selftest: protected-path bundle was not refused" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -3400,19 +3400,19 @@ EOF
     printing { print }
   ' "$workflow")"
   [ -n "$deliver_run" ] || { echo "selftest: could not extract the bundle run block" >&2; exit 1; }
-  printf '%s\n' "$deliver_run" | grep -q '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' || {
+  printf '%s\n' "$deliver_run" | grep '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' >/dev/null || {
     echo "selftest: bundle step does not git-show the pinned script" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'DELIVER_SHA256' || {
+  printf '%s\n' "$deliver_run" | grep 'DELIVER_SHA256' >/dev/null || {
     echo "selftest: deliver step does not check the pre-agent sha256" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'objects/info/alternates' || {
+  printf '%s\n' "$deliver_run" | grep 'objects/info/alternates' >/dev/null || {
     echo "selftest: deliver step does not refuse object alternates" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES' || {
+  printf '%s\n' "$deliver_run" | grep 'GIT_ALTERNATE_OBJECT_DIRECTORIES' >/dev/null || {
     echo "selftest: deliver step does not drop GIT_ALTERNATE_OBJECT_DIRECTORIES" >&2
     exit 1
   }
@@ -3476,7 +3476,7 @@ EOF
     echo "selftest: the bundle is not uploaded from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/upload-artifact@v7' "$workflow" || grep -q 'actions/checkout@v7' "$workflow" || grep -q 'actions/setup-python@v7' "$workflow"; then
+  if grep -q 'actions/upload-artifact@v7' "$workflow" || grep 'actions/checkout@v7' "$workflow" >/dev/null || grep -q 'actions/setup-python@v7' "$workflow"; then
     echo "selftest: design-run.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -3502,7 +3502,7 @@ EOF
     echo "selftest: the deliver workflow does not download the bundle from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/download-artifact@v7' "$deliver_workflow" || grep -q 'actions/checkout@v7' "$deliver_workflow"; then
+  if grep -q 'actions/download-artifact@v7' "$deliver_workflow" || grep 'actions/checkout@v7' "$deliver_workflow" >/dev/null; then
     echo "selftest: design-run-deliver.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -3521,11 +3521,11 @@ EOF
     printing { print }
   ' "$deliver_workflow")"
   [ -n "$push_step" ] || { echo "selftest: could not extract the deliver push step" >&2; exit 1; }
-  printf '%s\n' "$push_step" | grep -q 'timeout-minutes: 10' || {
+  printf '%s\n' "$push_step" | grep 'timeout-minutes: 10' >/dev/null || {
     echo "selftest: the deliver push step has no timeout under the job budget" >&2
     exit 1
   }
-  printf '%s\n' "$push_step" | grep -q 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' || {
+  printf '%s\n' "$push_step" | grep 'GH_TOKEN: \${{ secrets.GH_TOKEN }}' >/dev/null || {
     echo "selftest: the deliver push step does not hold the push PAT" >&2
     exit 1
   }
@@ -3562,11 +3562,11 @@ EOF
     echo "selftest: the deliver lock cleanup has no 3-minute timeout" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q -- '--write-bundle' || {
+  printf '%s\n' "$deliver_run" | grep -- '--write-bundle' >/dev/null || {
     echo "selftest: the bundle step does not pass --write-bundle" >&2
     exit 1
   }
-  if printf '%s\n' "$deliver_run" | grep -q 'GH_TOKEN'; then
+  if printf '%s\n' "$deliver_run" | grep 'GH_TOKEN' >/dev/null; then
     echo "selftest: the bundle step run block mentions GH_TOKEN" >&2
     exit 1
   fi
@@ -3784,7 +3784,7 @@ EOF
     exit 1
   }
   if grep -q 'START_SHA:scripts/routine-lock-cleanup.sh' "$deliver_workflow" \
-    || grep -q 'checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh' "$deliver_workflow"; then
+    || grep 'checkout "$START_SHA" -- scripts/routine-lock-cleanup.sh' "$deliver_workflow" >/dev/null; then
     echo "selftest: lock cleanup still takes its script from START_SHA" >&2
     exit 1
   fi
@@ -3915,11 +3915,11 @@ EOF
     echo "selftest: SKILL.md still authorizes git push" >&2
     exit 1
   fi
-  if grep -q 'secrets.GH_TOKEN' "$workflow" || grep -q 'HAS_GH_TOKEN' "$workflow"; then
+  if grep -q 'secrets.GH_TOKEN' "$workflow" || grep 'HAS_GH_TOKEN' "$workflow" >/dev/null; then
     echo "selftest: the run workflow still references the push PAT" >&2
     exit 1
   fi
-  if grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$workflow" || grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$deliver_workflow"; then
+  if grep -q 'github_token: \${{ secrets.GH_TOKEN }}' "$workflow" || grep 'github_token: \${{ secrets.GH_TOKEN }}' "$deliver_workflow" >/dev/null; then
     echo "selftest: an agent step still receives the push PAT" >&2
     exit 1
   fi
@@ -4015,19 +4015,19 @@ EOF
     echo "selftest: an agent step still uses bypassPermissions" >&2
     exit 1
   fi
-  printf '%s\n' "$deliver_run" | grep -q 'reap_agent_orphans' || {
+  printf '%s\n' "$deliver_run" | grep 'reap_agent_orphans' >/dev/null || {
     echo "selftest: the bundle step does not reap detached agent processes" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'now" != "$captured"' || {
+  printf '%s\n' "$deliver_run" | grep 'now" != "$captured"' >/dev/null || {
     echo "selftest: the bundle step does not re-check the bundle after the reap" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'reap_should_kill' || {
+  printf '%s\n' "$deliver_run" | grep 'reap_should_kill' >/dev/null || {
     echo "selftest: the bundle step does not classify orphans" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'run-\*\.scope' || {
+  printf '%s\n' "$deliver_run" | grep 'run-\*\.scope' >/dev/null || {
     echo "selftest: the bundle reaper does not catch systemd-run scopes" >&2
     exit 1
   }
@@ -4094,11 +4094,11 @@ EOF
     echo "selftest: SKILL.md still subscribes to a PR the deliver job has not opened" >&2
     exit 1
   fi
-  printf '%s\n' "$deliver_run" | grep -q 'GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' || {
+  printf '%s\n' "$deliver_run" | grep 'GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY' >/dev/null || {
     echo "selftest: deliver step does not drop alternate object dirs" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'GIT_CONFIG_PARAMETERS' || {
+  printf '%s\n' "$deliver_run" | grep 'GIT_CONFIG_PARAMETERS' >/dev/null || {
     echo "selftest: deliver step does not drop GIT_CONFIG_PARAMETERS" >&2
     exit 1
   }
@@ -4106,15 +4106,15 @@ EOF
     echo "selftest: lock-cleanup restore is missing --no-replace-objects and hooksPath" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'RUNNER_TEMP' || {
+  printf '%s\n' "$deliver_run" | grep 'RUNNER_TEMP' >/dev/null || {
     echo "selftest: deliver step does not stage the script in RUNNER_TEMP" >&2
     exit 1
   }
-  printf '%s\n' "$deliver_run" | grep -q 'refusing to restore design-run-deliver' || {
+  printf '%s\n' "$deliver_run" | grep 'refusing to restore design-run-deliver' >/dev/null || {
     echo "selftest: deliver step does not refuse a symlink restore" >&2
     exit 1
   }
-  if printf '%s\n' "$deliver_run" | grep -q './scripts/design-run-deliver.sh'; then
+  if printf '%s\n' "$deliver_run" | grep './scripts/design-run-deliver.sh' >/dev/null; then
     echo "selftest: deliver step still executes the worktree script" >&2
     exit 1
   fi
@@ -4133,35 +4133,35 @@ EOF
     printing { print }
   ' "$burn")"
   [ -n "$burn_run" ] || { echo "selftest: could not extract the burn bundle run block" >&2; exit 1; }
-  printf '%s\n' "$burn_run" | grep -q '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' || {
+  printf '%s\n' "$burn_run" | grep '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/design-run-deliver.sh"' >/dev/null || {
     echo "selftest: burn bundle step does not git-show the pinned script" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'DELIVER_SHA256' || {
+  printf '%s\n' "$burn_run" | grep 'DELIVER_SHA256' >/dev/null || {
     echo "selftest: burn bundle step does not check the pre-agent sha256" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'objects/info/alternates' || {
+  printf '%s\n' "$burn_run" | grep 'objects/info/alternates' >/dev/null || {
     echo "selftest: burn bundle step does not refuse object alternates" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q -- '--routine backlog-burn --write-bundle "${RUNNER_TEMP}/backlog-burn.bundle"' || {
+  printf '%s\n' "$burn_run" | grep -- '--routine backlog-burn --write-bundle "${RUNNER_TEMP}/backlog-burn.bundle"' >/dev/null || {
     echo "selftest: burn bundle step does not write the backlog-burn bundle" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'refusing to restore design-run-deliver' || {
+  printf '%s\n' "$burn_run" | grep 'refusing to restore design-run-deliver' >/dev/null || {
     echo "selftest: burn bundle step does not refuse a symlink restore" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q './scripts/design-run-deliver.sh' && {
+  printf '%s\n' "$burn_run" | grep './scripts/design-run-deliver.sh' >/dev/null && {
     echo "selftest: burn bundle step still executes the worktree script" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'reap_agent_orphans' || {
+  printf '%s\n' "$burn_run" | grep 'reap_agent_orphans' >/dev/null || {
     echo "selftest: burn bundle step does not reap detached agent processes" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep -q 'now" != "$captured"' || {
+  printf '%s\n' "$burn_run" | grep 'now" != "$captured"' >/dev/null || {
     echo "selftest: burn bundle step does not re-check the bundle after the reap" >&2
     exit 1
   }
@@ -4181,7 +4181,7 @@ EOF
     echo "selftest: the burn artifacts are not uploaded from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/upload-artifact@v7' "$burn" || grep -q 'actions/checkout@v7' "$burn" || grep -q 'actions/setup-python@v7' "$burn"; then
+  if grep -q 'actions/upload-artifact@v7' "$burn" || grep 'actions/checkout@v7' "$burn" >/dev/null || grep -q 'actions/setup-python@v7' "$burn"; then
     echo "selftest: backlog-burn.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -4215,7 +4215,7 @@ EOF
     echo "selftest: the burn arming gate changed" >&2
     exit 1
   }
-  if grep -q 'secrets.GH_TOKEN' "$burn" || grep -q 'HAS_GH_TOKEN' "$burn"; then
+  if grep -q 'secrets.GH_TOKEN' "$burn" || grep 'HAS_GH_TOKEN' "$burn" >/dev/null; then
     echo "selftest: the burn workflow still references the push PAT" >&2
     exit 1
   fi
@@ -4325,7 +4325,7 @@ EOF
     echo "selftest: burn must invoke backlog_burn via python3 -m backlog_burn.cli" >&2
     exit 1
   }
-  if grep -vE '^[[:space:]]*#' "$burn" | grep -qE '(^|[[:space:]])backlog-burn (config|run|select|gather)'; then
+  if grep -vE '^[[:space:]]*#' "$burn" | grep -E '(^|[[:space:]])backlog-burn (config|run|select|gather)' >/dev/null; then
     echo "selftest: burn still calls the backlog-burn console script (needs install)" >&2
     exit 1
   fi
@@ -4418,7 +4418,9 @@ EOF
   # Settle START_SHA case must accept a real 40-char commit (Bugbot on #863:
   # 41 hex classes rejected every SHA and lock cleanup never ran).
   settle_job="$(awk '/^  settle:/{p=1;print;next} p && /^  [A-Za-z]/{exit} p' "$burn")"
-  settle_sha_arm="$(printf '%s\n' "$settle_job" | grep -E '\[0-9a-f\]\[0-9a-f\]' | head -1)"
+  # SIGPIPE-safe under pipefail (no `grep | head -1`).
+  settle_sha_arm="$(grep -E '\[0-9a-f\]\[0-9a-f\]' <<<"$settle_job" || true)"
+  settle_sha_arm="${settle_sha_arm%%$'\n'*}"
   [ -n "$settle_sha_arm" ] || {
     echo "selftest: settle job has no START_SHA hex case arm" >&2
     exit 1
@@ -4486,11 +4488,11 @@ EOF
     printing && /^  [A-Za-z]/ && !/^  triage:/ { exit }
     printing { print }
   ' "$burn")"
-  printf '%s\n' "$burn_triage_job" | grep -q 'uses: \./\.github/actions/provider-triage' || {
+  printf '%s\n' "$burn_triage_job" | grep 'uses: \./\.github/actions/provider-triage' >/dev/null || {
     echo "selftest: the burn triage job does not run provider-triage" >&2
     exit 1
   }
-  if printf '%s\n' "$burn_perms" | grep -q 'provider-triage'; then
+  if printf '%s\n' "$burn_perms" | grep 'provider-triage' >/dev/null; then
     echo "selftest: provider-triage still runs inside the burn agent job" >&2
     exit 1
   fi
@@ -4517,7 +4519,7 @@ EOF
     echo "selftest: the burn deliver workflow does not download the bundle from the pinned v7 action" >&2
     exit 1
   }
-  if grep -q 'actions/download-artifact@v7' "$burn_deliver" || grep -q 'actions/checkout@v7' "$burn_deliver"; then
+  if grep -q 'actions/download-artifact@v7' "$burn_deliver" || grep 'actions/checkout@v7' "$burn_deliver" >/dev/null; then
     echo "selftest: backlog-burn-deliver.yml still uses a floating v7 action tag" >&2
     exit 1
   fi
@@ -4661,7 +4663,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 1 ] || { echo "selftest: design-run accepted a scripts/ commit (exit ${rc})" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/fix.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/fix.sh' >/dev/null || {
     echo "selftest: design-run did not report the scripts/ refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -4681,7 +4683,7 @@ EOF
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'touches scripts/fix.sh' || {
+  printf '%s\n' "$stderr" | grep 'touches scripts/fix.sh' >/dev/null || {
     echo "selftest: backlog-burn did not report the scripts/ refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
@@ -4697,7 +4699,7 @@ EOF
   rc=$?
   set -e
   [ "$rc" -eq 2 ] || { echo "selftest: an unknown routine exited ${rc}, expected 2" >&2; exit 1; }
-  printf '%s\n' "$stderr" | grep -q 'unknown routine: bogus' || {
+  printf '%s\n' "$stderr" | grep 'unknown routine: bogus' >/dev/null || {
     echo "selftest: an unknown routine did not report the refusal" >&2
     exit 1
   }
@@ -4729,7 +4731,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q "$needle" || {
+    printf '%s\n' "$stderr" | grep "$needle" >/dev/null || {
       echo "selftest: backlog-burn protected ${label} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -4983,7 +4985,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q "$needle" || {
+    printf '%s\n' "$stderr" | grep "$needle" >/dev/null || {
       echo "selftest: ${routine} protected ${label} did not report the refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -5165,7 +5167,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+    printf '%s\n' "$stderr" | grep 'points under a protected prefix' >/dev/null || {
       echo "selftest: ${routine} docs/hook->CLAUDE.md did not report symlink refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -5238,7 +5240,7 @@ EOF
       printf '%s\n' "$stderr" >&2
       exit 1
     }
-    printf '%s\n' "$stderr" | grep -q 'points under a protected prefix' || {
+    printf '%s\n' "$stderr" | grep 'points under a protected prefix' >/dev/null || {
       echo "selftest: ${routine} pathspec-magic :^y did not report symlink refusal" >&2
       printf '%s\n' "$stderr" >&2
       exit 1
@@ -5295,7 +5297,7 @@ EOF
     printf '%s\n' "$stderr" >&2
     exit 1
   }
-  printf '%s\n' "$stderr" | grep -q 'ls-tree failed for' || {
+  printf '%s\n' "$stderr" | grep 'ls-tree failed for' >/dev/null || {
     echo "selftest: ls-tree failure did not report the refusal" >&2
     printf '%s\n' "$stderr" >&2
     exit 1
