@@ -7,7 +7,9 @@
 //   - the RENDERED bell, driven through indexPage after setNotifications — the
 //     positive path is deploy-only (local/CI has no network source and the bell
 //     shows empty), so these hold the non-empty render against regression the
-//     way how-it-works.test.mjs drives howItWorksPage.
+//     way how-it-works.test.mjs drives howItWorksPage — and the UNAVAILABLE
+//     render: a queue the deploy could not fetch (measured: a 401) used to
+//     leave the bell saying "You're all caught up", a false claim on every page.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +18,9 @@ import {
   emptyBundle,
   decisionsToNotifications,
   mergeBundles,
+  DECISIONS_UNAVAILABLE,
 } from "../lib/notifications.mjs";
+import { SEAM } from "../lib/seam.mjs";
 import { indexPage, setNotifications } from "../lib/templates.mjs";
 
 // A decision queue as build.mjs assembles it (decisions.mjs rows + searchUrl).
@@ -113,4 +117,55 @@ test("the header bell renders an empty state with no badge when nothing is queue
   assert.match(html, /class="notif"/, "the bell is always present (standard app pattern)");
   assert.ok(!/class="notif-badge"/.test(html), "no badge when the count is zero");
   assert.match(html, /You're all caught up\./, "the empty state is shown");
+});
+
+// --- a queue the deploy could not load (seam.mjs `unavailable`) ---
+
+const UNAVAILABLE_QUEUE = {
+  status: SEAM.UNAVAILABLE,
+  rows: [],
+  searchUrl: "https://github.com/o/r/issues?q=needs-decision",
+};
+
+test("decisionsToNotifications: an unavailable queue is a couldn't-load line, not an empty bundle", () => {
+  const b = decisionsToNotifications(UNAVAILABLE_QUEUE);
+  assert.deepEqual(b.items, []);
+  assert.deepEqual(b.unavailable, [DECISIONS_UNAVAILABLE]);
+  assert.equal(DECISIONS_UNAVAILABLE, "Couldn't load the decision queue for this deploy.");
+  assert.deepEqual(b.actions, [{ label: "Every open decision →", url: UNAVAILABLE_QUEUE.searchUrl }],
+    "the reader can still check the queue on GitHub");
+  assert.notDeepEqual(b, emptyBundle(), "never the all-caught-up bundle");
+  // the empty seam (fetched, nothing parked) IS all caught up
+  assert.deepEqual(decisionsToNotifications({ status: SEAM.EMPTY, rows: [], searchUrl: "s" }), emptyBundle());
+});
+
+test("the header bell shows 'couldn't load', never 'all caught up', when the queue is unavailable", () => {
+  setNotifications(decisionsToNotifications(UNAVAILABLE_QUEUE));
+  try {
+    const html = indexPage([]);
+    assert.match(html, /class="notif"/, "the bell is still present");
+    assert.match(html, /Couldn(&#39;|')t load the decision queue for this deploy\./);
+    assert.match(html, /class="notif-empty notif-unavailable"/);
+    assert.ok(!html.includes("all caught up"), "an unread queue is never 'all caught up'");
+    assert.ok(!/class="notif-badge"/.test(html), "no count is claimed");
+    assert.match(html, /aria-label="Notifications: could not be loaded for this deploy"/);
+    assert.match(html, /Every open decision/, "the GitHub link stays as a way through");
+  } finally {
+    setNotifications(emptyBundle());
+  }
+});
+
+test("mergeBundles carries unavailable lines beside another source's rows", () => {
+  const merged = mergeBundles(decisionsToNotifications(QUEUE), decisionsToNotifications(UNAVAILABLE_QUEUE));
+  assert.equal(merged.items.length, 2);
+  assert.deepEqual(merged.unavailable, [DECISIONS_UNAVAILABLE]);
+  setNotifications(merged);
+  try {
+    const html = indexPage([]);
+    assert.match(html, /class="notif-badge"[^>]*>2</, "the loaded rows still count");
+    assert.match(html, /Couldn(&#39;|')t load the decision queue/, "and the failed source is named");
+    assert.ok(!html.includes("all caught up"));
+  } finally {
+    setNotifications(emptyBundle());
+  }
 });

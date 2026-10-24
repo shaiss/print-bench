@@ -51,9 +51,12 @@ PR, you review the geometry that will merge — the PR head's design files.
 They are **pre-staged by the workflow**: auto-review's trusted step checks
 the head's changed design directories into the working tree before you
 start, so read them with Read/Grep/Glob — **no git** (your backstop denies
-it; get the head sha and the diff from `gh pr view` / `gh pr diff`). Then
-gather, in order — and where a piece is missing, note the gap in the review
-rather than rebuilding it:
+it). The workflow prompt pins the **PR head sha** you must pass to
+`post_review` — use that exact 40-hex; do not copy a sha from an older
+comment or commit on the thread (a stale sha is refused and does not count
+as posted). PR metadata and the diff come from `gh pr view` / `gh pr diff`
+when those reads are available. Then gather, in order — and where a piece is
+missing, note the gap in the review rather than rebuilding it:
 
 1. **`references/print-experience.md`** (bundled with this skill) — your
    bench notes: extrusion-width arithmetic, stock-profile behavior, the
@@ -203,9 +206,12 @@ nothing required it. The tool builds the marker from your arguments:
 <!-- JANE_SIGNOFF sha=<PR head sha> verdict=pass|block fuse=none|acknowledged -->
 ```
 
-- **`sha`** — the PR's current head commit (the 40-hex you reviewed; read it from
-  the PR metadata via `gh pr view`). The gate is keyed to it: a marker for a
-  superseded commit is treated as stale unless the design tree is unchanged.
+- **`sha`** — the PR's current head commit (the 40-hex you reviewed). Use the
+  exact value from the prompt's `PR head sha` line (the workflow pins it as
+  `REVIEWER_HEAD_SHA`); `gh pr view --json headRefOid` is the attended
+  fallback. Never reuse a sha from an older review comment — a stale sha is
+  refused before posting so it cannot burn the one-post cap. The gate is
+  keyed to the live head.
 - **`verdict=pass`** is your default — your findings are feedback the PM triages,
   not a merge veto. Use **`verdict=block`** only for a genuine can't-print /
   unsafe-to-merge defect you would stake the sign-off on.

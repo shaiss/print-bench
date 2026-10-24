@@ -25,7 +25,7 @@ install and build commands), so a green local build means the deploy builds.
 | `/styles/<name>/` | that style's `STYLE.md`, rendered |
 | `/people/` | every `people/<handle>.md` — the product cores and the `shared: true` review specialists — as full member profiles with the product teams each has been on |
 | `/how-it-works/` | a behind-the-scenes of the pipeline, presented from the committed architecture docs (`docs/architecture/*.md`); every mechanism links to the file that implements it |
-| `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light reviewed-by reference, and the build-history timeline (its `PM.md` decision log and `NOTES.md` field tests, plus — on the Vercel deploy — its own git commits) |
+| `/designs/<name>/` (team section) | for a design with a committed `team.conf`, the product page also carries a "team contributions" section: who built it (identity, linking to their `/people/` profile), a light "Review specialists →" line naming the shared specialists every team can call on (the same line on every rostered page — who is available to review, not a claim that they reviewed this product or a PR), and the build-history timeline (its `PM.md` decision log and `NOTES.md` field tests, plus — on the Vercel deploy — its own git commits) |
 | `/llms.txt` | the machine-readable index of every markdown source the site serves ([llms.txt](https://llmstxt.org/) convention), derived from the docs' own titles and summaries — never hand-maintained (`lib/llms.mjs`) |
 | `/llms-full.txt` | the platform docs (contributing + architecture) concatenated into one fetch |
 | `/docs/contributing/*.md`, `/docs/architecture/*.md` | the contributor and architecture docs, served **verbatim** as raw markdown (so their repo-relative links resolve in the repo, not necessarily on this host — see the scoped exception under "Two decisions worth knowing") |
@@ -95,18 +95,34 @@ makes the site look more locked-down than it is. Kept apart:
   the *build*, not a ban on fetching.
 - **The deploy may fetch live first-party data.** On Vercel the build is
   allowed to pull data it cannot commit — through a deploy-scoped, best-effort
-  seam that renders *empty* on any failure and runs only behind a deploy-only
-  flag, so it is purely additive and never breaks a build. `lib/releases.mjs`
-  is the reference implementation (`SITE_FETCH_RELEASES=1`, the latest GitHub
-  Release manifest → download links; nothing locally, no broken build when the
-  API is down). `lib/history.mjs` is the second (`SITE_FETCH_HISTORY=1`): a
-  design's own git commits over the GitHub API, folded into the team timeline as
-  `commit · git` events, attributed to a member via their committed `github:`
-  login. `lib/decisions.mjs` is the third (`SITE_FETCH_DECISIONS=1`): the open
-  `needs-decision` queue over the GitHub search API, mapped by `notifications.mjs`
-  into the header notification bell — empty locally, so the bell shows its
-  "all caught up" state. Any further deploy-time source — PR / review history —
-  follows the same shape.
+  seam that runs only behind a deploy-only flag and never breaks a build: on any
+  failure it yields no data, so it is purely additive. But a failure is never
+  passed off as "nothing there" — every seam reports one shared status
+  (`lib/seam.mjs`): `off` (the flag is unset — the local/CI default, and the
+  page renders exactly the committed baseline), `ok`, `empty` (fetched fine,
+  genuinely nothing), or `unavailable` (offline, non-2xx, rate limit, timeout,
+  unparseable or unexpected body, or a 200 that is not the whole answer — a
+  search GitHub flags `incomplete_results`, a queue that ran out short of its
+  `total_count`). An `unavailable` seam prints a `WARN <seam>: fetch
+  unavailable … (<failure class>)` line in the build log and a visible
+  couldn't-load note on the affected page, instead of a zero count that reads
+  like real emptiness. CI builds offline, where every seam is `off`, so
+  `test/build-seams.test.mjs` runs the real `build.mjs` with every seam armed
+  against a stubbed `fetch` (all 401s, then an honest empty 200) — the only
+  check on the wiring from a seam's status to its WARN line and its page.
+  `lib/releases.mjs` is the reference implementation
+  (`SITE_FETCH_RELEASES=1`, the latest GitHub Release manifest → download
+  links; nothing locally, no broken build when the API is down).
+  `lib/history.mjs` is the second (`SITE_FETCH_HISTORY=1`): a design's own git
+  commits over the GitHub API, folded into the team timeline as `commit · git`
+  events, attributed to a member via their committed `github:` login.
+  `lib/decisions.mjs` is the third (`SITE_FETCH_DECISIONS=1`): the open
+  `needs-decision` queue over the GitHub search API, every page of it, mapped by
+  `notifications.mjs` into the header notification bell — off locally, so the
+  bell shows its "all caught up" state; a deploy that could not read the queue
+  shows "Couldn't load the decision queue for this deploy" instead. Any further
+  deploy-time source — PR / review history — follows the same shape and reports
+  through the same status.
 - **The served output references nothing external.** Every asset the *browser*
   loads is vendored (three.js, the OpenSCAD-WASM runtime, the `text()` font),
   resolved by an inline import map, never a CDN. "No external references" is a
@@ -226,11 +242,16 @@ build half of [issue #102](https://github.com/shaiss/print-bench/issues/102),
 consumed here for [#139](https://github.com/shaiss/print-bench/issues/139)). Three
 things keep it consistent with the rest of the site:
 
-- **Best-effort, never a broken build.** The manifest is fetched at build time
-  (`lib/releases.mjs`); a design with no release, or an unreachable/rate-limited
-  API, simply renders no Downloads block. The no-404 rule still holds for
-  *committed* references — release links are external and absent when the release
-  is.
+- **Best-effort, never a broken build — and never a false "no release".** The
+  manifest is fetched at build time (`lib/releases.mjs`); a design with no
+  release simply renders no Downloads block. An unreachable or rate-limited API
+  (or one design's unreadable or malformed manifest) is different: that design's
+  Downloads block says this deploy couldn't check for release downloads and
+  links the releases list, so a failed fetch never reads as "nothing to
+  download" — and, since a whole-release failure lands the note on every page,
+  it never claims a download exists either. The
+  no-404 rule still holds for *committed* references — release links are
+  external and absent when the release is.
 - **Vercel-scoped, so local and CI stay deterministic.** The fetch runs only on
   the deploy (which has network) or under `SITE_FETCH_RELEASES=1`; a plain
   `./scripts/site.sh` build performs no network I/O and shows no downloads, so its
@@ -239,9 +260,43 @@ things keep it consistent with the rest of the site:
   published the release, so the SHA-256 shown is of the exact bytes a visitor
   downloads — a local re-render never forges them.
 
+## Content-Security-Policy
+
+Every page carries its own policy as a `<meta http-equiv>`, the first element in
+`<head>`, generated by `lib/csp.mjs` when `build.mjs` writes the page: scripts
+are same-origin plus a `'sha256-…'` source for each inline script that page
+actually serves (the theme bootstrap, and the import map on product pages and
+`/people/`), `'wasm-unsafe-eval'` for the OpenSCAD runtime, `worker-src 'self'
+blob:`, `object-src 'none'`, `base-uri 'self'`, `img-src 'self' data: blob:` (a
+visitor's re-rolled avatar is a `data:` SVG) and `connect-src 'self'`. Hashes are
+computed over the page's final HTML, so they cannot drift from what ships, and
+anything no hash can allow — an inline `on…=` handler, a `javascript:` URL —
+fails the build. The Vercel Toolbar's origins (`vercel.live`, `vercel.com`, the
+Pusher socket) are added only when `VERCEL_ENV=preview`, so local, CI and
+production builds stay byte-identical. Deliberately **not** restricted:
+`default-src`, `style-src` and `font-src` — the pages use inline `style`
+attributes and the toolbar injects its own styles, and nothing loads from
+another origin to begin with.
+
+`vercel.json` adds what a `<meta>` cannot carry: a site-wide header with
+`frame-ancestors 'none'` (plus `object-src`/`base-uri`), deliberately with no
+`script-src`/`default-src`, because that header also reaches the worker script
+and every asset. The OpenSCAD worker takes its policy from its own response,
+not the page's `<meta>`, so `/assets/openscad-worker.js` gets its own header —
+`script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'`, repeating the
+site-wide directives so the result is the same whether both matching headers
+are sent or only the later one. `test/csp.test.mjs` holds the built site to all
+of this, including a negative control. Browsers are the only real proof, so this
+was also driven in Chromium with the `vercel.json` headers applied: the
+configurator render and download, the 3D viewer, the avatar studio and the theme
+toggle ran with zero violations, while an unhashed inline script, a one-byte
+change to an import map, and a worker header without `'wasm-unsafe-eval'` were
+each refused.
+
 ## Layout
 
 - `build.mjs` — the generator; discovery, render, asset copy, link check
+- `lib/csp.mjs` — the per-page Content-Security-Policy: inline-script hashes from the final HTML, the preview-only Vercel Toolbar origins, and `checkCsp`, which the build and `test/csp.test.mjs` both hold every page to
 - `avatars.mjs` — the member-avatar generator: regenerates each committed
   `assets/avatars/<handle>.svg` from the member's `people/<handle>.md` header
   (`npm --prefix site run avatars`); its `--set` mode (updating the
@@ -266,13 +321,14 @@ things keep it consistent with the rest of the site:
 - `lib/scadparams.mjs` — Customizer parameters and include closure from a `.scad`
 - `lib/team.mjs` — the roster layer (issue #123): `people/<handle>.md` + `designs/<name>/team.conf` + the interim `people/work.conf` recent-work manifest (issue #124) → resolved member records, agent mandates read from their charters at build time; an unresolvable handle, mandate source, or cited work artifact fails the build
 - `lib/profile.mjs` — the reusable member profile component (issue #124): identity, cited mandate, team chips, scope-filtered recent work; the People page renders it in the cross-team scope
-- `lib/teams.mjs` — the team/org building blocks (issue #122, revised IA): the product page's "team contributions" section (`teamContributions` — light identity cards linking to People, a reviewed-by reference, the build-history timeline) and the shared `historySlot`; pure functions of the roster data
+- `lib/teams.mjs` — the team/org building blocks (issue #122, revised IA): the product page's "team contributions" section (`teamContributions` — light identity cards linking to People, the "Review specialists →" line, the build-history timeline) and the shared `historySlot`, which adds a couldn't-load note when the git-history seam was `unavailable`; pure functions of the roster data
 - `lib/timeline.mjs` — the "History of work together" timeline (issue #126): a source-adapter seam plus the sources it runs (the committed `PM.md` decision log and `NOTES.md` field-test log, and the deploy-time git history from `history.mjs`) → product-scoped, attributed, newest-first events, and the `timelineEvents` render the product page's contributions section hosts; a drifted decision-log shape fails the build
-- `lib/history.mjs` — the deploy-time git-history source for the team timeline: a design's path-filtered commits over the GitHub API (best-effort and Vercel-scoped, like `releases.mjs`; merge commits dropped) → attributed `commit · git` events, the author mapped to a member by their committed `github:` login. The pure commit→event transform is unit-tested; the fetch boundary is stubbed, never the network
+- `lib/seam.mjs` — the deploy-time fetch seams' shared status (`off` / `ok` / `empty` / `unavailable`) and the one `fetchJson` boundary they all use, which classifies every failure (`HTTP 403, rate limited`, `network error: …`, `timeout after … ms`, `unparseable JSON body`) instead of collapsing it into "nothing there"; `runSeam` (off when the flag is unset, never throws) and the build log's `WARN` line formatter
+- `lib/history.mjs` — the deploy-time git-history source for the team timeline: a design's path-filtered commits over the GitHub API (best-effort and Vercel-scoped, like `releases.mjs`; merge commits dropped; a seam status per design) → attributed `commit · git` events, the author mapped to a member by their committed `github:` login. The pure commit→event transform is unit-tested; the fetch boundary is stubbed, never the network
 - `lib/model.mjs` — the per-design model bundle (entry, source, files, sections, asserts) the configurator and viewer share
-- `lib/releases.mjs` — release download links (issue #139): the pure manifest → per-part download-link mapping, and the best-effort, Vercel-scoped fetch of the latest release's manifests (injectable `fetch`, empty on any failure)
-- `lib/decisions.mjs` — the deploy-time source for the parked-decision queue (issue #181): the open `needs-decision` issues/PRs over the GitHub search API (best-effort and Vercel-scoped, like `releases.mjs`). The pure search-item → row transform is unit-tested; the fetch boundary is stubbed, never the network
-- `lib/notifications.mjs` — the generic notification model the header bell renders from: a data source (today `decisions.mjs`) → a `{items, actions}` bundle, via `setNotifications` in `templates.mjs`. Pure and total on junk; the base every future notification source funnels through (`mergeBundles`) instead of growing another page panel
+- `lib/releases.mjs` — release download links (issue #139): the pure manifest → per-part download-link mapping, and the best-effort, Vercel-scoped fetch of the latest release's manifests (injectable `fetch`; no manifests on failure, with a seam status that `designReleaseStatus` narrows to each design's page)
+- `lib/decisions.mjs` — the deploy-time source for the parked-decision queue (issue #181): the open `needs-decision` issues/PRs over the GitHub search API, paginated (100 per page until a short page or `total_count`, capped at the API's 1000-result ceiling) — best-effort and Vercel-scoped, like `releases.mjs`, with a seam status. The pure search-item → row transform is unit-tested; the fetch boundary is stubbed, never the network
+- `lib/notifications.mjs` — the generic notification model the header bell renders from: a data source (today `decisions.mjs`) → a `{items, actions, unavailable}` bundle, via `setNotifications` in `templates.mjs`; a source whose fetch was `unavailable` contributes a couldn't-load line the bell shows in place of "all caught up". Pure and total on junk; the base every future notification source funnels through (`mergeBundles`) instead of growing another page panel
 - `lib/templates.mjs` — the page shells
 - `test/` — `npm --prefix site test`; run by `./scripts/site.sh` and CI
 - `assets/` — `site.css` (the Modernist design system from the site-wireframes
