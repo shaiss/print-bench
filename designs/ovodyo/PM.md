@@ -68,3 +68,6 @@ hero's "reaches the ball centre" is preview-only until the hub lands).
 | 2026-10-24 | #604 note: numeral shadow-hole legibility at 288 indexes/day is a hot path once driven | Drik customer-sense / PM queue |
 | 2026-10-24 | Re-rank #604: ball-side hub/socket **first** within the issue (demo ↔ chipped plaque) | Drik used-it / PM triage |
 | 2026-10-24 | #601 approach: swap `text()` numerals for `lib/stencil-glyphs.scad` `stencil_text()` | Jane bench-sense / PM queue |
+| 2026-10-24 | v0 desk-die framing adopted (until #604) | Drik customer-sense / PM triage |
+| 2026-10-24 | Interim ballast-in-balls: packed pour blessed, loose shot forbidden (rattle) | Drik customer-sense / PM ruling |
+| 2026-10-24 | Kinematics proof table resolved (landing-flat 10–11 empty; ctrls 236/108) | Drik hunch / NOTES hygiene |

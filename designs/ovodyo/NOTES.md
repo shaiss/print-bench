@@ -356,13 +356,17 @@ facet-count` on the binary STL; 0 = empty):
 
 | part | stops rendered | facets |
 |---|---|---|
-| `landing-flat` | 0–11 | stop 0: 0; stop 1: 0; stop 2: 0; stop 3: 0; stop 4: 0; stop 5: 0; stop 6: 0; stop 7: 0; stop 8: 0; stop 9: 0; stop 10: in flight at hand-off; stop 11: in flight at hand-off |
-| `landing-flat-ctrl` | 0, 1 | stop 0: in flight at hand-off — must be > 0; stop 1: in flight at hand-off — must be > 0 |
+| `landing-flat` | 0–11 | 0 at every stop (0,0,0,0,0,0,0,0,0,0,0,0) |
+| `landing-flat-ctrl` | 0, 1 | stop 0: 236; stop 1: 108 (> 0, the check can fail) |
 | `landing-glyph` | 0–11 | 0 at every stop (0,0,0,0,0,0,0,0,0,0,0,0) |
 | `landing-glyph-rolled` | 0, 3 | 698; 348 (> 0, the check can fail) |
 | `landing-glyph-mirrored` | 0, 3 | 334; 178 (> 0, mirroring is caught) |
 
-The rows marked *in flight at hand-off* were still rendering when this commit was cut (the batch ran 2-wide on a shared 4-CPU box at ~65 s per full-ball render); `stops 0–9` of `landing-flat` came back 0. Re-run: `for s in 10 11; do xvfb-run -a openscad --export-format binstl -o build/lf-$s.stl -D 'part="landing-flat"' -D stop=$s designs/ovodyo/ovodyo.scad; ./scripts/lineage.sh facet-count build/lf-$s.stl; done` (and the same with `landing-flat-ctrl` at 0 and 1, which must count > 0).
+Resolved 2026-10-24 on tip `c9acb05` (OpenSCAD 2021.01 CGAL): stops 10–11 of
+`landing-flat` empty; both `landing-flat-ctrl` rows nonempty — the landing
+proof is falsifiable. Re-run if the stop table moves:
+`for s in 10 11; do xvfb-run -a openscad --export-format binstl -o build/lf-$s.stl -D 'part="landing-flat"' -D stop=$s designs/ovodyo/ovodyo.scad; ./scripts/lineage.sh facet-count build/lf-$s.stl; done`
+(and the same with `landing-flat-ctrl` at 0 and 1).
 
 **Regenerate.** `python3 designs/ovodyo/tumble_stops.py` prints the report and
 the baked block; `--write` splices it into `tumble.scad`; `--check` exits

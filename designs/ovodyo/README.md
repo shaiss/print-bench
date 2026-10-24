@@ -75,8 +75,9 @@ whole clock would print as one fused lump):
   NOTES.md). Print one of each for a complete hours ball.
 - `minutes-top` + `minutes-bottom` — likewise for the minutes ball: top **10,
   35, 25, 45, 55, 15**, bottom **30, 05, 40, 20, 00, 50** (00–55 in 5s). Until
-  the real drive lands ([#604](https://github.com/shaiss/print-bench/issues/604)), day one the minutes ball is for
-  hand-spin demos (or sits pretty) — it is not yet a running clock face.
+  the drive lands ([#604](https://github.com/shaiss/print-bench/issues/604)), it's a **desk die you set by hand** —
+  tumble until the face you want parks on a flat pentagon — not yet a running
+  clock face.
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
   (a Ø5.6 mm round nose) and carry a bored stalk boss over the motor pod, with
@@ -112,7 +113,11 @@ the default render is the assembled clock.
 
 - **Material:** PLA (white shell + red interior/mechanism is the intent; v0 is
   single-material).
-- **Layer height:** 0.2 mm.
+- **Layer height:** 0.2 mm for the base parts; **0.16 mm for the four ball
+  halves** — the near-pole facets sit ~52° and a finer step softens the show
+  surface. A faint texture band around each pole (and slightly translucent
+  lines along facet edges) is the known [#600](https://github.com/shaiss/print-bench/issues/600) caveat, not a slicing
+  mistake — don't chase it with supports.
 - **Infill:** 15–20 %.
 - **Supports:** none. The truss and mock drive print support-free, and the
   ball halves print **pole-down** (see Orientation), which makes the cavity an
@@ -124,6 +129,9 @@ the default render is the assembled clock.
   ring (the captive thread) shut. The slot's rims bridge ~10 mm in PLA —
   slightly drooled strips inside the window are the print, not a defect
   (turning supports on to "fix" them is the weld-the-seam failure mode).
+- **Brim:** safe on every part — if the truss tips lift, turn the brim on.
+  No fit on this design touches the bed (the seam rings print at the top of
+  the pole-down halves; the core sockets exit vertical faces).
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render).
   The pole face carries a numeral, so **layer 1 is the stencil itself**; the
@@ -223,9 +231,23 @@ each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into each 
 (it seats one way only). Fill and plug *before* you slide — a seated keel has no
 port access. Print the plugs on the coffee-break plate with the other base parts,
 never solo (a Ø5 mm part is easy to lose; a spare is cheap insurance). Weigh the
-pour first (~55 g total starting fill); the Ø3.2 mm ports are tight for Ø2 mm
-shot — tap and shake as you pour so the shot doesn't arch in the throat. Press a
-Ø5 mm silicone bumper into each of the four foot recesses.
+pour first (~55 g total starting fill); pour in **~10 g stages and tap between
+stages** (tapping while pouring fights the funnel). A folded-paper funnel with
+the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm ports are a
+1.6-pellet throat and will arch. Press a Ø5 mm silicone bumper into each of the
+four foot recesses.
+
+**Heft (v0 interim):** the shells are light for their size — the reference's
+mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
+wrapped in felt (or similar) inside a ball half before you screw it shut is a
+fine interim heft hack; **loose shot is forbidden** — it rattles against the
+numeral voids, and on this page rattle reads as broken. The heft arrives properly
+with the drive.
+
+**Care:** cut-through numerals, the 10 mm slot, and the airy truss collect desk
+dust — unscrew a ball (one full turn) and wipe the cavity when it looks dull;
+dust the lattice with a soft brush. Rotate which numeral faces the desk under
+the putty dab so wear doesn't pick one face forever.
 
 The real
 clock is driven by a geared stepper through a bevel differential and homed with a
