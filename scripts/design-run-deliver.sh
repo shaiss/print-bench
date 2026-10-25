@@ -4668,10 +4668,21 @@ EOF
       exit 1
     }
   done
-  # Wrapper is built with absolute node + cli.js (never env node).
-  grep -Fq 'exec ${node_bin} ${cli_js}' \
+  # Wrapper is built with absolute /opt node copy + cli.js (never env node,
+  # never /usr/local/bin/node — that path is world-writable on GHA).
+  grep -Fq 'exec ${pinned_node} ${cli_js}' \
     "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
     echo "selftest: install-sandbox-runtime-pin.sh does not emit absolute-node wrapper" >&2
+    exit 1
+  }
+  grep -Fq 'pinned_node="${INSTALL_ROOT}/bin/node"' \
+    "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not copy node under /opt" >&2
+    exit 1
+  }
+  grep -Fq 'pinned_node="/opt/sandbox-runtime/bin/node"' \
+    "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not require /opt node pin" >&2
     exit 1
   }
   grep -Eiq 'env[[:space:]]+node' "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
