@@ -370,7 +370,9 @@ def test_direct_commit_rule(standins):
     records = extract.extract_direct_commits(ctx, frozen)
     assert [r["sha"] for r in records] == [SHA["0"], SHA["6"]]          # 5 touches no designs/
     rec = records[0]
-    assert rec["kind"] == "commit" and rec["sha"] == SHA["0"] and rec["committed_at"] == "1970-01-01T00:01:40Z"
+    assert rec["kind"] == "commit" and rec["committed_at"] == "1970-01-01T00:01:40Z"
+    for r in records:
+        assert contract.validate("record@1:commit", r, DELTA_CONTRACT) == [], r["sha"]
     (event,) = rec["events"]
     assert event["episode"] == f"C:{SHA['0'][:8]}" and event["kind"] == "commit.human"
     assert event["url"].endswith(f"/commit/{SHA['0']}") and event["pr"] is None

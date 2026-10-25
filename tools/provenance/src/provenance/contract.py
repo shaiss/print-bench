@@ -66,8 +66,8 @@ JSON (``canonical.dumps``) — for ``*.json.gz`` the DECOMPRESSED bytes, never
 the gzip stream (the contract note); each document must sit at the path it
 names (receipts: run id, attempt (``run_attempt or 1``) and the UTC date of
 ``run.created_at``; raw: number and revision, revision 1 the bare path,
-``.r<K>`` only for K ≥ 2; records: ``records/<kind>/<identity>.json`` with the
-key equal to the record's own number/sha/tag; views: ``views/<design>.json``);
+``.r<K>`` only for K ≥ 2; records: ``records/<kind>/<identity>.json``, the
+identity being the record's own ``pr``/``issue`` number, ``sha`` or ``tag``; views: ``views/<design>.json``);
 raw revisions of each PR and brief are contiguous from 1. Guard files: both
 refs must carry them; the DERIVED ref must carry main's current bytes, while
 on the evidence ref (written once, at bootstrap) a difference from main is

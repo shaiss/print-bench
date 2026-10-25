@@ -846,12 +846,12 @@ whether an owner-login event was a human click or an owner-token session
 
 ### record@1
 
-| Kind | Key | Extra fields |
+| Kind | Identity (the path segment) | Extra fields |
 |---|---|---|
-| `pr` | PR number | `state`, `created_at`, `closed_at`, `merged_at`, `merge_commit_sha`, `merge_method`, `head_ref`, `base_ref`, `linked_issues` (every linked issue), `briefs` (those with a `raw/brief/` document — design briefs only), `designs` (`{design: {membership, kinds}}`), `rounds`, `threads` (`{total, resolved}`), `noise_counts`, `unknown`, `evidence` |
-| `brief` | issue number | `issue`, `state`, `state_reason`, `created_at`, `closed_at`, `labels`, `design_name`, `prs`, `evidence` |
-| `commit` | sha40 | `sha`, `committed_at`, `designs`, `evidence` (`source: git`) |
-| `release` | tag | `tag`, `published_at`, `designs`, `evidence` |
+| `pr` | `pr`, the PR number | `pr`, `state`, `created_at`, `closed_at`, `merged_at`, `merge_commit_sha`, `merge_method`, `head_ref`, `base_ref`, `linked_issues` (every linked issue), `briefs` (those with a `raw/brief/` document — design briefs only), `designs` (`{design: {membership, kinds}}`), `rounds`, `threads` (`{total, resolved}`), `noise_counts`, `unknown`, `evidence` |
+| `brief` | `issue`, the issue number | `issue`, `state`, `state_reason`, `created_at`, `closed_at`, `labels`, `design_name`, `prs`, `evidence` |
+| `commit` | `sha`, the sha40 | `sha`, `committed_at`, `designs`, `evidence` (`source: git`) |
+| `release` | `tag` | `tag`, `published_at`, `designs`, `evidence` |
 
 Every record carries `format`, `kind`, `extractor`
 (`provenance-extract 2`), `incomplete` and `events` (sorted by the event sort

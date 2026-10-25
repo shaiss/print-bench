@@ -520,6 +520,21 @@ def test_derived_tree_validates_and_recomputes():
         C.validate_tree(FakeTreeReader(files), "site")
 
 
+def test_derived_tree_paths_for_every_record_kind():
+    """Every synthetic record (all four kinds) validates at the path bundle.record_path gives it, and a
+    pr or brief record one number off is refused — pins contract's identity map to the bundle's."""
+    from _views_helpers import synthetic_records
+    from provenance import bundle
+    recs = {bundle.record_path(r): r for r in synthetic_records()}
+    assert {p.split("/")[1] for p in recs} == {"pr", "brief", "commit", "release"}
+    assert _tree_errors(_derived_files(records=recs), "derived") == []
+    for kind, field in (("pr", "pr"), ("brief", "issue")):
+        rec = next(r for r in synthetic_records() if r["kind"] == kind)
+        wrong = f"records/{kind}/{rec[field] + 1}.json"
+        assert _tree_errors(_derived_files(records={wrong: rec}), "derived") == [
+            f"{wrong}: the document belongs at records/{kind}/{rec[field]}.json"]
+
+
 def test_derived_tree_negatives():
     def forge(fn):
         return _derived_files(bundle_edit=fn)
@@ -544,7 +559,7 @@ def test_derived_tree_negatives():
     rec = _records()[f"records/commit/{SHA}.json"]
     files[f"records/commit/{SHA}.json"] = canonical.dumps_bytes(dict(rec, committed_at="2026-10-12T00:00:00Z"))
     assert _tree_errors(files, "derived") == ["site/bundle.json: content_sha256 does not recompute from the tree"]
-    # a record at the wrong path, or whose key is not its own sha
+    # a record at the wrong path (the path derives from the record's own identity field)
     other = "b" * 40
     recs = {f"records/commit/{other}.json": _records()[f"records/commit/{SHA}.json"]}
     assert _tree_errors(_derived_files(records=recs), "derived") == [

@@ -178,6 +178,23 @@ def test_python_and_node_validators_accept_and_reject(tmp_path):
         assert h.node_validate("bundle@1", bad, tmp_path), label
 
 
+@needs(contract_mod.validate)
+def test_both_validators_reject_a_stray_record_key(tmp_path):
+    """record@1 has no ``key`` field (the identity is pr/issue/sha/tag): both validators refuse one on
+    every record kind, so the commit record's ``"key": "<sha40>"`` line cannot come back unnoticed."""
+    records = h.synthetic_records()
+    assert {r["kind"] for r in records} == {"pr", "brief", "commit", "release"}
+    for r in records:
+        bad = dict(r, key=bundle.record_path(r).rsplit("/", 1)[1].removesuffix(".json"))
+        assert contract_mod.validate(f"record@1:{r['kind']}", bad) == ["$: unexpected field 'key'"], r["kind"]
+    if h.node() is None:
+        pytest.skip("node not on PATH: the Python half passed")
+    for r in records:
+        bad = dict(r, key="x")
+        got = h.node_validate(f"record@1:{r['kind']}", bad, tmp_path)
+        assert got and all('"key"' in e for e in got), (r["kind"], got)
+
+
 # ----------------------------------------------------------------------------- same_content
 
 def test_same_content_reads_the_tip_not_its_digest(fake_episodes):
@@ -324,11 +341,21 @@ def test_record_path():
     assert bundle.record_path({"kind": "brief", "issue": 7}) == "records/brief/7.json"
     assert bundle.record_path({"kind": "commit", "sha": "a" * 40}) == f"records/commit/{'a' * 40}.json"
     assert bundle.record_path({"kind": "release", "tag": "v2.0"}) == "records/release/v2.0.json"
-    for bad in ({"kind": "pr", "pr": "../x"}, {"kind": "pr", "pr": 0}, {"kind": "pr"},
-                {"kind": "commit", "sha": "a" * 39}, {"kind": "release", "tag": ".."},
-                {"kind": "release", "tag": "a/b"}, {"kind": "view", "design": "x"}):
-        with pytest.raises(ValueError):
+    for bad in ({"kind": "pr", "pr": 0}, {"kind": "commit", "sha": "a" * 39}, {"kind": "release", "tag": ".."},
+                {"kind": "release", "tag": "a/b"}, {"kind": "release", "tag": "None/x"}):
+        with pytest.raises(ValueError, match="invalid .* record identity"):
             bundle.record_path(bad)
+    # a missing identity is refused as missing — str(None) would otherwise pass the release pattern
+    for kind in ("pr", "brief", "commit", "release"):
+        with pytest.raises(ValueError, match="missing identity field"):
+            bundle.record_path({"kind": kind})
+    # the identity's type is the contract's: a str PR number, a bool, a None sha or an int tag is not one
+    for bad in ({"kind": "pr", "pr": "510"}, {"kind": "pr", "pr": "../x"}, {"kind": "brief", "issue": True},
+                {"kind": "commit", "sha": None}, {"kind": "release", "tag": 5}):
+        with pytest.raises(ValueError, match="record identity .* is "):
+            bundle.record_path(bad)
+    with pytest.raises(ValueError, match="unknown record kind"):
+        bundle.record_path({"kind": "view", "design": "x"})
 
 
 def test_build_bundle_meta_and_digests(fake_episodes):

@@ -100,6 +100,8 @@ _SHA40 = re.compile(r"[0-9a-f]{40}")
 _DESIGN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 #: record kind -> identity field used in ``records/<kind>/<id>.json`` (contract record@1).
 _RECORD_IDENTITY = {"pr": "pr", "brief": "issue", "commit": "sha", "release": "tag"}
+#: record kind -> the identity field's type (contract record@1: pr/issue int, sha/tag str).
+_RECORD_IDENTITY_TYPE = {"pr": int, "brief": int, "commit": str, "release": str}
 #: record kind -> the path-segment pattern its identity string must match.
 _RECORD_KEYS = {
     "pr": re.compile(r"[1-9][0-9]*"),
@@ -231,7 +233,10 @@ def record_path(record: dict[str, Any]) -> str:
     field = _RECORD_IDENTITY[kind]
     if field not in record:
         raise ValueError(f"bundle: {kind} record missing identity field {field!r}")
-    key = str(record[field])
+    value, want = record[field], _RECORD_IDENTITY_TYPE[kind]
+    if type(value) is not want:  # exact: a bool is an int, and "510" is not a PR number
+        raise ValueError(f"bundle: {kind} record identity {field!r} is {type(value).__name__}, not {want.__name__}")
+    key = str(value)
     if not pattern.fullmatch(key) or key in (".", ".."):
         raise ValueError(f"bundle: invalid {kind} record identity {key!r}")
     return f"records/{kind}/{key}.json"
