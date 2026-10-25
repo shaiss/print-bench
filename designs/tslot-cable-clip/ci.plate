@@ -1,0 +1,7 @@
+# Production parts for the multi-object 3MF plate — the printable
+# deliverable for a separately-printed multi-part design (scripts/plate.sh,
+# CLAUDE.md co-design step 4). The three stations as distinct objects; the
+# coupon is a fit-check, not a plate part.
+station-a
+station-b
+station-c
