@@ -10,8 +10,18 @@ set -euo pipefail
 src="/usr/share/apparmor/extra-profiles/bwrap-userns-restrict"
 dst="/etc/apparmor.d/bwrap-userns-restrict"
 
+# Ubuntu 24.04 ships bwrap-userns-restrict in apparmor-profiles; 26.04
+# (ubuntu-latest as of 2026-10) does not. Ship workflows pin runs-on to
+# ubuntu-24.04 for the same reason OpenSCAD-nightly jobs do (PR #920).
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+fi
 [ -f "$src" ] || {
   echo "error: missing ${src} (install apparmor-profiles)" >&2
+  if [ "${ID:-}" = "ubuntu" ] && [ "${VERSION_ID:-}" != "24.04" ]; then
+    echo "error: AppArmor bwrap-userns-restrict is only expected on ubuntu-24.04; this host is ${PRETTY_NAME:-unknown} (VERSION_ID=${VERSION_ID:-unset}). Pin the job to runs-on: ubuntu-24.04." >&2
+  fi
   exit 1
 }
 command -v bwrap >/dev/null || {

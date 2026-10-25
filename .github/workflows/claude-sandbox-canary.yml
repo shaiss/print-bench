@@ -1,10 +1,12 @@
 name: Claude SCRUB sandbox canary
 
-# Keyless proof that Cipher's #876 path works on a real ubuntu-latest runner:
+# Keyless proof that Cipher's #876 path works on a real ubuntu-24.04 runner:
 # AppArmor bwrap-userns-restrict (sysctl stays 1), GPG-pinned Claude Code
-# under /opt, integrity-pinned sandbox-runtime, then SCRUB=1 sandbox smoke
+# under /opt, lockfile-pinned sandbox-runtime, then SCRUB=1 sandbox smoke
 # as the runner uid after disable-sudo. Reuses the same scripts the ship
 # workflows call — no duplicated install/smoke logic.
+# Pin 24.04 (not ubuntu-latest/26.04): bwrap-userns-restrict lives in
+# apparmor-profiles only on 24.04 — same pin pattern as OpenSCAD-nightly (#920).
 #
 # MUST NOT be a required check (not in ci-ok). No provider/PAT secrets.
 #
@@ -22,6 +24,7 @@ on:
       - ".github/workflows/claude-sandbox-canary.yml"
       - ".github/claude-code-version"
       - ".github/sandbox-runtime-version"
+      - ".github/sandbox-runtime/**"
       - "scripts/install-claude-code-pin.sh"
       - "scripts/install-sandbox-runtime-pin.sh"
       - "scripts/verify-claude-code-pin.sh"
@@ -39,14 +42,14 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Trusted preflight (AppArmor + GPG Claude + integrity-pinned srt)
+      - name: Trusted preflight (AppArmor + GPG Claude + lockfile-pinned srt)
         id: preflight
         # Cipher: install must not see provider/PAT secrets.
         env:

@@ -131,7 +131,10 @@ jobs:
       vars.BACKLOG_BURN_ENABLED == 'true'
       && github.ref_name == github.event.repository.default_branch
       && vars.AI_ANDON_CORD != 'pulled'
-    runs-on: ubuntu-latest
+    # Pin 24.04 (not ubuntu-latest/26.04): setup-bwrap-apparmor.sh needs
+    # bwrap-userns-restrict from apparmor-profiles, which 26.04 does not ship
+    # (same pin pattern as OpenSCAD-nightly jobs in #920).
+    runs-on: ubuntu-24.04
     # Job budget 225 = 2 × ship-step timeout (105) + 15 min headroom. The walk
     # below is five ship steps in a row (three GLM links, then the Anthropic
     # tail — issue #544), each with its own 105-minute timeout, and the budget
