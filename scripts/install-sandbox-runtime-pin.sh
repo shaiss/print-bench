@@ -106,37 +106,81 @@ node_bin="$(command -v node)"
   echo "error: node not executable at ${node_bin:-empty}" >&2
   exit 1
 }
+# Node must be outside $HOME so a planted ~/.local/bin/node cannot be the
+# interpreter the root-owned wrapper permanently binds.
+case "$node_bin" in
+  "${HOME}"/*|/home/*)
+    echo "error: node at ${node_bin} is under a home directory — refuse to pin a hijackable interpreter" >&2
+    exit 1
+    ;;
+esac
+node_bin="$(readlink -f "$node_bin")"
+[ -x "$node_bin" ] || {
+  echo "error: resolved node not executable: ${node_bin}" >&2
+  exit 1
+}
+case "$node_bin" in
+  "${HOME}"/*|/home/*)
+    echo "error: resolved node at ${node_bin} is under a home directory" >&2
+    exit 1
+    ;;
+esac
 
 # Install under /opt as root from the committed lockfile. npm ci verifies
 # every tarball against lockfile integrity hashes; --ignore-scripts blocks
 # prepare/husky (dist/ is already in the published tarball).
 sudo rm -rf "$INSTALL_ROOT"
-sudo mkdir -p "$INSTALL_ROOT"
+sudo mkdir -p "${INSTALL_ROOT}/bin"
 sudo install -o root -g root -m 0644 \
   "${PKG_DIR}/package.json" "${PKG_DIR}/package-lock.json" "$INSTALL_ROOT/"
 sudo env "PATH=$(dirname "$npm_bin"):$(dirname "$node_bin"):/usr/local/bin:/usr/bin:/bin" \
   "$npm_bin" ci --ignore-scripts --prefix "$INSTALL_ROOT"
 
-srt_src="${INSTALL_ROOT}/node_modules/.bin/srt"
-[ -x "$srt_src" ] || {
-  echo "error: srt shim missing after npm ci: ${srt_src}" >&2
+cli_js="${INSTALL_ROOT}/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js"
+[ -f "$cli_js" ] || {
+  echo "error: sandbox-runtime cli.js missing after npm ci: ${cli_js}" >&2
   exit 1
 }
-# Point /usr/local/bin/srt at the lockfile-installed shim (relative requires
-# inside that shim resolve against /opt/sandbox-runtime/node_modules).
-sudo ln -sfn "$srt_src" /usr/local/bin/srt
 
-PATH="/usr/local/bin:$(dirname "$npm_bin"):${PATH}"
+# Root-owned wrapper with ABSOLUTE node + cli.js — never `#!/usr/bin/env node`
+# (a planted ~/.local/bin/node would intercept env). Not a symlink.
+wrapper_tmp="$(mktemp)"
+cat > "$wrapper_tmp" <<EOF
+#!/bin/bash
+exec ${node_bin} ${cli_js} "\$@"
+EOF
+srt_bin="${INSTALL_ROOT}/bin/srt"
+sudo install -o root -g root -m 0755 "$wrapper_tmp" "$srt_bin"
+rm -f "$wrapper_tmp"
+sudo chown root:root "$INSTALL_ROOT" "${INSTALL_ROOT}/bin"
+sudo chmod 0755 "$INSTALL_ROOT" "${INSTALL_ROOT}/bin"
+sudo chmod go-w "$INSTALL_ROOT" "${INSTALL_ROOT}/bin"
+
+if [ -L "$srt_bin" ]; then
+  echo "error: installed srt path must not be a symlink: ${srt_bin}" >&2
+  exit 1
+fi
+
+# Same bytes at /usr/local/bin/srt so bare PATH lookups hit the pin after
+# ~/.local/bin/srt is removed (verify-sandbox-runtime-pin.sh re-strips it).
+sudo install -o root -g root -m 0755 "$srt_bin" /usr/local/bin/srt
+rm -f "${HOME}/.local/bin/srt" 2>/dev/null || true
+
+PATH="/usr/local/bin:/usr/bin:/bin"
 export PATH
-srt_bin="$(command -v srt || true)"
-[ -n "$srt_bin" ] || {
-  echo "error: srt not on PATH after verified sandbox-runtime install" >&2
+resolved="$(command -v srt || true)"
+[ "$resolved" = "/usr/local/bin/srt" ] || {
+  echo "error: command -v srt is '${resolved:-empty}', want /usr/local/bin/srt" >&2
   exit 1
 }
 got_ver="$(srt --version 2>/dev/null | tr -d '[:space:]' || true)"
 if [ "$got_ver" != "$srt_ver" ]; then
   echo "error: srt --version is '${got_ver:-empty}', want ${srt_ver}" >&2
   exit 1
+fi
+
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "srt_bin=${srt_bin}" >> "$GITHUB_OUTPUT"
 fi
 
 echo "install-sandbox-runtime-pin: ${srt_bin} version=${got_ver} lockfile=ok"

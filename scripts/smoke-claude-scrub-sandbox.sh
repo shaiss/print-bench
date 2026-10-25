@@ -99,11 +99,10 @@ fi
   exit 1
 }
 
-srt_bin="$(command -v srt || true)"
-[ -n "$srt_bin" ] || {
-  echo "::error::srt (Claude sandbox-runtime) not on PATH — install it in trusted preflight before disable-sudo" >&2
-  exit 1
-}
+# Re-strip ~/.local/bin/srt and confirm the root-owned /opt wrapper
+# (absolute node — not env) before PATH-resolving srt for the smoke.
+"${GITHUB_WORKSPACE:-$(cd "$(dirname "$0")/.." && pwd)}/scripts/verify-sandbox-runtime-pin.sh"   /opt/sandbox-runtime/bin/srt
+srt_bin="/opt/sandbox-runtime/bin/srt"
 command -v rg >/dev/null || {
   echo "::error::ripgrep (rg) not on PATH — srt requires it; apt-install ripgrep in preflight" >&2
   exit 1

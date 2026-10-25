@@ -4616,12 +4616,51 @@ EOF
     exit 1
   }
   for script in install-claude-code-pin.sh install-sandbox-runtime-pin.sh \
-    verify-claude-code-pin.sh setup-bwrap-apparmor.sh smoke-claude-scrub-sandbox.sh; do
+    verify-claude-code-pin.sh verify-sandbox-runtime-pin.sh \
+    setup-bwrap-apparmor.sh smoke-claude-scrub-sandbox.sh; do
     [ -x "${repo_root}/scripts/${script}" ] || {
       echo "selftest: scripts/${script} missing or not executable" >&2
       exit 1
     }
   done
+  grep -q 'verify-sandbox-runtime-pin.sh' "$burn" || {
+    echo "selftest: burn missing verify-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'verify-sandbox-runtime-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing verify-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  # Preflight/scrub failure must score walk_outcome as failure (not not-run),
+  # or settle leaves the SHIP-LOCK starving the claimed issue.
+  for wf in "$burn" "$workflow"; do
+    grep -q "steps.preflight.outcome == 'failure'" "$wf" || {
+      echo "selftest: $(basename "$wf") walk_outcome does not treat preflight failure as failure" >&2
+      exit 1
+    }
+    grep -q "steps.scrub_smoke.outcome == 'failure'" "$wf" || {
+      echo "selftest: $(basename "$wf") walk_outcome does not treat scrub_smoke failure as failure" >&2
+      exit 1
+    }
+  done
+  grep -q '\.local/bin/srt' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not strip ~/.local/bin/srt" >&2
+    exit 1
+  }
+  grep -q '\.local/bin/srt' "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not strip ~/.local/bin/srt" >&2
+    exit 1
+  }
+  # Wrapper is built with absolute node + cli.js (never env node).
+  grep -Fq 'exec ${node_bin} ${cli_js}' \
+    "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not emit absolute-node wrapper" >&2
+    exit 1
+  }
+  grep -Eiq 'env[[:space:]]+node' "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not refuse env node" >&2
+    exit 1
+  }
   grep -q 'install-sandbox-runtime-pin.sh' "$burn" || {
     echo "selftest: burn missing install-sandbox-runtime-pin.sh" >&2
     exit 1

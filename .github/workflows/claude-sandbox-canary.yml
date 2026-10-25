@@ -28,6 +28,7 @@ on:
       - "scripts/install-claude-code-pin.sh"
       - "scripts/install-sandbox-runtime-pin.sh"
       - "scripts/verify-claude-code-pin.sh"
+      - "scripts/verify-sandbox-runtime-pin.sh"
       - "scripts/setup-bwrap-apparmor.sh"
       - "scripts/smoke-claude-scrub-sandbox.sh"
 
@@ -171,4 +172,6 @@ jobs:
           "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
             "${{ steps.preflight.outputs.claude_bin }}" \
             "${{ steps.preflight.outputs.claude_sha256 }}"
+          "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
+            /opt/sandbox-runtime/bin/srt
           echo "canary ok: smoke passed under unpriv_bwrap; sysctl=${{ steps.preflight.outputs.userns_sysctl }}; uid=${{ steps.preflight.outputs.agent_uid }} (${{ steps.preflight.outputs.agent_user }})"
