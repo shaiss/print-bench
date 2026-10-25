@@ -592,11 +592,17 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+          HOME: /home/runner
+          PATH: /usr/bin:/bin
         run: |
           set -euo pipefail
           unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_KEY ZAI_KEY \
             OPENROUTER_API_KEY GH_TOKEN REGEN_TOKEN || true
-          "${GITHUB_WORKSPACE}/scripts/smoke-claude-scrub-sandbox.sh" \
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}')" >&2
+            exit 1
+          fi
+          /usr/bin/bash "${GITHUB_WORKSPACE}/scripts/smoke-claude-scrub-sandbox.sh" \
             "${{ steps.preflight.outputs.claude_bin }}"
 
       - name: Verify Claude Code pin (before link 1)
@@ -613,6 +619,7 @@ jobs:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
           PATH: /usr/bin:/bin
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -638,10 +645,51 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
+          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
+          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
+          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
+            exit 1
+          fi
+          restore_verify() {
+            local name="$1"
+            local dest="${RUNNER_TEMP}/${name}"
+            local blob_tmp
+            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
+            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+              echo "::error::refusing to restore ${name} through a symlink" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
+              /usr/bin/rm -f "$blob_tmp"
+              echo "::error::could not restore ${name} from ${START_SHA}" >&2
+              exit 1
+            fi
+            if [ -L "$dest" ]; then
+              /usr/bin/rm -f "$dest"
+            fi
+            /usr/bin/mv -f "$blob_tmp" "$dest"
+            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
+              echo "::error::${name} restore did not leave a regular file" >&2
+              exit 1
+            fi
+          }
+          restore_verify verify-claude-code-pin.sh
+          restore_verify verify-sandbox-runtime-pin.sh
+          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
             "${{ steps.preflight.outputs.claude_bin }}" \
             "${{ steps.preflight.outputs.claude_sha256 }}"
-          "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
+          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
             /opt/sandbox-runtime/bin/srt
 
       - name: Run via Z.AI (GLM, chain link 1)
@@ -730,6 +778,7 @@ jobs:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
           PATH: /usr/bin:/bin
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -755,10 +804,51 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
+          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
+          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
+          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
+            exit 1
+          fi
+          restore_verify() {
+            local name="$1"
+            local dest="${RUNNER_TEMP}/${name}"
+            local blob_tmp
+            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
+            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+              echo "::error::refusing to restore ${name} through a symlink" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
+              /usr/bin/rm -f "$blob_tmp"
+              echo "::error::could not restore ${name} from ${START_SHA}" >&2
+              exit 1
+            fi
+            if [ -L "$dest" ]; then
+              /usr/bin/rm -f "$dest"
+            fi
+            /usr/bin/mv -f "$blob_tmp" "$dest"
+            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
+              echo "::error::${name} restore did not leave a regular file" >&2
+              exit 1
+            fi
+          }
+          restore_verify verify-claude-code-pin.sh
+          restore_verify verify-sandbox-runtime-pin.sh
+          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
             "${{ steps.preflight.outputs.claude_bin }}" \
             "${{ steps.preflight.outputs.claude_sha256 }}"
-          "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
+          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
             /opt/sandbox-runtime/bin/srt
 
       - name: Run via Z.AI (GLM, chain link 2)
@@ -833,6 +923,7 @@ jobs:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
           PATH: /usr/bin:/bin
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -858,10 +949,51 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
+          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
+          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
+          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
+            exit 1
+          fi
+          restore_verify() {
+            local name="$1"
+            local dest="${RUNNER_TEMP}/${name}"
+            local blob_tmp
+            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
+            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+              echo "::error::refusing to restore ${name} through a symlink" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
+              /usr/bin/rm -f "$blob_tmp"
+              echo "::error::could not restore ${name} from ${START_SHA}" >&2
+              exit 1
+            fi
+            if [ -L "$dest" ]; then
+              /usr/bin/rm -f "$dest"
+            fi
+            /usr/bin/mv -f "$blob_tmp" "$dest"
+            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
+              echo "::error::${name} restore did not leave a regular file" >&2
+              exit 1
+            fi
+          }
+          restore_verify verify-claude-code-pin.sh
+          restore_verify verify-sandbox-runtime-pin.sh
+          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
             "${{ steps.preflight.outputs.claude_bin }}" \
             "${{ steps.preflight.outputs.claude_sha256 }}"
-          "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
+          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
             /opt/sandbox-runtime/bin/srt
 
       - name: Run via Z.AI (GLM, chain link 3)
@@ -948,6 +1080,7 @@ jobs:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
           PATH: /usr/bin:/bin
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -973,10 +1106,51 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
+          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
+          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
+          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
+            exit 1
+          fi
+          restore_verify() {
+            local name="$1"
+            local dest="${RUNNER_TEMP}/${name}"
+            local blob_tmp
+            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
+            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+              echo "::error::refusing to restore ${name} through a symlink" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
+              /usr/bin/rm -f "$blob_tmp"
+              echo "::error::could not restore ${name} from ${START_SHA}" >&2
+              exit 1
+            fi
+            if [ -L "$dest" ]; then
+              /usr/bin/rm -f "$dest"
+            fi
+            /usr/bin/mv -f "$blob_tmp" "$dest"
+            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
+              echo "::error::${name} restore did not leave a regular file" >&2
+              exit 1
+            fi
+          }
+          restore_verify verify-claude-code-pin.sh
+          restore_verify verify-sandbox-runtime-pin.sh
+          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
             "${{ steps.preflight.outputs.claude_bin }}" \
             "${{ steps.preflight.outputs.claude_sha256 }}"
-          "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
+          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
             /opt/sandbox-runtime/bin/srt
 
       - name: Run via Anthropic (Claude, chain link 4)
@@ -1065,6 +1239,7 @@ jobs:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
           PATH: /usr/bin:/bin
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -1090,10 +1265,51 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
+          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
+          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
+          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
+            exit 1
+          fi
+          restore_verify() {
+            local name="$1"
+            local dest="${RUNNER_TEMP}/${name}"
+            local blob_tmp
+            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
+            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+              echo "::error::refusing to restore ${name} through a symlink" >&2
+              exit 1
+            fi
+            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
+              /usr/bin/rm -f "$blob_tmp"
+              echo "::error::could not restore ${name} from ${START_SHA}" >&2
+              exit 1
+            fi
+            if [ -L "$dest" ]; then
+              /usr/bin/rm -f "$dest"
+            fi
+            /usr/bin/mv -f "$blob_tmp" "$dest"
+            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
+              echo "::error::${name} restore did not leave a regular file" >&2
+              exit 1
+            fi
+          }
+          restore_verify verify-claude-code-pin.sh
+          restore_verify verify-sandbox-runtime-pin.sh
+          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
             "${{ steps.preflight.outputs.claude_bin }}" \
             "${{ steps.preflight.outputs.claude_sha256 }}"
-          "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
+          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
             /opt/sandbox-runtime/bin/srt
 
       - name: Run via Anthropic (Claude, chain link 5)

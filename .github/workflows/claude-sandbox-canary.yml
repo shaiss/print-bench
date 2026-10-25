@@ -139,10 +139,16 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+          HOME: /home/runner
+          PATH: /usr/bin:/bin
         run: |
           set -euo pipefail
           unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_KEY ZAI_KEY \
             OPENROUTER_API_KEY GH_TOKEN REGEN_TOKEN || true
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}')" >&2
+            exit 1
+          fi
           echo "smoke as $(id -un) uid=$(id -u)"
           sysctl_val="$(tr -d '[:space:]' < /proc/sys/kernel/apparmor_restrict_unprivileged_userns)"
           echo "apparmor_restrict_unprivileged_userns=${sysctl_val}"
@@ -150,7 +156,7 @@ jobs:
             echo "::error::sysctl must remain 1 during smoke (got ${sysctl_val}); not falling back to clearing it" >&2
             exit 1
           }
-          "${GITHUB_WORKSPACE}/scripts/smoke-claude-scrub-sandbox.sh" \
+          /usr/bin/bash "${GITHUB_WORKSPACE}/scripts/smoke-claude-scrub-sandbox.sh" \
             "${{ steps.preflight.outputs.claude_bin }}"
 
       - name: Re-verify Claude Code pin after smoke
@@ -167,11 +173,19 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+          HOME: /home/runner
+          PATH: /usr/bin:/bin
+          CLAUDE_CONFIG_DIR: /home/runner/.claude
+          XDG_CONFIG_HOME: /home/runner/.config
         run: |
           set -euo pipefail
-          "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
+          if [ "${PATH}" != "/usr/bin:/bin" ]; then
+            echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}')" >&2
+            exit 1
+          fi
+          /usr/bin/bash "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
             "${{ steps.preflight.outputs.claude_bin }}" \
             "${{ steps.preflight.outputs.claude_sha256 }}"
-          "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
+          /usr/bin/bash "${GITHUB_WORKSPACE}/scripts/verify-sandbox-runtime-pin.sh" \
             /opt/sandbox-runtime/bin/srt
           echo "canary ok: smoke passed under unpriv_bwrap; sysctl=${{ steps.preflight.outputs.userns_sysctl }}; uid=${{ steps.preflight.outputs.agent_uid }} (${{ steps.preflight.outputs.agent_user }})"

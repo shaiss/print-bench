@@ -4672,9 +4672,109 @@ EOF
     echo "selftest: verify-sandbox-runtime-pin.sh does not require /usr/bin/bwrap" >&2
     exit 1
   }
+  # Cipher MED-2: verify scripts must check the real inherited PATH (never
+  # re-export PATH=/usr/bin:/bin before that check — GITHUB_PATH prepends
+  # ahead of step env PATH and a re-set would hide a planted fake bwrap).
+  for vscript in verify-sandbox-runtime-pin.sh verify-claude-code-pin.sh; do
+    vpath="${repo_root}/scripts/${vscript}"
+    grep -Fq 'inherited PATH must be exactly /usr/bin:/bin' "$vpath" || {
+      echo "selftest: ${vscript} does not refuse a polluted inherited PATH" >&2
+      exit 1
+    }
+    # The PATH check must appear before any `export PATH=` (if any).
+    check_line="$(grep -n 'inherited PATH must be exactly /usr/bin:/bin' "$vpath" | head -1 | cut -d: -f1)"
+    export_line="$(grep -n 'export PATH=' "$vpath" | head -1 | cut -d: -f1 || true)"
+    if [ -n "${export_line:-}" ] && [ -n "${check_line:-}" ] \
+      && [ "$export_line" -le "$check_line" ]; then
+      echo "selftest: ${vscript} re-exports PATH before the inherited-PATH check (Cipher MED-2)" >&2
+      exit 1
+    fi
+  done
+  # Absolute bwrap/socat/rg pins: Claude managed-settings (preflight) + srt smoke.
+  grep -Fq '"bwrapPath": "/usr/bin/bwrap"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed bwrapPath" >&2
+    exit 1
+  }
+  grep -Fq '"socatPath": "/usr/bin/socat"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed socatPath" >&2
+    exit 1
+  }
+  grep -Fq '"command": "/usr/bin/rg"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed ripgrep path" >&2
+    exit 1
+  }
+  grep -Fq 'managed_dir="/etc/claude-code"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not target /etc/claude-code" >&2
+    exit 1
+  }
+  grep -Fq 'managed-settings.json' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed-settings.json" >&2
+    exit 1
+  }
+  grep -Fq 'managed="/etc/claude-code/managed-settings.json"' \
+    "${repo_root}/scripts/verify-claude-code-pin.sh" || {
+    echo "selftest: verify-claude-code-pin.sh does not require managed-settings path pins" >&2
+    exit 1
+  }
+  grep -Fq '"bwrapPath": "/usr/bin/bwrap"' \
+    "${repo_root}/scripts/smoke-claude-scrub-sandbox.sh" || {
+    echo "selftest: smoke-claude-scrub-sandbox.sh srt settings lack absolute bwrapPath" >&2
+    exit 1
+  }
+  grep -Fq '"socatPath": "/usr/bin/socat"' \
+    "${repo_root}/scripts/smoke-claude-scrub-sandbox.sh" || {
+    echo "selftest: smoke-claude-scrub-sandbox.sh srt settings lack absolute socatPath" >&2
+    exit 1
+  }
+  grep -Fq '"command": "/usr/bin/rg"' \
+    "${repo_root}/scripts/smoke-claude-scrub-sandbox.sh" || {
+    echo "selftest: smoke-claude-scrub-sandbox.sh lacks absolute rg path" >&2
+    exit 1
+  }
+  # Cipher MED-1: verify_claude_N restores verify-*.sh from START_SHA into
+  # RUNNER_TEMP and invokes via /usr/bin/bash (not the agent-writable tree
+  # shebang).
+  for wf in "$burn" "$workflow"; do
+    restore_n="$(grep -c 'restore_verify verify-claude-code-pin.sh' "$wf" || true)"
+    [ "$restore_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 START_SHA restores of verify-claude-code-pin.sh, found ${restore_n}" >&2
+      exit 1
+    }
+    restore_srt_n="$(grep -c 'restore_verify verify-sandbox-runtime-pin.sh' "$wf" || true)"
+    [ "$restore_srt_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 START_SHA restores of verify-sandbox-runtime-pin.sh, found ${restore_srt_n}" >&2
+      exit 1
+    }
+    bash_inv_n="$(grep -c '/usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh"' "$wf" || true)"
+    [ "$bash_inv_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 /usr/bin/bash invokes of restored verify-claude-code-pin.sh, found ${bash_inv_n}" >&2
+      exit 1
+    }
+    grep -F 'show "$START_SHA:scripts/${name}"' "$wf" >/dev/null || {
+      echo "selftest: $(basename "$wf") verify restore does not git-show from START_SHA" >&2
+      exit 1
+    }
+    # Must not still invoke the workspace verify scripts directly in verify_claude_N.
+    if grep -E '^\s+"\$\{GITHUB_WORKSPACE\}/scripts/verify-(claude-code|sandbox-runtime)-pin\.sh"' "$wf" >/dev/null; then
+      echo "selftest: $(basename "$wf") still invokes workspace verify-*.sh directly (Cipher MED-1)" >&2
+      exit 1
+    fi
+    start_sha_env_n="$(grep -c 'START_SHA: \${{ steps.start_ref.outputs.sha }}' "$wf" || true)"
+    # start_ref START_SHA appears on verify (5) plus other trusted steps; require
+    # at least the five verify steps carry it (grep counts all occurrences).
+    [ "$start_sha_env_n" -ge 5 ] || {
+      echo "selftest: $(basename "$wf") expected >=5 START_SHA env pins from start_ref, found ${start_sha_env_n}" >&2
+      exit 1
+    }
+  done
   for wf in "$burn" "$workflow"; do
     grep -q 'PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin' "$wf" || {
-      echo "selftest: $(basename "$wf") agent steps lack system-first PATH (SCRUB pins before ~/.local/bin)" >&2
+      echo "selftest: $(basename "$wf") agent steps lack /opt+/usr/bin-before-~/.local/bin PATH" >&2
       exit 1
     }
     # Every SCRUB agent PATH block must blank NODE_OPTIONS/LD_PRELOAD/…
