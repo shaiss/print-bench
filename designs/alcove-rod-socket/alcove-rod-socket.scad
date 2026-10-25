@@ -57,6 +57,16 @@ neck_len = 10;
 screw_count = 1; // [1,2]
 // Metric size of the flat-head mounting screws
 screw_size = "M5"; // [M2,M2.5,M3,M4,M5,M6]
+// Wall-face anti-rotation ribs — bite drywall/paint so a single central M5
+// does not spin when the collar is torqued. On by default for screw_count=1;
+// ignored at screw_count=2 (the off-axis pair already pins the boss).
+anti_rotate = true;
+// Radial V-groove count on the wall face
+anti_rotate_n = 8; // [6,8,10,12]
+// Groove depth (mm) — 4 layers at the pinned 0.2 mm height
+anti_rotate_h = 0.8;
+// Groove opening at the wall (mm) — ≤ 2·h so flanks are ≥ 45° (N4)
+anti_rotate_w = 1.6;
 
 /* [Collar] */
 // Knurl flute count around the grip band (guarded: flutes must stay printable)
@@ -116,6 +126,30 @@ assert(knurl_depth <= wall - 1.2, str(
 // seats on the screw instead of the shoulder.
 assert(boss_h - csk_h < flange_t + collar_lower_h,
     "screw head recess breaks through the collar's rod seat — raise the neck.");
+// Anti-rotation keys: shallow 45° V-grooves in the wall face. Depth is
+// 2–8 layers; opening ≤ 2·h so each flank is ≥ 45° (no pocket roof a
+// stock 0.4/0.2 profile cannot bridge); lands between grooves stay at
+// or above the 0.8 mm printable floor at the inner radius.
+assert(anti_rotate_n >= 6 && anti_rotate_n <= 12, str(
+    "anti_rotate_n ", anti_rotate_n, " — want [6, 12]."));
+assert(anti_rotate_h >= 0.4 && anti_rotate_h <= 1.6, str(
+    "anti_rotate_h ", anti_rotate_h, " mm — want [0.4, 1.6] (2–8 layers)."));
+assert(anti_rotate_w >= 0.8 && anti_rotate_w <= 2 * anti_rotate_h + 1e-9, str(
+    "anti_rotate_w ", anti_rotate_w, " mm — want [0.8, 2·h=", 2 * anti_rotate_h,
+    "] so flanks stay ≥ 45°."));
+assert(anti_rotate_h + 2 * style_edge_chamfer < flange_t, str(
+    "anti_rotate_h ", anti_rotate_h, " mm would eat through the flange."));
+// Layout numbers the cutter uses (always derived so a collar-only render
+// still refuses an unprintable groove). Used only when the cut actually runs.
+anti_rotate_r_in = shank_d / 2 + 5.0;
+anti_rotate_r_out = flange_d / 2 - style_edge_chamfer - 1.6;
+anti_rotate_pitch_in = 2 * PI * anti_rotate_r_in / anti_rotate_n;
+assert(anti_rotate_pitch_in >= anti_rotate_w + 1.6, str(
+    "anti-rotate lands merge at r_in: pitch ", anti_rotate_pitch_in,
+    " mm vs groove ", anti_rotate_w, " mm. Cut anti_rotate_n or _w."));
+assert(anti_rotate_r_out - anti_rotate_r_in >= 8, str(
+    "anti-rotate annulus too short (", anti_rotate_r_out - anti_rotate_r_in,
+    " mm) — flange is too small for this groove layout."));
 
 // ---------------------------------------------------------------------------
 // Boss — wall plate + male thread. Printed flange-down (its use orientation:
@@ -142,6 +176,37 @@ module boss() {
                             thread_starts, neck_len, seg = thread_seg);
         }
         mount_screw_holes();
+        anti_rotate_cut();
+    }
+}
+
+// Wall-face bite: eight (by default) radial V-grooves in the flange's
+// bed/wall face, opening at z=0 and closing at 45° so a stock 0.4/0.2
+// profile prints them as first-layer slots, not pocket roofs. Lands
+// between grooves stay on the bed (inner washer + outer rim uncut).
+// Tightening the central M5 keys those lands into paint/drywall paper
+// so collar torque cannot spin the boss. No-op when anti_rotate is off
+// or screw_count=2 (the off-axis pair already pins it, and grooves
+// would cross those shanks).
+module anti_rotate_cut() {
+    if (anti_rotate && screw_count == 1) {
+        for (i = [0 : anti_rotate_n - 1])
+            rotate([0, 0, i * 360 / anti_rotate_n])
+                anti_rotate_groove(anti_rotate_r_in, anti_rotate_r_out);
+    }
+}
+
+// One radial V-groove cutter: opening anti_rotate_w at the wall (z=0),
+// peaked at z=h. Overlaps the inner washer / outer rim by 0.01 only in
+// z (the radial span stops at r_in / r_out) so the rim stays a full
+// first-layer ring.
+module anti_rotate_groove(r_in, r_out) {
+    w = anti_rotate_w;
+    hull() {
+        translate([r_in, -w / 2, -0.02])
+            cube([r_out - r_in, w, 0.02]);
+        translate([r_in, -0.02, anti_rotate_h])
+            cube([r_out - r_in, 0.04, 0.02]);
     }
 }
 
