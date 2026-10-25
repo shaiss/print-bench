@@ -71,12 +71,15 @@ if [ "$got" != "$want" ]; then
 fi
 
 # Drop any user Claude config a prior continue-on-error agent link may have
-# planted under the pinned HOME / CLAUDE_CONFIG_DIR / XDG_CONFIG_HOME. The
-# next secret-bearing claude-code-action parent process loads hooks/settings
-# from these paths; SCRUB/AppArmor only wrap sandboxed children. Recreate
-# empty dirs so Claude starts with a clean control plane each link.
-claude_cfg="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
-xdg_claude="${XDG_CONFIG_HOME:-${HOME}/.config}/claude"
-rm -rf -- "${claude_cfg}" "${xdg_claude}" "${HOME}/.claude"
+# planted. The next secret-bearing claude-code-action parent process loads
+# hooks/settings from these paths; SCRUB/AppArmor only wrap sandboxed
+# children. Allowlist paths under /home/runner only — never honor a planted
+# CLAUDE_CONFIG_DIR / XDG_CONFIG_HOME that could point rm -rf elsewhere.
+runner_home="/home/runner"
+claude_cfg="${runner_home}/.claude"
+xdg_claude="${runner_home}/.config/claude"
+claude_json="${runner_home}/.claude.json"
+rm -rf -- "${claude_cfg}" "${xdg_claude}"
+rm -f -- "${claude_json}"
 mkdir -p -- "${claude_cfg}"
-echo "verify-claude-code-pin: ${bin} sha256 ok; wiped ${claude_cfg} (+ ${xdg_claude})"
+echo "verify-claude-code-pin: ${bin} sha256 ok; wiped ${claude_cfg}, ${xdg_claude}, ${claude_json}"

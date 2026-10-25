@@ -564,6 +564,22 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          CLAUDE_CONFIG_DIR: /home/runner/.claude
+          XDG_CONFIG_HOME: /home/runner/.config
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          NO_PROXY: ""
+          NODE_TLS_REJECT_UNAUTHORIZED: ""
+          NODE_EXTRA_CA_CERTS: ""
+          SSLKEYLOGFILE: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -663,6 +679,22 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          CLAUDE_CONFIG_DIR: /home/runner/.claude
+          XDG_CONFIG_HOME: /home/runner/.config
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          NO_PROXY: ""
+          NODE_TLS_REJECT_UNAUTHORIZED: ""
+          NODE_EXTRA_CA_CERTS: ""
+          SSLKEYLOGFILE: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -748,6 +780,22 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          CLAUDE_CONFIG_DIR: /home/runner/.claude
+          XDG_CONFIG_HOME: /home/runner/.config
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          NO_PROXY: ""
+          NODE_TLS_REJECT_UNAUTHORIZED: ""
+          NODE_EXTRA_CA_CERTS: ""
+          SSLKEYLOGFILE: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -845,6 +893,22 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          CLAUDE_CONFIG_DIR: /home/runner/.claude
+          XDG_CONFIG_HOME: /home/runner/.config
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          NO_PROXY: ""
+          NODE_TLS_REJECT_UNAUTHORIZED: ""
+          NODE_EXTRA_CA_CERTS: ""
+          SSLKEYLOGFILE: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -944,6 +1008,22 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          CLAUDE_CONFIG_DIR: /home/runner/.claude
+          XDG_CONFIG_HOME: /home/runner/.config
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          NO_PROXY: ""
+          NODE_TLS_REJECT_UNAUTHORIZED: ""
+          NODE_EXTRA_CA_CERTS: ""
+          SSLKEYLOGFILE: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
