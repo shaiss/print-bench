@@ -4667,6 +4667,29 @@ EOF
       echo "selftest: $(basename "$wf") agent steps lack system-first PATH (SCRUB pins before ~/.local/bin)" >&2
       exit 1
     }
+    # Every SCRUB agent PATH block must blank NODE_OPTIONS/LD_PRELOAD/…
+    # at process start (GITHUB_ENV plant from a prior continue-on-error link).
+    python3 - "$wf" <<'PY' || exit 1
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines()
+needle = "PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin"
+need = ("LD_PRELOAD: \"\"", "LD_LIBRARY_PATH: \"\"", "LD_AUDIT: \"\"",
+        "BASH_ENV: \"\"", "ENV: \"\"", "NODE_OPTIONS: \"\"", "NODE_PATH: \"\"")
+hits = 0
+for i, line in enumerate(lines):
+    if needle not in line:
+        continue
+    window = "\n".join(lines[i:i+12])
+    missing = [n for n in need if n not in window]
+    if missing:
+        print(f"selftest: {path} SCRUB PATH at line {i+1} missing process-start pins: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+    hits += 1
+if hits != 5:
+    print(f"selftest: {path} expected 5 SCRUB agent PATH blocks with hijack pins, found {hits}", file=sys.stderr)
+    sys.exit(1)
+PY
   done
   # Wrapper is built with absolute /opt node copy + cli.js (never env node,
   # never /usr/local/bin/node — that path is world-writable on GHA).
