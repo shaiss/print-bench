@@ -20,8 +20,9 @@
 # Default bin: /opt/sandbox-runtime/bin/srt
 set -euo pipefail
 export PATH="/usr/bin:/bin"
-RM_BIN="${RM_BIN:-/usr/bin/rm}"
-STAT_BIN="${STAT_BIN:-/usr/bin/stat}"
+# Hardcoded — never honor RM_BIN/etc from GITHUB_ENV.
+RM_BIN="/usr/bin/rm"
+STAT_BIN="/usr/bin/stat"
 
 bin="${1:-/opt/sandbox-runtime/bin/srt}"
 

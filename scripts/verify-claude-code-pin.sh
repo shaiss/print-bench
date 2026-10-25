@@ -10,10 +10,11 @@ set -euo pipefail
 # Pin tooling PATH so a planted ~/.local/bin/{rm,sha256sum,bash} cannot no-op
 # the wipe or forge a checksum. Absolute binaries below are belt-and-suspenders.
 export PATH="/usr/bin:/bin"
-RM_BIN="${RM_BIN:-/usr/bin/rm}"
-MKDIR_BIN="${MKDIR_BIN:-/usr/bin/mkdir}"
-SHA256SUM_BIN="${SHA256SUM_BIN:-/usr/bin/sha256sum}"
-STAT_BIN="${STAT_BIN:-/usr/bin/stat}"
+# Hardcoded — never honor RM_BIN/etc from GITHUB_ENV.
+RM_BIN="/usr/bin/rm"
+MKDIR_BIN="/usr/bin/mkdir"
+SHA256SUM_BIN="/usr/bin/sha256sum"
+STAT_BIN="/usr/bin/stat"
 
 bin="${1:?usage: $0 <bin> <sha256>}"
 want="${2:?usage: $0 <bin> <sha256>}"
