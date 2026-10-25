@@ -4751,11 +4751,10 @@ EOF
     echo "selftest: smoke-claude-scrub-sandbox.sh lacks absolute rg path" >&2
     exit 1
   }
-  # Cipher MED-1 hardened (#876 Bugbot HIGH): verify_claude_N uses the same
-  # deliver-restore discipline — pre-agent digests in start_ref outputs,
-  # pinned RUNNER_TEMP, blanked GIT_*, shared restore-verify-pins.sh helper
-  # (itself digest-checked) that reaps orphans, restores both verify-*.sh into
-  # a fresh mktemp dir, re-checks digest/owner, and execs via /usr/bin/bash.
+  # Cipher MED-1 hardened (#876): verify_claude_N uses deliver-restore
+  # discipline plus the Bugbot MEDIUM class close — uid-based orphan reap
+  # (not cwd/cmdline heuristics), fd+unlink helper/verify exec (no stable
+  # path TOCTOU), and a fresh mktemp CLAUDE_CONFIG_DIR per keyed ship.
   [ -f "${repo_root}/scripts/restore-verify-pins.sh" ] || {
     echo "selftest: scripts/restore-verify-pins.sh is missing" >&2
     exit 1
@@ -4764,6 +4763,19 @@ EOF
     echo "selftest: restore-verify-pins.sh does not reap agent orphans" >&2
     exit 1
   }
+  # Uid/ancestor reap — must NOT key off cwd/cmdline/in_tree/mentions.
+  grep -Fq "/^Uid:/" "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not reap by process uid" >&2
+    exit 1
+  }
+  grep -q 'is_ancestor' "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not preserve the step ancestor chain" >&2
+    exit 1
+  }
+  if grep -qE 'in_tree=|mentions=' "${repo_root}/scripts/restore-verify-pins.sh"; then
+    echo "selftest: restore-verify-pins.sh still uses cwd/cmdline reap heuristics" >&2
+    exit 1
+  fi
   grep -q 'mktemp -d "${RUNNER_TEMP}/verify-pins.XXXXXX"' \
     "${repo_root}/scripts/restore-verify-pins.sh" || {
     echo "selftest: restore-verify-pins.sh does not restore into a fresh mktemp dir" >&2
@@ -4778,9 +4790,20 @@ EOF
     echo "selftest: restore-verify-pins.sh does not check restored-file owner" >&2
     exit 1
   }
-  grep -q '/usr/bin/bash "${workdir}/verify-claude-code-pin.sh"' \
+  # Verify scripts exec via /dev/fd after unlink (TOCTOU close).
+  grep -q '/usr/bin/bash "/dev/fd/${VERIFY_CLAUDE_FD}"' \
     "${repo_root}/scripts/restore-verify-pins.sh" || {
-    echo "selftest: restore-verify-pins.sh does not invoke verify-claude-code-pin via /usr/bin/bash" >&2
+    echo "selftest: restore-verify-pins.sh does not exec verify-claude-code-pin via /dev/fd" >&2
+    exit 1
+  }
+  grep -q 'echo "claude_config_dir=${cfg_dir}" >> "$GITHUB_OUTPUT"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not publish claude_config_dir to GITHUB_OUTPUT" >&2
+    exit 1
+  }
+  grep -q 'mktemp -d "${RUNNER_TEMP}/claude-cfg.XXXXXX"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not allocate a fresh claude-cfg dir" >&2
     exit 1
   }
   for wf in "$burn" "$workflow"; do
@@ -4822,6 +4845,24 @@ EOF
       echo "selftest: $(basename "$wf") expected 5 VERIFY_SRT_SHA256 env pins, found ${srt_digest_n}" >&2
       exit 1
     }
+    # No stable helper path — TOCTOU class.
+    if grep -q 'restore_tmp="${RUNNER_TEMP}/restore-verify-pins.sh"' "$wf"; then
+      echo "selftest: $(basename "$wf") still restores helper to a stable RUNNER_TEMP path" >&2
+      exit 1
+    fi
+    fd_exec_n="$(grep -c '/usr/bin/bash "/dev/fd/${helper_fd}"' "$wf" || true)"
+    [ "$fd_exec_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 /dev/fd helper execs, found ${fd_exec_n}" >&2
+      exit 1
+    }
+    # Every keyed ship/run must take CLAUDE_CONFIG_DIR from the preceding
+    # verify step's fresh mktemp output — never the shared /home/runner/.claude.
+    for n in 1 2 3 4 5; do
+      grep -q "CLAUDE_CONFIG_DIR: \${{ steps.verify_claude_${n}.outputs.claude_config_dir }}" "$wf" || {
+        echo "selftest: $(basename "$wf") ship/run link ${n} does not use verify_claude_${n} claude_config_dir" >&2
+        exit 1
+      }
+    done
     # Every verify_claude_N step must pin RUNNER_TEMP and blank GIT_* the
     # same way the deliver/bundle step does (step env wins over GITHUB_ENV).
     python3 - "$wf" <<'PY' || exit 1
@@ -4845,8 +4886,8 @@ for i, line in enumerate(lines):
     if "id: verify_claude_" not in line:
         continue
     hits += 1
-    # env (~45 lines) + restore/digest/exec (~55 lines); keep headroom.
-    window = "\n".join(lines[i:i+130])
+    # env (~45 lines) + restore/digest/fd-exec (~60 lines); keep headroom.
+    window = "\n".join(lines[i:i+140])
     missing = [n for n in need if n not in window]
     if missing:
         print(
@@ -4869,10 +4910,17 @@ for i, line in enumerate(lines):
             file=sys.stderr,
         )
         sys.exit(1)
-    if '/usr/bin/bash "$restore_tmp"' not in window:
+    if '/usr/bin/bash "/dev/fd/${helper_fd}"' not in window:
         print(
             f"selftest: {path} verify step at line {i+1} does not exec helper "
-            "via /usr/bin/bash",
+            "via /dev/fd",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if 'exec {helper_fd}<' not in window or 'rm -f "$blob_tmp"' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not fd-hold + "
+            "unlink the helper before exec",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -4906,6 +4954,7 @@ PY
     # Every SCRUB agent PATH block must blank NODE_OPTIONS/LD_PRELOAD/…
     # at process start (GITHUB_ENV plant from a prior continue-on-error link).
     python3 - "$wf" <<'PY' || exit 1
+import re
 import sys
 path = sys.argv[1]
 lines = open(path).read().splitlines()
@@ -4915,8 +4964,10 @@ need = ("LD_PRELOAD: \"\"", "LD_LIBRARY_PATH: \"\"", "LD_AUDIT: \"\"",
         "HTTP_PROXY: \"\"", "HTTPS_PROXY: \"\"", "ALL_PROXY: \"\"",
         "NODE_TLS_REJECT_UNAUTHORIZED: \"\"", "NODE_EXTRA_CA_CERTS: \"\"",
         "SSLKEYLOGFILE: \"\"", "HOME: /home/runner",
-        "CLAUDE_CONFIG_DIR: /home/runner/.claude",
         "XDG_CONFIG_HOME: /home/runner/.config")
+cfg_re = re.compile(
+    r"CLAUDE_CONFIG_DIR: \$\{\{ steps\.verify_claude_[1-5]\.outputs\.claude_config_dir \}\}"
+)
 hits = 0
 for i, line in enumerate(lines):
     if needle not in line:
@@ -4927,6 +4978,20 @@ for i, line in enumerate(lines):
     missing = [n for n in need if n not in window]
     if missing:
         print(f"selftest: {path} SCRUB PATH at line {i+1} missing process-start pins: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+    if "CLAUDE_CONFIG_DIR: /home/runner/.claude" in window:
+        print(
+            f"selftest: {path} SCRUB PATH at line {i+1} still pins shared "
+            "/home/runner/.claude (must use verify_claude_N output)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not cfg_re.search(window):
+        print(
+            f"selftest: {path} SCRUB PATH at line {i+1} missing per-link "
+            "claude_config_dir from verify_claude_N",
+            file=sys.stderr,
+        )
         sys.exit(1)
     hits += 1
 if hits != 5:
