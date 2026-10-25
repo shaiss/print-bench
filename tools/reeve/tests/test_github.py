@@ -96,9 +96,13 @@ def _responses():
          "created_at": "2026-08-11T05:00:00Z", "updated_at": "2026-08-14T05:00:00Z",
          "html_url": "https://github.com/o/r/issues/743"},
     ]
+    # Same-host next only — _paged refuses off-host Link URLs (#904).
+    issues_page2_url = (
+        f"{github.API_ROOT}/repos/{REPO}/issues?state=open&per_page=100&page=2"
+    )
     responses[f"{github.API_ROOT}/repos/{REPO}/issues?state=open&per_page=100"] = (
-        issues_page1, '<https://next.example/issues2>; rel="next"')
-    responses["https://next.example/issues2"] = (issues_page2, "")
+        issues_page1, f'<{issues_page2_url}>; rel="next"')
+    responses[issues_page2_url] = (issues_page2, "")
 
     responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
         _lock("🚢 SHIP-LOCK claimed by run 1\n\n<!-- design-run-ship-lock:v1 -->", "2026-08-10T05:23:00Z"),
@@ -280,16 +284,29 @@ def test_missing_workflow_runs_key_raises(monkeypatch):
 
 def test_pagination_cap_raises_instead_of_truncating(monkeypatch):
     responses = _responses()
+    # Same-host next URLs only — an off-host Link is refused before the cap
+    # (see test_paged_refuses_off_host_next).
+    next_hdr = f'<{github.API_ROOT}/repos/{REPO}/issues?state=open&page=x>; rel="next"'
 
     def endless(url, token):
-        if "/issues?" in url or url.startswith("https://next.example/"):
-            return [], '<https://next.example/again>; rel="next"'
+        if "/issues?" in url:
+            return [], next_hdr
         return responses[url]
 
     monkeypatch.setattr(github, "_get", endless)
     monkeypatch.setattr(github, "_MAX_PAGES", 3)
     with pytest.raises(RuntimeError, match="more than 3 pages"):
         github.gather_run_health(REPO, "tok")
+
+
+def test_paged_refuses_off_host_next(monkeypatch):
+    """Pager must not follow a Link next URL off api.github.com (#904)."""
+    def _get(url, token):
+        return [{"id": 1}], '<https://evil.example/page=2>; rel="next"'
+
+    monkeypatch.setattr(github, "_get", _get)
+    with pytest.raises(ValueError, match="off API host"):
+        github._paged(f"{github.API_ROOT}/repos/{REPO}/issues?per_page=100", "tok")
 
 
 def test_non_list_page_raises_instead_of_extending(monkeypatch):

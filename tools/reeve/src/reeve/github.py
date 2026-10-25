@@ -152,6 +152,20 @@ def _get(url: str, token: str) -> tuple[Any, str]:
         return json.load(resp), resp.headers.get("Link", "")
 
 
+def _require_api_host(url: str) -> None:
+    """Refuse a URL whose scheme+host differ from :data:`API_ROOT`.
+
+    Pagination follows ``Link: rel="next"`` with the same Bearer token; an
+    off-host next URL must not be requested (Cipher #898 LOW / issue #904).
+    """
+    parsed = urllib.parse.urlparse(url)
+    root = urllib.parse.urlparse(API_ROOT)
+    if (parsed.scheme, parsed.netloc) != (root.scheme, root.netloc):
+        raise ValueError(
+            f"refusing to follow Link next URL off API host {API_ROOT!r}: {url!r}"
+        )
+
+
 def _paged(url: str, token: str) -> list[Any]:
     """Every item from ``url``, following Link rel="next" up to the cap."""
     items: list[Any] = []
@@ -174,7 +188,12 @@ def _paged(url: str, token: str) -> list[Any]:
             )
         items.extend(body)
         match = _LINK_NEXT_RE.search(link)
-        next_url = match.group(1) if match else None
+        if match:
+            candidate = match.group(1)
+            _require_api_host(candidate)
+            next_url = candidate
+        else:
+            next_url = None
     return items
 
 
