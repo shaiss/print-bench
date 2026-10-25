@@ -444,8 +444,8 @@ def exclusion_reason(
     decision_label: str = DECISION_PENDING_LABEL,
     decline_cooldown_hours: float = DECLINE_COOLDOWN_HOURS,
     defer_cooldown_hours: float = DEFER_COOLDOWN_HOURS,
-    burn_cooldown_hours: float = BURN_COOLDOWN_HOURS,
     branch_ahead_by: Optional[dict[str, Any]] = None,
+    burn_cooldown_hours: float = BURN_COOLDOWN_HOURS,
 ) -> Optional[str]:
     """Why this issue is *not* eligible, or ``None`` if it is.
 
