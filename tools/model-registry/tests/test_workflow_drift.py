@@ -16,9 +16,12 @@ The load-bearing check parses each reviewer job's ordered ship steps and asserts
   `ANTHROPIC_API_KEY` (the #298 Anthropic tail); swapping one is caught.
   (OpenRouter free-tier models are forbidden on the review chain — Cipher
   hold on #678 — and the free-tail allowlist test enforces that.)
-* the step's `ANTHROPIC_BASE_URL` matches the link's `base_url` exactly — present
-  and equal for Z.AI (the Anthropic-compatible endpoint), absent for Anthropic —
-  so pointing a slot at the wrong endpoint is caught.
+* the step's `ANTHROPIC_BASE_URL` matches the link's `base_url` — present and
+  equal for Z.AI (the Anthropic-compatible endpoint); for Anthropic's native
+  endpoint (registry `base_url` empty) the step may omit the key **or** pin
+  `https://api.anthropic.com` explicitly (needed on continue-on-error chain
+  tails to override a prior GLM `$GITHUB_ENV` plant) — so pointing a slot at
+  the wrong endpoint is still caught.
 
 Everything is *derived from the registry*, never restated as a hand-copied constant:
 the test reads the YAML and compares it against what the registry resolves to. A
@@ -42,6 +45,7 @@ from typing import NamedTuple
 import pytest
 
 from model_registry.registry import Registry
+from model_registry.smoke import NATIVE_BASE_URL
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "auto-review.yml"
@@ -66,6 +70,21 @@ REVIEWER_JOBS = ("jane-review", "drik-review", "pm-triage", "design-coach")
 # valid inside the `jobs:` section (elsewhere — e.g. `on:` → `pull_request:` — a
 # 2-space bare key is not a job), so callers slice from `jobs:` first.
 _JOB_HEADER = re.compile(r"^  ([a-z][a-z0-9-]*):[ \t]*$", re.MULTILINE)
+
+
+def _base_urls_match(step_base: str, registry_base: str) -> bool:
+    """True when a ship step's ANTHROPIC_BASE_URL matches the registry endpoint.
+
+    Empty registry `base_url` means Anthropic's native endpoint. A workflow may
+    omit `ANTHROPIC_BASE_URL` (parsed as '') or pin `NATIVE_BASE_URL` explicitly
+    — the latter is required on continue-on-error chain tails so a prior GLM
+    link's `$GITHUB_ENV` plant cannot redirect the Anthropic API key. Empty
+    string is NOT treated as native at process start (nullish coalescing keeps
+    it), so the pin must be the real URL.
+    """
+    if registry_base in ("", NATIVE_BASE_URL) and step_base in ("", NATIVE_BASE_URL):
+        return True
+    return step_base == registry_base
 
 
 def _workflow_text() -> str:
@@ -241,9 +260,9 @@ def test_every_ship_step_is_pinned_to_its_registry_link():
             assert step["secret"] == link.secret, (
                 f"{job} slot {link.position}: wires secrets.{step['secret']} but the "
                 f"registry routes this position to secrets.{link.secret}.")
-            # The endpoint must match exactly: the Z.AI base_url for a Z.AI link,
-            # absent (empty) for Anthropic's native endpoint.
-            assert step["base_url"] == link.base_url, (
+            # The endpoint must match: the Z.AI base_url for a Z.AI link;
+            # absent or NATIVE_BASE_URL for Anthropic's native endpoint.
+            assert _base_urls_match(step["base_url"], link.base_url), (
                 f"{job} slot {link.position}: ANTHROPIC_BASE_URL is "
                 f"{step['base_url']!r} but the registry endpoint is {link.base_url!r}.")
     assert checked == list(REVIEWER_JOBS)
@@ -540,7 +559,7 @@ def _assert_oracle_chain_pinned(text: str, chain: str, step_id: str) -> None:
         assert step["secret"] == link.secret, (
             f"oracle {chain} slot {link.position}: wires secrets.{step['secret']} "
             f"but the registry routes this position to secrets.{link.secret}.")
-        assert step["base_url"] == link.base_url, (
+        assert _base_urls_match(step["base_url"], link.base_url), (
             f"oracle {chain} slot {link.position}: ANTHROPIC_BASE_URL is "
             f"{step['base_url']!r} but the registry endpoint is {link.base_url!r}.")
         # Punch-list item #6: the ship step must not shed its narrowed surface.
@@ -1784,7 +1803,7 @@ def _step_provider(reg: Registry, step: dict, where: str) -> str:
         f"{where}: a ship step's secret {named} matches no single registry "
         f"provider (matches: {providers})")
     provider = providers[0]
-    assert step["base_url"] == bases_by_provider[provider], (
+    assert _base_urls_match(step["base_url"], bases_by_provider[provider]), (
         f"{where}: a ship step for provider {provider!r} carries "
         f"ANTHROPIC_BASE_URL {step['base_url']!r} but the registry endpoint is "
         f"{bases_by_provider[provider]!r}")

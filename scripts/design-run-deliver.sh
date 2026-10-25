@@ -4691,12 +4691,13 @@ for i, line in enumerate(lines):
 if hits != 5:
     print(f"selftest: {path} expected 5 SCRUB agent PATH blocks with hijack pins, found {hits}", file=sys.stderr)
     sys.exit(1)
-# Anthropic tail (links 4–5): blank BASE_URL + AUTH_TOKEN so a prior GLM
-# GITHUB_ENV plant cannot redirect the Anthropic API key.
-blank_base = sum(1 for line in lines if line.strip() == 'ANTHROPIC_BASE_URL: ""')
+# Anthropic tail (links 4–5): pin native BASE_URL + blank AUTH_TOKEN so a
+# prior GLM GITHUB_ENV plant cannot redirect the Anthropic API key.
+native = sum(1 for line in lines
+             if line.strip() == 'ANTHROPIC_BASE_URL: https://api.anthropic.com')
 blank_auth = sum(1 for line in lines if line.strip() == 'ANTHROPIC_AUTH_TOKEN: ""')
-if blank_base != 2:
-    print(f"selftest: {path} expected 2 Anthropic-tail ANTHROPIC_BASE_URL blanks, found {blank_base}", file=sys.stderr)
+if native != 2:
+    print(f"selftest: {path} expected 2 Anthropic-tail native ANTHROPIC_BASE_URL pins, found {native}", file=sys.stderr)
     sys.exit(1)
 if blank_auth != 2:
     print(f"selftest: {path} expected 2 Anthropic-tail ANTHROPIC_AUTH_TOKEN blanks, found {blank_auth}", file=sys.stderr)
