@@ -15,7 +15,7 @@ coupon-tunable fits) serves that.
 |---|---|---|---|---|
 | N1 | Lug geometry tracks the real 2020 slot: mouth / cavity / lip | 6.0 / 12.0×8.0 / 2.0 mm | NopSCADlib E2020 (slot ground truth, via extrusion-shelf-bracket) | a measured rail disagrees with E2020 (then fix the source, not this design) |
 | N2 | Neck slides in the mouth with coupon-tuned clearance | 0.15 mm/side | family coupon value; user tunes ±0.05 on the coupon | a field test shows the family value wrong for this blade |
-| N3 | Spool bore fit: stub under bore by coupon-swept clearance, stub ≥ spool width | 0.6 mm (sweep 0.3–0.9); 68 ≥ 66 mm | assumed 1 kg spool defaults (bore 52, width 66) | user's spool measurably outside (they `-D`, we don't redesign) |
+| N3 | Spool bore fit: stub under bore by coupon-swept clearance, stub ≥ spool width | 0.6 mm (sweep 0.3–0.9); 71 ≥ 66 mm (covers 66–71 range) | assumed 1 kg spool defaults (bore 52, width 66) | user's spool measurably outside (they `-D`, we don't redesign) |
 | N4 | Standoff: rail face to spool | ≥25 mm (built 28) | brief #669 | the brief's number changes |
 | N5 | Zero hardware, zero bearings | 0 vitamins | brief #669 | the owner explicitly reopens it (bearing variant is backlog B1, not v1) |
 | N6 | Support-free print, walls ≥3 perimeters | trunk ≤38°, bridges ≤9.15 mm, walls ≥1.2 mm | repo FDM bar + printcheck (peg 92/100, only the intentional bridge warning) | printcheck regresses or a field print needs supports |

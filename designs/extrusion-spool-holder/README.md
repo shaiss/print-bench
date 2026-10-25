@@ -49,7 +49,7 @@ spools and standard European square-slot 2020):
 | `slot_fit_tol` | 0.15 mm | slide clearance per side of the lug neck in the slot mouth; 0.05 steps |
 | `slot_mouth` | 6.0 mm | your extrusion's slot width (6.2 variants exist) |
 | `standoff` | 28 mm | rail face to spool seat (brief minimum 25) |
-| `axle_len` | 68 mm | stub length past the shoulder — keep ≥ your spool's width |
+| `axle_len` | 71 mm | stub length past the shoulder — keep ≥ your spool's width (covers 66–71 mm flanges) |
 | `shoulder_d` | 58 mm | seat ring OD; the inboard keeper the spool cannot pass |
 
 All parameters sit at the top of `extrusion-spool-holder.scad` in

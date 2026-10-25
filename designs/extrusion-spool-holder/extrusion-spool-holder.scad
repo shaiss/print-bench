@@ -76,8 +76,9 @@ spool_od = 200;
 // coupon-tuned; 0.6 turns freely without wobble on a bore-true spool.
 bore_clearance = 0.6;
 // Axle stub length past the seat shoulder (mm) — must seat past the
-// spool's centre of mass (>= spool width).
-axle_len = 68;
+// spool's centre of mass (>= spool width). Default covers the documented
+// 66–71 mm flange-to-flange range (NOTES).
+axle_len = 71;
 // Axle stub wall thickness (mm) — the stub is a hollow tube so a 1 kg
 // spool does not cost a 150 g peg
 axle_wall = 5;
@@ -204,8 +205,9 @@ module coupon() {
     blade();
     translate([lug_x0 - 3, -7, z_plate])
         cube([lug_span + 6, 14, plate_t]);
-    // axle rings + one label bar island beside them (detached, so
-    // nothing obstructs the ring bores when you trial-fit a spool)
+    // axle rings with the clearance value sunk into each ring's TOP face
+    // (non-fit surface — OD is the bore trial, ID rides the stub). Labels
+    // travel with the ring when a user breaks one off to test in a spool.
     for (i = [0:2]) {
         x = lug_span + 42 + i * 62;
         translate([x, 0, 0])
@@ -214,17 +216,12 @@ module coupon() {
                                    chamfer1 = 0.6, chamfer2 = 0.6);
                 translate([0, 0, -0.5])
                     cylinder(d = axle_bore_d, h = 11);
-            }
-    }
-    translate([lug_span + 42 - 12, 30, 0])
-        difference() {
-            cube([62 * 2 + 24, 12, 2]);
-            for (i = [0:2])
-                translate([12 + i * 62, 6, 1.4])
+                translate([0, 0, 10 - 0.6])
                     linear_extrude(0.7)
                         text(str(sweep[i]), size = 5, halign = "center",
                              valign = "center");
-        }
+            }
+    }
 }
 
 // The extrusion as the blade sees it, in the print pose: the rail-face

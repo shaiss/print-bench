@@ -17,7 +17,7 @@ hardware, zero bearings. Brief: issue #669. Style: `workshop-utility`.
 | Lug slide clearance | 0.15 mm/side | given — family coupon-tuned (extrusion-shelf-bracket); tune on the coupon |
 | Standoff, rail face → spool | ≥25 mm | given — brief minimum; built 28 |
 | Spool bore | Ø52 mm | assumed default (Prusament/Polymaker/eSUN 1 kg); 55 / 30 are `-D` overrides |
-| Spool width between flanges | 66 mm | assumed (66–71 range; stub 68 covers it) |
+| Spool width between flanges | 66 mm | assumed (66–71 range; stub 71 covers it) |
 | Spool OD | Ø200 mm | assumed (sets the moment; informational) |
 | Bore diametral clearance | 0.6 mm | assumed default; coupon sweep 0.3–0.9 |
 | Load | 10 N at ~64 mm | derived — 1 kg spool at its COM |
@@ -73,7 +73,7 @@ fit over weeks — that is the standing field-test question.
 | engagement depth | `head_depth = 3.5` | 3.5 (plate underside plane) |
 | standoff ≥25 | `standoff = 28` | 28.0 (rail plane 3.5 → shoulder 31.5) |
 | spool bore Ø52 | `axle_d = 51.4` | Ø51.4 (Ø41.4 through-bore) |
-| stub past spool width | `axle_len = 68 ≥ spool_w 66` | 68.0 (z 34.5 → 102.5) |
+| stub past spool width | `axle_len = 71 ≥ spool_w 66` (covers 71 mm max) | 71.0 (z 34.5 → 105.5) |
 | keeper shoulder | `shoulder_d = 58` | Ø58 (x −6…52) |
 | overall | — | 58 × 58 × 102.5, 1 body, 1356 facets |
 
