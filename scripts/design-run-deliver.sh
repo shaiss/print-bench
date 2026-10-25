@@ -4680,7 +4680,9 @@ hits = 0
 for i, line in enumerate(lines):
     if needle not in line:
         continue
-    window = "\n".join(lines[i:i+12])
+    # 20 lines covers PATH + comment + LD/NODE pins (+ Anthropic BASE_URL
+    # blanks on the tail links). Keep this ahead of the pin list length.
+    window = "\n".join(lines[i:i+20])
     missing = [n for n in need if n not in window]
     if missing:
         print(f"selftest: {path} SCRUB PATH at line {i+1} missing process-start pins: {', '.join(missing)}", file=sys.stderr)
@@ -4688,6 +4690,16 @@ for i, line in enumerate(lines):
     hits += 1
 if hits != 5:
     print(f"selftest: {path} expected 5 SCRUB agent PATH blocks with hijack pins, found {hits}", file=sys.stderr)
+    sys.exit(1)
+# Anthropic tail (links 4–5): blank BASE_URL + AUTH_TOKEN so a prior GLM
+# GITHUB_ENV plant cannot redirect the Anthropic API key.
+blank_base = sum(1 for line in lines if line.strip() == 'ANTHROPIC_BASE_URL: ""')
+blank_auth = sum(1 for line in lines if line.strip() == 'ANTHROPIC_AUTH_TOKEN: ""')
+if blank_base != 2:
+    print(f"selftest: {path} expected 2 Anthropic-tail ANTHROPIC_BASE_URL blanks, found {blank_base}", file=sys.stderr)
+    sys.exit(1)
+if blank_auth != 2:
+    print(f"selftest: {path} expected 2 Anthropic-tail ANTHROPIC_AUTH_TOKEN blanks, found {blank_auth}", file=sys.stderr)
     sys.exit(1)
 PY
   done

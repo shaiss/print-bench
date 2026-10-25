@@ -875,6 +875,11 @@ jobs:
           ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Anthropic tail: override a prior GLM link's GITHUB_ENV plant
+          # of ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN so the Anthropic
+          # API key cannot be sent to a planted endpoint.
+          ANTHROPIC_BASE_URL: ""
+          ANTHROPIC_AUTH_TOKEN: ""
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -950,6 +955,11 @@ jobs:
           ENV: ""
           NODE_OPTIONS: ""
           NODE_PATH: ""
+          # Anthropic tail: override a prior GLM link's GITHUB_ENV plant
+          # of ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN so the Anthropic
+          # API key cannot be sent to a planted endpoint.
+          ANTHROPIC_BASE_URL: ""
+          ANTHROPIC_AUTH_TOKEN: ""
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
