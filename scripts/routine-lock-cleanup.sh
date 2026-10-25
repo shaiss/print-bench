@@ -42,9 +42,13 @@
 #              during the job window must not mint a stop. An older stop
 #              still sitting as the latest comment does not vouch for a
 #              later walk that posted nothing.
-#   dead       anything else — withdrawal posted, death counted, escalation
-#              at the threshold — regardless of the exit code passed in,
-#              which is carried in the withdrawal body as a diagnostic only
+#   dead       anything else — withdrawal posted (when a lock was active),
+#              a 🚢 BURN-COOLDOWN comment posted so the picker skips the
+#              issue for a window (issue #923; the #885 spin), death
+#              counted, escalation at the threshold — regardless of the
+#              exit code passed in, which is carried in the withdrawal /
+#              cooldown body as a diagnostic only. delivered and declined
+#              stay false so the red gate still fires.
 # The workflow gates its red-on-death and provider-triage steps on the
 # `delivered`/`declined` outputs, never on the walk's outcome string.
 #
@@ -103,6 +107,14 @@ ${LOCK_HTML_MARKER}"
 # be reworded, this prefix may not (old comments would stop counting).
 DEATH_PREFIX='🚢 SHIP-LOCK WITHDRAWN — scheduled run died'
 DECISION_LABEL='needs-decision'
+# Posted when a ship walk recorded neither delivered nor declined (issue
+# #923): the picker skips the issue for BURN_COOLDOWN_HOURS so a claimless
+# success cannot monopolize every hourly firing (#885), while delivered/
+# declined stay false so the settle job still goes red. First-line marker
+# must stay in sync with tools/backlog-burn select.py's BURN_COOLDOWN_MARKER.
+COOLDOWN_MARKER='🚢 BURN-COOLDOWN'
+COOLDOWN_HTML_MARKER='<!-- burn-cooldown:v1 -->'
+BURN_COOLDOWN_HOURS=24
 
 # jq prelude: first non-blank line of a body, stripped — the line
 # backlog_burn.select._first_line classifies on. is_lock requires the HTML
@@ -402,6 +414,16 @@ conclude() {  # delivered declined withdrawn escalated summary — the one exit 
   exit 0
 }
 
+# Post the picker cooldown for a neither-delivered-nor-declined death.
+# Does NOT set declined=true — the red gate must still fire (AC3 / #923).
+post_burn_cooldown() {
+  local body
+  body="$(printf '%s\n\n%s\n\n- routine: %s\n- agent outcome (diagnostic only — the disposition is derived from the artifacts above): %s\n- run: %s\n\nNeither delivered nor declined. This issue is on a %s h burn cooldown so the next firing picks other work; the job still goes red so the death stays visible.' \
+    "$COOLDOWN_MARKER" "$COOLDOWN_HTML_MARKER" "$ROUTINE" "$OUTCOME" "$RUN_URL" "$BURN_COOLDOWN_HOURS")"
+  gh_api --method POST "/repos/$REPO/issues/$ISSUE/comments" -f body="$body" >/dev/null
+  echo "::notice::posted $COOLDOWN_MARKER on #$ISSUE (${BURN_COOLDOWN_HOURS} h picker cooldown; red-on-death still fires)"
+}
+
 # ---- live flow ------------------------------------------------------------
 
 run_live() {
@@ -479,18 +501,24 @@ run_live() {
     # No lock this run could have left (never claimed, or the latest lock is
     # one of our own death-withdrawal notices from an earlier firing). No
     # withdrawal, no death to count — but NOT delivered and NOT declined: the
-    # workflow's red gate reads those and decides.
+    # workflow's red gate reads those and decides. Post a burn-cooldown so
+    # the picker skips this issue for a window (#923 / #885 spin) instead of
+    # re-selecting it every hour with nothing recorded.
     echo "::notice::no active SHIP-LOCK on #$ISSUE — nothing to release"
-    conclude false false false false "no-op (no active lock)"
+    post_burn_cooldown
+    conclude false false false false "no-op (no active lock; burn-cooldown posted)"
   fi
 
   # 5. Dead — regardless of the exit code passed in. Withdraw: a new
-  # comment, never a deletion: timestamps are the record.
+  # comment, never a deletion: timestamps are the record. Also post the
+  # burn-cooldown so a withdrawn claim does not get re-picked immediately
+  # (#923) — declined stays false so red-on-death still fires.
   local body
   body="$(printf '%s\n\n- routine: %s\n- agent outcome (diagnostic only — the disposition is derived from the artifacts above): %s\n- run: %s\n\nThe claim above is released (not deleted — timestamps are the record) so the next firing can select this issue again.' \
     "$WITHDRAW_LINE" "$ROUTINE" "$OUTCOME" "$RUN_URL")"
   gh_api --method POST "/repos/$REPO/issues/$ISSUE/comments" -f body="$body" >/dev/null
   echo "::notice::withdrew a dead $ROUTINE run's SHIP-LOCK on #$ISSUE (agent outcome: $OUTCOME)"
+  post_burn_cooldown
 
   # 6. Escalate a repeat offender to a human (docs/decision-gate.md). Counted
   # from the pre-POST snapshot plus this run's own withdrawal, so the Nth
@@ -499,7 +527,7 @@ run_live() {
   deaths="$(count_dead_withdrawals <<<"$comments")"
   total=$(( deaths + 1 ))
   if ! should_escalate "$deaths" "$ESCALATE_AFTER"; then
-    conclude false false true false "withdrew a dead run's SHIP-LOCK (death $total of $ESCALATE_AFTER before escalation)"
+    conclude false false true false "withdrew a dead run's SHIP-LOCK (death $total of $ESCALATE_AFTER before escalation; burn-cooldown posted)"
   fi
 
   # Ensure the label exists — the ensure-label idiom from the decision gate:
@@ -1006,6 +1034,8 @@ STUB
   grep -qx 'declined=false' "$tmp/dead-out" || st_fail "the dead case did not emit declined=false"
   grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/dead-postlog" \
     || st_fail "the dead case did not post the withdrawal comment"
+  grep "$COOLDOWN_MARKER" "$tmp/dead-postlog" >/dev/null \
+    || st_fail "the dead case did not post the burn-cooldown comment"
 
   # Row 2: exit 0 with a corroborating branch → delivered, nothing posted.
   # The branch carries unmerged work: its compare against the default branch
@@ -1127,8 +1157,9 @@ STUB
   grep -qx 'withdrawn=false' "$tmp/declfree-out" || st_fail "the #675 shape did not emit withdrawn=false"
   no_posts declfree
 
-  # Row 3c's negative controls, each the all-false no-op the red gate fails
-  # on (claimless, so there is no lock to withdraw and nothing is posted):
+  # Row 3c's negative controls, each the all-false disposition the red gate
+  # fails on (claimless, so there is no lock to withdraw) plus a
+  # burn-cooldown post (#923) so the picker skips:
   #   declold   — the same thread, but this firing's window opened after the
   #               last DECLINED: a previous firing's stop, and this run
   #               posted nothing.
@@ -1148,7 +1179,8 @@ STUB
     for kv in delivered=false declined=false withdrawn=false; do
       grep -qx "$kv" "$tmp/$name-out" || st_fail "the claimless-decline control '$name' did not emit $kv"
     done
-    no_posts "$name"
+    grep "$COOLDOWN_MARKER" "$tmp/$name-postlog" >/dev/null \
+      || st_fail "the claimless-decline control '$name' did not post the burn-cooldown"
   done
 
   # Row 4 (#690's exact shape): exit 0, the walk's DEFERRED as the latest
@@ -1177,7 +1209,8 @@ STUB
 
   # Security control: the same window, but the commenter is some other User.
   # declined stays false. Claimless, so there is no lock to withdraw — the
-  # all-false no-op, and red-on-death is not skipped.
+  # all-false disposition reaches red-on-death, and a burn-cooldown is
+  # posted so the picker skips (#923).
   e2e_fix deferatk comments '[{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "attacker", "type": "User"}}]'
   e2e_fix deferatk branches '[]'
   e2e_fix deferatk pulls '[]'
@@ -1185,7 +1218,8 @@ STUB
   grep -qx 'declined=false' "$tmp/deferatk-out" || st_fail "an outsider claimless DEFERRED minted a decline (declined=true)"
   grep -qx 'delivered=false' "$tmp/deferatk-out" || st_fail "the outsider claimless case did not emit delivered=false"
   grep -qx 'withdrawn=false' "$tmp/deferatk-out" || st_fail "the outsider claimless case did not emit withdrawn=false"
-  no_posts deferatk
+  grep "$COOLDOWN_MARKER" "$tmp/deferatk-postlog" >/dev/null \
+    || st_fail "the outsider claimless death did not post the burn-cooldown"
 
   # Same control on the claimed branch: an outsider's DEFERRED after the
   # lock is not a stop, so the active lock is a death and gets withdrawn.
@@ -1198,11 +1232,11 @@ STUB
   grep -q -- '--method POST /repos/o/r/issues/1/comments' "$tmp/deferatklock-postlog" \
     || st_fail "the outsider-defer claimed case did not post the withdrawal comment"
 
-  # Row 4's negative control (AC1's other direction): the same claimless
-  # fixture WITHOUT the DEFERRED comment stays the all-false no-op — no
-  # branch, no PR, no stop marker of any kind — so delivered=false AND
-  # declined=false reach the red gate and the job fails. A claimless walk
-  # that posted nothing is still a death.
+  # Row 4's negative control (AC1's other direction + #923): the same
+  # claimless fixture WITHOUT the DEFERRED comment is still a death —
+  # delivered=false AND declined=false reach the red gate — AND posts a
+  # BURN-COOLDOWN so the picker skips the issue instead of re-picking it
+  # every hour (#885). declined stays false: cooldown is for picking only.
   e2e_fix nodefer comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z"}]'
   e2e_fix nodefer branches '[]'
   e2e_fix nodefer pulls '[]'
@@ -1210,12 +1244,14 @@ STUB
   grep -qx 'declined=false' "$tmp/nodefer-out" || st_fail "a claimless walk with no stop marker wrongly emitted declined=true"
   grep -qx 'delivered=false' "$tmp/nodefer-out" || st_fail "the no-defer control did not emit delivered=false"
   grep -qx 'withdrawn=false' "$tmp/nodefer-out" || st_fail "the no-defer control did not emit withdrawn=false"
-  no_posts nodefer
+  grep "$COOLDOWN_MARKER" "$tmp/nodefer-postlog" >/dev/null \
+    || st_fail "the claimless no-stop death (#923) did not post the burn-cooldown"
 
   # Row 4's other negative control: a later firing, success, posts no
-  # comment, and the previous firing's DEFERRED is still the latest
-  # comment. The window opened after that comment, so it is not this
-  # firing's defer — declined stays false and red-on-death is not skipped.
+  # stop, and the previous firing's DEFERRED is still the latest comment.
+  # The window opened after that comment, so it is not this firing's defer
+  # — declined stays false, red-on-death fires, and a fresh burn-cooldown
+  # is posted so the picker moves on (#923).
   e2e_fix priordefer comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix priordefer branches '[]'
   e2e_fix priordefer pulls '[]'
@@ -1223,7 +1259,8 @@ STUB
   grep -qx 'declined=false' "$tmp/priordefer-out" || st_fail "a prior claimless DEFERRED vouched for a later markerless firing (declined=true)"
   grep -qx 'delivered=false' "$tmp/priordefer-out" || st_fail "the prior-defer firing did not emit delivered=false"
   grep -qx 'withdrawn=false' "$tmp/priordefer-out" || st_fail "the prior-defer firing did not emit withdrawn=false"
-  no_posts priordefer
+  grep "$COOLDOWN_MARKER" "$tmp/priordefer-postlog" >/dev/null \
+    || st_fail "the prior-defer claimless death did not post the burn-cooldown"
 
   # Row 4b: the claimed shape — the walk claimed, deferred inside the
   # window, and left the lock standing → declined, nothing posted (the lock
@@ -1374,10 +1411,63 @@ DECOY
     || st_fail "the restored copy did not post the withdrawal comment"
   grep -qF -- "$DEATH_PREFIX" "$tmp/stacked-postlog" \
     || st_fail "the restored copy's withdrawal did not carry the death-withdrawal first line"
+  grep "$COOLDOWN_MARKER" "$tmp/stacked-postlog" >/dev/null \
+    || st_fail "the restored copy did not post the burn-cooldown after withdrawing"
   if grep -q "no orphaned lock to release" "$tmp/stacked-log" "$tmp/stacked-out"; then
     st_fail "the pre-#538 no-op notice appeared under the restored copy — the tree's stacked script ran anyway"
   fi
   echo "ok    selftest: #670 — a stacked tree's pre-#538 copy no-ops, the restored start-commit copy withdraws"
+
+  # -- #923: settle-style mktemp→mv restore leaves a regular file ----------
+  # Mirrors the restore inlined in backlog-burn.yml / design-run.yml settle
+  # (and the early preflight): write via mktemp, mv onto RUNNER_TEMP path,
+  # refuse if the result is not a regular file. Negative control: a
+  # directory at the destination must fail the regular-file check.
+  settle_restore() {  # <repo> <sha> <dest-dir> → writes <dest-dir>/routine-lock-cleanup.sh
+    local repo sha dest blob_tmp script
+    repo="$1"; sha="$2"; dest="$3"
+    blob_tmp="$(mktemp "${dest}/routine-lock-cleanup-blob.XXXXXX")"
+    if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+      echo "lock-cleanup restore did not leave a regular file" >&2
+      return 1
+    fi
+    if ! git -C "$repo" --no-replace-objects -c core.hooksPath=/dev/null show \
+        "$sha:scripts/routine-lock-cleanup.sh" > "$blob_tmp"; then
+      rm -f "$blob_tmp"
+      return 1
+    fi
+    script="${dest}/routine-lock-cleanup.sh"
+    if [ -L "$script" ]; then
+      rm -f "$script"
+    fi
+    mv -f "$blob_tmp" "$script"
+    if [ -L "$script" ] || [ ! -f "$script" ]; then
+      echo "lock-cleanup restore did not leave a regular file" >&2
+      return 1
+    fi
+    return 0
+  }
+  mkdir -p "$tmp/settle-dest"
+  settle_restore "$repo" "$start_sha" "$tmp/settle-dest" \
+    || st_fail "settle-style restore failed on a clean dest"
+  [ -f "$tmp/settle-dest/routine-lock-cleanup.sh" ] \
+    || st_fail "settle-style restore did not leave a regular file"
+  [ ! -L "$tmp/settle-dest/routine-lock-cleanup.sh" ] \
+    || st_fail "settle-style restore left a symlink"
+  cmp -s "$tmp/settle-dest/routine-lock-cleanup.sh" "$SELF" \
+    || st_fail "settle-style restore did not recover the start commit's copy"
+  # Negative: destination path is a directory → mv lands inside it or fails;
+  # either way the named path must not pass the regular-file check after.
+  mkdir -p "$tmp/settle-neg"
+  mkdir -p "$tmp/settle-neg/routine-lock-cleanup.sh"
+  if settle_restore "$repo" "$start_sha" "$tmp/settle-neg" 2>"$tmp/settle-neg-err"; then
+    # If mv succeeded into the directory, the path is still a directory —
+    # the regular-file check inside settle_restore must have refused.
+    st_fail "settle-style restore accepted a directory at the destination"
+  fi
+  grep "lock-cleanup restore did not leave a regular file" "$tmp/settle-neg-err" >/dev/null \
+    || st_fail "settle-style restore failure did not report the regular-file error"
+  echo "ok    selftest: #923 — settle-style mktemp→mv restore leaves a regular file (and refuses a directory dest)"
 
   # The agent can leave the script path as a symlink. A redirect onto that
   # path follows the link (negative control, below). The locked index is the
@@ -1476,16 +1566,23 @@ DECOY
         | grep '> scripts/routine-lock-cleanup.sh' >/dev/null
   }
   settle_in_block() {  # step-block text on stdin → 0 for the fresh-job restore
+    # #923: settle must mktemp→mv into RUNNER_TEMP (never redirect onto a
+    # fixed path that may already be a symlink), then refuse if the result
+    # is not a regular file.
     local block
     block="$(cat)"
     printf '%s\n' "$block" | grep 'show "$START_SHA:scripts/routine-lock-cleanup.sh"' >/dev/null \
+      && printf '%s\n' "$block" | grep 'mktemp "${RUNNER_TEMP}/routine-lock-cleanup-blob.XXXXXX"' >/dev/null \
+      && printf '%s\n' "$block" | grep 'mv -f "$blob_tmp" "$script"' >/dev/null \
       && printf '%s\n' "$block" | grep 'script="${RUNNER_TEMP}/routine-lock-cleanup.sh"' >/dev/null \
-      && printf '%s\n' "$block" | grep '\[ -L "$script" \]' >/dev/null \
+      && printf '%s\n' "$block" | grep '\[ -L "$script" \] || \[ ! -f "$script" \]' >/dev/null \
+      && printf '%s\n' "$block" | grep 'lock-cleanup restore did not leave a regular file' >/dev/null \
       && printf '%s\n' "$block" | grep '"$script" --repo' >/dev/null \
       && printf '%s\n' "$block" \
         | grep -E 'START_SHA: \$\{\{ needs\.(run|burn)\.outputs\.start_sha \}\}' >/dev/null \
       && ! printf '%s\n' "$block" | grep '> scripts/routine-lock-cleanup.sh' >/dev/null \
-      && ! printf '%s\n' "$block" | grep '\./scripts/routine-lock-cleanup.sh' >/dev/null
+      && ! printf '%s\n' "$block" | grep '\./scripts/routine-lock-cleanup.sh' >/dev/null \
+      && ! printf '%s\n' "$block" | grep 'show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$script"' >/dev/null
   }
   capture_precedes_agent() {  # workflow file → 0 when start_sha is captured before the first agent step
     local cap_ln agent_ln
@@ -1592,6 +1689,13 @@ EOF
     > "$tmp/ours.ndjson"
   [ "$(lock_state < "$tmp/ours.ndjson")" = "withdrawn" ] \
     || st_fail "our own withdrawal line does not release the lock for the selector"
+  # #923: the burn-cooldown marker the claimless-death path posts must stay
+  # byte-identical to select.py's BURN_COOLDOWN_MARKER, or the picker never
+  # sees the cooldown and the #885 spin returns.
+  case "$COOLDOWN_MARKER" in
+    '🚢 BURN-COOLDOWN') : ;;
+    *) st_fail "COOLDOWN_MARKER drifted off select.py's BURN_COOLDOWN_MARKER (got '$COOLDOWN_MARKER')" ;;
+  esac
   echo "ok    selftest: withdrawal first line stays selector-compatible"
 
   # -- usage errors exit 2 -------------------------------------------------
