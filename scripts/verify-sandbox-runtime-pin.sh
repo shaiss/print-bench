@@ -4,17 +4,17 @@
 # follow-up on #876).
 #
 # Claude's SCRUB wrap PATH-resolves `srt`, `bwrap`, `socat`, and `rg` by name.
-# AppArmor only confines `/usr/bin/bwrap`, so a planted `~/.local/bin/bwrap`
-# (ahead of /usr/bin on the GHA PATH) would defeat clearenv. This script:
-#   1. Strips runner-writable ~/.local/bin shadows for the SCRUB toolchain
-#   2. Requires the absolute /opt srt wrapper (root-owned, not a symlink, no
-#      `env node`) and a matching /usr/local/bin/srt copy
-#   3. Requires `command -v` (on a PATH that still prefers ~/.local/bin if
-#      present) to resolve bwrap/socat/rg/srt to the expected system pins
+# AppArmor only confines `/usr/bin/bwrap`. Two PATH traps on GHA runners:
+#   • ~/.local/bin is ahead of /usr/bin by default
+#   • /usr/local/bin is chmod 777 (no sticky bit) on the hosted image, so the
+#     runner uid can plant bwrap/srt there without sudo
+# This script strips those shadows, requires the absolute /opt srt wrapper
+# (root-owned, not a symlink, no `env node`), and requires `command -v` to
+# resolve bwrap/socat/rg/srt to the expected non-writable pins.
 #
-# Agent steps should ALSO set PATH with /usr/local/bin:/usr/bin:/bin BEFORE
-# ~/.local/bin so a mid-link plant cannot shadow SCRUB tools, while pip
-# user scripts under ~/.local/bin remain reachable.
+# Agent steps set PATH=/opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin
+# (no /usr/local/bin) so a mid-link plant cannot shadow SCRUB tools while pip
+# user scripts under ~/.local/bin remain reachable after system pins.
 #
 # Usage: verify-sandbox-runtime-pin.sh [srt-bin]
 # Default bin: /opt/sandbox-runtime/bin/srt
@@ -30,11 +30,13 @@ case "$bin" in
     ;;
 esac
 
-# Drop planted SCRUB-toolchain shadows under the runner-writable PATH prefix.
-# Keep the strip list tight to tools Claude SCRUB / srt actually resolve.
 local_bin="${HOME}/.local/bin"
+# Drop planted SCRUB-toolchain shadows under runner-writable prefixes.
 for name in srt bwrap socat rg node; do
   rm -f "${local_bin}/${name}" 2>/dev/null || true
+  # /usr/local/bin is world-writable on GHA — remove SCRUB names there too
+  # (no sudo needed). Never rely on /usr/local/bin for these tools.
+  rm -f "/usr/local/bin/${name}" 2>/dev/null || true
 done
 
 [ -e "$bin" ] || {
@@ -77,8 +79,6 @@ if [ -w "$bin" ]; then
   exit 1
 fi
 
-# Wrapper must exec an absolute node + absolute cli.js — never `env node`,
-# which a planted ~/.local/bin/node would intercept.
 if grep -Eiq 'env[[:space:]]+node|/usr/bin/env[[:space:]]+node' "$bin"; then
   echo "error: pinned srt wrapper must not use env node: ${bin}" >&2
   exit 1
@@ -93,30 +93,9 @@ grep -Fq "$cli_js" "$bin" || {
   exit 1
 }
 
-usr_bin="/usr/local/bin/srt"
-if [ -L "$usr_bin" ]; then
-  echo "error: ${usr_bin} must not be a symlink" >&2
-  exit 1
-fi
-[ -f "$usr_bin" ] || {
-  echo "error: ${usr_bin} missing — re-run install-sandbox-runtime-pin.sh" >&2
-  exit 1
-}
-usr_owner="$(stat -c '%u:%g %a' "$usr_bin")"
-if [ "$usr_owner" != "0:0 755" ]; then
-  echo "error: expected owner 0:0 mode 755 for ${usr_bin}, got ${usr_owner}" >&2
-  exit 1
-fi
-if ! cmp -s "$bin" "$usr_bin"; then
-  echo "error: ${usr_bin} bytes differ from ${bin}" >&2
-  exit 1
-fi
-
-# Resolve on a PATH that still puts ~/.local/bin first when it exists — after
-# the strip above, these must land on the system / root-owned pins. This is
-# what the agent job's inherited PATH looks like before we also harden PATH
-# on the keyed ship/run steps themselves.
-resolve_path="${local_bin}:/usr/local/bin:/usr/bin:/bin"
+# Resolve on a PATH shaped like the hardened agent PATH (system + /opt first,
+# ~/.local/bin last for pip scripts, no /usr/local/bin).
+resolve_path="/opt/sandbox-runtime/bin:/usr/bin:/bin:${local_bin}"
 assert_resolved() {
   local name="$1" want="$2" got
   got="$(PATH="$resolve_path" command -v "$name" || true)"
@@ -125,8 +104,8 @@ assert_resolved() {
     exit 1
   fi
   case "$got" in
-    "${HOME}"/*)
-      echo "error: ${name} resolved under \$HOME: ${got}" >&2
+    "${HOME}"/*|/usr/local/*)
+      echo "error: ${name} resolved under a writable prefix: ${got}" >&2
       exit 1
       ;;
   esac
@@ -136,7 +115,7 @@ assert_resolved() {
   fi
 }
 
-assert_resolved srt "$usr_bin"
+assert_resolved srt "$bin"
 assert_resolved bwrap /usr/bin/bwrap
 assert_resolved socat /usr/bin/socat
 assert_resolved rg /usr/bin/rg
@@ -147,4 +126,4 @@ got_ver="$(PATH="$resolve_path" srt --version 2>/dev/null | tr -d '[:space:]' ||
   exit 1
 }
 
-echo "verify-sandbox-runtime-pin: ${bin} (=${usr_bin}) version=${got_ver}; bwrap/socat/rg pins ok"
+echo "verify-sandbox-runtime-pin: ${bin} version=${got_ver}; bwrap/socat/rg pins ok"

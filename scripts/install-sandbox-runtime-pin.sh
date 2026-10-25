@@ -161,16 +161,17 @@ if [ -L "$srt_bin" ]; then
   exit 1
 fi
 
-# Same bytes at /usr/local/bin/srt so bare PATH lookups hit the pin after
-# ~/.local/bin/srt is removed (verify-sandbox-runtime-pin.sh re-strips it).
-sudo install -o root -g root -m 0755 "$srt_bin" /usr/local/bin/srt
+# Do NOT install into /usr/local/bin: GHA runner images chmod -R 777 that
+# directory, so the runner uid could replace a copy after disable-sudo.
+# Agents resolve srt via PATH that puts /opt/sandbox-runtime/bin first.
+sudo rm -f /usr/local/bin/srt 2>/dev/null || true
 rm -f "${HOME}/.local/bin/srt" 2>/dev/null || true
 
-PATH="/usr/local/bin:/usr/bin:/bin"
+PATH="/opt/sandbox-runtime/bin:/usr/bin:/bin"
 export PATH
 resolved="$(command -v srt || true)"
-[ "$resolved" = "/usr/local/bin/srt" ] || {
-  echo "error: command -v srt is '${resolved:-empty}', want /usr/local/bin/srt" >&2
+[ "$resolved" = "$srt_bin" ] || {
+  echo "error: command -v srt is '${resolved:-empty}', want ${srt_bin}" >&2
   exit 1
 }
 got_ver="$(srt --version 2>/dev/null | tr -d '[:space:]' || true)"

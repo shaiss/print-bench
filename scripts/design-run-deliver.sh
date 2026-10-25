@@ -4663,7 +4663,7 @@ EOF
     exit 1
   }
   for wf in "$burn" "$workflow"; do
-    grep -q 'PATH: /usr/local/bin:/usr/bin:/bin:/home/runner/.local/bin' "$wf" || {
+    grep -q 'PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin' "$wf" || {
       echo "selftest: $(basename "$wf") agent steps lack system-first PATH (SCRUB pins before ~/.local/bin)" >&2
       exit 1
     }
