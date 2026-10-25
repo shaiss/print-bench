@@ -460,8 +460,8 @@ jobs:
             "${GITHUB_WORKSPACE}/.github/claude-code-version"
           "${GITHUB_WORKSPACE}/scripts/install-sandbox-runtime-pin.sh" \
             "${GITHUB_WORKSPACE}/.github/sandbox-runtime-version"
-          command -v srt >/dev/null || {
-            echo "::error::preflight toolchain missing srt after verified install" >&2
+          [ -x /opt/sandbox-runtime/bin/srt ] || {
+            echo "::error::preflight missing /opt/sandbox-runtime/bin/srt after verified install" >&2
             exit 1
           }
 
