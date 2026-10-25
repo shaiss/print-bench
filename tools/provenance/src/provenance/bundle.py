@@ -54,7 +54,7 @@ with ``--force-with-lease`` (``gitstore.push_force_with_lease``):
 ``site/test/fixtures/provenance-bundle.json`` IN MEMORY from the committed
 SYNTHETIC records under ``tools/provenance/tests/fixtures/records/``
 (hand-authored, contract-valid, covering every record kind and every event
-field set: ``<kind>/<key>.json`` record@1 files, ``rows/<design>.json`` the
+field set: ``<kind>/<identity>.json`` record@1 files, ``rows/<design>.json`` the
 committed-row events of one design, ``designs.json`` the designs "on main"
 including a zero-history one; folded with ``views.build_view``) with fixed meta (``main_sha =
 521d092813b78a88bd9a74b1052cfef1f230d86b``, ``evidence_sha = "0"*40``,
@@ -98,7 +98,9 @@ GUARD_MODES = {"vercel.json": "100644", "scripts/vercel-ignore-build.sh": "10075
 
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 _DESIGN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
-#: record kind -> the key pattern its ``records/<kind>/<key>.json`` path accepts (contract record@1).
+#: record kind -> identity field used in ``records/<kind>/<id>.json`` (contract record@1).
+_RECORD_IDENTITY = {"pr": "pr", "brief": "issue", "commit": "sha", "release": "tag"}
+#: record kind -> the path-segment pattern its identity string must match.
 _RECORD_KEYS = {
     "pr": re.compile(r"[1-9][0-9]*"),
     "brief": re.compile(r"[1-9][0-9]*"),
@@ -221,13 +223,17 @@ def same_content(tip: Optional[TreeReader], new_files: dict[str, tuple[str, byte
 
 
 def record_path(record: dict[str, Any]) -> str:
-    """``records/<kind>/<key>.json`` for one record@1."""
-    kind, key = record.get("kind"), record.get("key")
+    """``records/<kind>/<identity>.json`` for one record@1."""
+    kind = record.get("kind")
     pattern = _RECORD_KEYS.get(kind)
     if pattern is None:
         raise ValueError(f"bundle: unknown record kind {kind!r}")
-    if not isinstance(key, str) or not pattern.fullmatch(key) or key in (".", ".."):
-        raise ValueError(f"bundle: invalid {kind} record key {key!r}")
+    field = _RECORD_IDENTITY[kind]
+    if field not in record:
+        raise ValueError(f"bundle: {kind} record missing identity field {field!r}")
+    key = str(record[field])
+    if not pattern.fullmatch(key) or key in (".", ".."):
+        raise ValueError(f"bundle: invalid {kind} record identity {key!r}")
     return f"records/{kind}/{key}.json"
 
 

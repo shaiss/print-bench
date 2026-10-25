@@ -73,7 +73,6 @@
  "extractor": "provenance-extract 1",
  "format": "record@1",
  "incomplete": [],
- "key": "d63588d44d5248bae73e9487528a9387c269726b",
  "kind": "commit",
  "sha": "d63588d44d5248bae73e9487528a9387c269726b"
 }

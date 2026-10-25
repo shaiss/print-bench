@@ -853,7 +853,7 @@ whether an owner-login event was a human click or an owner-token session
 | `commit` | sha40 | `sha`, `committed_at`, `designs`, `evidence` (`source: git`) |
 | `release` | tag | `tag`, `published_at`, `designs`, `evidence` |
 
-Every record carries `format`, `kind`, `key`, `extractor`
+Every record carries `format`, `kind`, `extractor`
 (`provenance-extract 2`), `incomplete` and `events` (sorted by the event sort
 key). `evidence` = `{raw, raw_sha256, revision, receipts, source}`
 (`raw_sha256` over the decompressed document). No record or view carries

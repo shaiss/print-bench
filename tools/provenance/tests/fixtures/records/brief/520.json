@@ -279,7 +279,6 @@
  "format": "record@1",
  "incomplete": [],
  "issue": 520,
- "key": "520",
  "kind": "brief",
  "labels": [
   "design-brief",

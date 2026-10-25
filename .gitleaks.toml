@@ -16,18 +16,3 @@ paths = [
   '''lib/NopSCADlib/.*''',
   '''.*/previews/.*''',
 ]
-
-# The provenance harvester's commit-record fixtures (tools/provenance) carry
-# the record key, which for a commit record IS the commit's 40-hex sha, on a
-# line `"key": "<sha>"`. generic-api-key reads that as a key=value secret. The
-# exemption needs all three: generic-api-key only, a file named by a 40-hex sha
-# under records/commit/, and the exact whole-line shape — any other line in
-# that file, or the same line anywhere else, is still scanned.
-[[rules]]
-id = "generic-api-key"
-[[rules.allowlists]]
-description = "Provenance commit-record fixtures: the record key is the commit sha"
-condition = "AND"
-paths = ['''(^|/)tools/provenance/tests/fixtures/records/commit/[0-9a-f]{40}\.json$''']
-regexTarget = "line"
-regexes = ['''^\s*"key": "[0-9a-f]{40}",?$''']

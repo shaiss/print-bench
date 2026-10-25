@@ -68,7 +68,6 @@
  "extractor": "provenance-extract 1",
  "format": "record@1",
  "incomplete": [],
- "key": "v1.0",
  "kind": "release",
  "published_at": "2026-09-03T15:00:00Z",
  "tag": "v1.0"

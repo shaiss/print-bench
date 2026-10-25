@@ -181,7 +181,7 @@ def evidence(raw: Optional[str] = None) -> dict[str, Any]:
 
 def pr_record(n: int, events: list[dict], *, head_ref: Optional[str], created_at: str,
               closed_at: Optional[str]) -> dict[str, Any]:
-    return {"format": "record@1", "kind": "pr", "key": str(n), "extractor": "provenance-extract 1",
+    return {"format": "record@1", "kind": "pr", "extractor": "provenance-extract 1",
             "incomplete": [], "events": events, "pr": n, "state": "merged", "created_at": created_at,
             "closed_at": closed_at, "merged_at": closed_at, "merge_commit_sha": None,
             "merge_method": None, "head_ref": head_ref, "base_ref": "main", "linked_issues": [],
@@ -191,7 +191,7 @@ def pr_record(n: int, events: list[dict], *, head_ref: Optional[str], created_at
 
 def brief_record(n: int, events: list[dict], *, labels: Iterable[str] = ("design-brief",),
                  created_at: str = "2026-09-01T00:00:00Z") -> dict[str, Any]:
-    return {"format": "record@1", "kind": "brief", "key": str(n), "extractor": "provenance-extract 1",
+    return {"format": "record@1", "kind": "brief", "extractor": "provenance-extract 1",
             "incomplete": [], "events": events, "issue": n, "state": "closed", "state_reason": "completed",
             "created_at": created_at, "closed_at": None, "labels": sorted(labels), "design_name": None,
             "prs": [], "evidence": evidence(f"raw/brief/{n}.json.gz")}

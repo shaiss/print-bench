@@ -117,7 +117,7 @@ test("sorted compares strings by code point, not UTF-16 (an astral character)", 
   assert.ok([high, astral].sort()[0] === astral, "the default sort disagrees — the trap");
   const brief = {
     format: "record@1", extractor: "provenance-extract 1", incomplete: [], events: [],
-    kind: "brief", key: "1", issue: 1, state: "open", state_reason: null,
+    kind: "brief", issue: 1, state: "open", state_reason: null,
     created_at: "2026-01-01T00:00:00Z", closed_at: null, labels: [high, astral],
     design_name: null, prs: [],
     evidence: { raw: null, raw_sha256: null, revision: null, receipts: [], source: "git" },

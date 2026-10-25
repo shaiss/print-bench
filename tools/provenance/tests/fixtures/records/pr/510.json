@@ -1169,7 +1169,6 @@
  "format": "record@1",
  "head_ref": "claude/issue-501-alpha-clip",
  "incomplete": [],
- "key": "510",
  "kind": "pr",
  "linked_issues": [
   501,

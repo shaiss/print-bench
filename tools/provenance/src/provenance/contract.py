@@ -66,7 +66,7 @@ JSON (``canonical.dumps``) — for ``*.json.gz`` the DECOMPRESSED bytes, never
 the gzip stream (the contract note); each document must sit at the path it
 names (receipts: run id, attempt (``run_attempt or 1``) and the UTC date of
 ``run.created_at``; raw: number and revision, revision 1 the bare path,
-``.r<K>`` only for K ≥ 2; records: ``records/<kind>/<key>.json`` with the
+``.r<K>`` only for K ≥ 2; records: ``records/<kind>/<identity>.json`` with the
 key equal to the record's own number/sha/tag; views: ``views/<design>.json``);
 raw revisions of each PR and brief are contiguous from 1. Guard files: both
 refs must carry them; the DERIVED ref must carry main's current bytes, while
@@ -454,9 +454,9 @@ _RECORD_IDENTITY = {"pr": "pr", "brief": "issue", "commit": "sha", "release": "t
 def _expected_derived_path(shape: str, doc: dict[str, Any]) -> str:
     if shape.startswith("record@1:"):
         kind = doc["kind"]
-        if str(doc[_RECORD_IDENTITY[kind]]) != doc["key"]:
-            raise ValueError(f"key {doc['key']!r} is not the record's {_RECORD_IDENTITY[kind]}")
-        return f"records/{kind}/{doc['key']}.json"
+        identity = _RECORD_IDENTITY[kind]
+        key = str(doc[identity])
+        return f"records/{kind}/{key}.json"
     if shape == "view@1":
         return f"views/{doc['design']}.json"
     if shape == "bundle@1":

@@ -320,13 +320,13 @@ def test_derived_tree_uses_mains_guard_blobs(fake_episodes):
 
 
 def test_record_path():
-    assert bundle.record_path({"kind": "pr", "key": "510"}) == "records/pr/510.json"
-    assert bundle.record_path({"kind": "brief", "key": "7"}) == "records/brief/7.json"
-    assert bundle.record_path({"kind": "commit", "key": "a" * 40}) == f"records/commit/{'a' * 40}.json"
-    assert bundle.record_path({"kind": "release", "key": "v2.0"}) == "records/release/v2.0.json"
-    for bad in ({"kind": "pr", "key": "../x"}, {"kind": "pr", "key": "0"}, {"kind": "pr", "key": 5},
-                {"kind": "commit", "key": "a" * 39}, {"kind": "release", "key": ".."},
-                {"kind": "release", "key": "a/b"}, {"kind": "view", "key": "x"}):
+    assert bundle.record_path({"kind": "pr", "pr": 510}) == "records/pr/510.json"
+    assert bundle.record_path({"kind": "brief", "issue": 7}) == "records/brief/7.json"
+    assert bundle.record_path({"kind": "commit", "sha": "a" * 40}) == f"records/commit/{'a' * 40}.json"
+    assert bundle.record_path({"kind": "release", "tag": "v2.0"}) == "records/release/v2.0.json"
+    for bad in ({"kind": "pr", "pr": "../x"}, {"kind": "pr", "pr": 0}, {"kind": "pr"},
+                {"kind": "commit", "sha": "a" * 39}, {"kind": "release", "tag": ".."},
+                {"kind": "release", "tag": "a/b"}, {"kind": "view", "design": "x"}):
         with pytest.raises(ValueError):
             bundle.record_path(bad)
 
@@ -433,7 +433,17 @@ def _stub_pipeline(monkeypatch, *, lazy_place=False):
     for designs/ commits the way the real one does), receipt_events returns one UNPLACED job
     event for PR 510, place fills unplaced episodes from the record's first round."""
     calls = _Calls()
-    by_key = {(r["kind"], r["key"]): r for r in h.synthetic_records()}
+    def _rid(r):
+        if r["kind"] == "pr":
+            return str(r["pr"])
+        if r["kind"] == "brief":
+            return str(r["issue"])
+        if r["kind"] == "commit":
+            return r["sha"]
+        if r["kind"] == "release":
+            return r["tag"]
+        raise AssertionError(r["kind"])
+    by_key = {(r["kind"], _rid(r)): r for r in h.synthetic_records()}
     rows = h.synthetic_rows()
     h.patch_episodes(monkeypatch)
     _context_with_receipt_run_ids(monkeypatch)
@@ -456,7 +466,7 @@ def _stub_pipeline(monkeypatch, *, lazy_place=False):
         for sha, _epoch in ctx.git.first_parent_log(ctx.main_sha):
             if any(p.startswith("designs/") for p in ctx.git.changed_paths(sha)) \
                     and ctx.git.committer_email(sha) != extract.GITHUB_COMMITTER and sha not in frozen:
-                out.append({"kind": "commit", "key": sha})          # never reached on this history
+                out.append({"kind": "commit", "sha": sha})          # never reached on this history
         return out + [copy.deepcopy(r) for (k, _), r in sorted(by_key.items()) if k == "commit"]
 
     class Index:
@@ -469,19 +479,19 @@ def _stub_pipeline(monkeypatch, *, lazy_place=False):
         return {3001: 501}
 
     def annotate_record(record, index, codebasis, *, owner_login, claims):
-        calls.add("annotate_record", record["kind"], record["key"], claims)
+        calls.add("annotate_record", record["kind"], _rid(record), claims)
         return copy.deepcopy(record)
 
     def receipt_events(record, index, codebasis, *, owner, repo):
-        calls.add("receipt_events", record["key"])
-        if record["key"] != "510":
+        calls.add("receipt_events", _rid(record))
+        if record.get("pr") != 510:
             return []
         ev = copy.deepcopy(next(e for e in record["events"] if e["id"] == "job:7001"))
         ev.update(id="job:7999", episode=None, head_sha=None)
         return [ev]
 
     def place(record):
-        calls.add("place", record["key"], [e["id"] for e in record["events"] if e["episode"] is None])
+        calls.add("place", _rid(record), [e["id"] for e in record["events"] if e["episode"] is None])
         out = copy.deepcopy(record)
         for e in out["events"]:
             if e["episode"] is None and not lazy_place:
@@ -492,7 +502,7 @@ def _stub_pipeline(monkeypatch, *, lazy_place=False):
     real_build_views = views.build_views
 
     def build_views(records, **kw):
-        calls.add("build_views", [(r["kind"], r["key"]) for r in records])
+        calls.add("build_views", [(r["kind"], _rid(r)) for r in records])
         return real_build_views(records, **kw)
 
     monkeypatch.setattr(extract, "extract_pr", extract_pr)

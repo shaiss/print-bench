@@ -370,7 +370,7 @@ def test_direct_commit_rule(standins):
     records = extract.extract_direct_commits(ctx, frozen)
     assert [r["sha"] for r in records] == [SHA["0"], SHA["6"]]          # 5 touches no designs/
     rec = records[0]
-    assert rec["kind"] == "commit" and rec["key"] == SHA["0"] and rec["committed_at"] == "1970-01-01T00:01:40Z"
+    assert rec["kind"] == "commit" and rec["sha"] == SHA["0"] and rec["committed_at"] == "1970-01-01T00:01:40Z"
     (event,) = rec["events"]
     assert event["episode"] == f"C:{SHA['0'][:8]}" and event["kind"] == "commit.human"
     assert event["url"].endswith(f"/commit/{SHA['0']}") and event["pr"] is None
@@ -506,7 +506,7 @@ def test_pr_record_shape(standins):
     assert rec["threads"] == {"resolved": 8, "total": 8} and rec["incomplete"] == []
     assert rec["evidence"] == {"raw": "raw/pr/636.json.gz", "raw_sha256": canonical.content_sha256(raw_pr(636)),
                                "receipts": [], "revision": 1, "source": "evidence"}
-    assert rec["extractor"] == extract.EXTRACTOR_VERSION and rec["key"] == "636"
+    assert rec["extractor"] == extract.EXTRACTOR_VERSION and rec["pr"] == 636
     assert all(e["episode"] for e in rec["events"])                       # placed at extraction
     assert rec["events"] == sorted(rec["events"], key=canonical.event_sort_key)
     raw = raw_pr(636)

@@ -479,11 +479,11 @@ def _view(design):
 
 def _records():
     commit = {"format": "record@1", "extractor": "provenance-extract 1", "incomplete": [], "events": [],
-              "kind": "commit", "key": SHA, "sha": SHA, "committed_at": TS,
+              "kind": "commit", "sha": SHA, "committed_at": TS,
               "designs": {"demo": {"membership": "member", "kinds": ["docs", "source"]}},
               "evidence": {"raw": None, "raw_sha256": None, "revision": None, "receipts": [], "source": "git"}}
     release = {"format": "record@1", "extractor": "provenance-extract 1", "incomplete": [], "events": [],
-               "kind": "release", "key": "v2.0", "tag": "v2.0", "published_at": TS, "designs": ["demo"],
+               "kind": "release", "tag": "v2.0", "published_at": TS, "designs": ["demo"],
                "evidence": {"raw": "raw/release/v2.0.json.gz", "raw_sha256": "0" * 64, "revision": 1,
                             "receipts": [], "source": "evidence"}}
     return {f"records/commit/{SHA}.json": commit, "records/release/v2.0.json": release}
@@ -549,10 +549,6 @@ def test_derived_tree_negatives():
     recs = {f"records/commit/{other}.json": _records()[f"records/commit/{SHA}.json"]}
     assert _tree_errors(_derived_files(records=recs), "derived") == [
         f"records/commit/{other}.json: the document belongs at records/commit/{SHA}.json"]
-    bad_key = dict(_records()[f"records/commit/{SHA}.json"], key=other)
-    got = _tree_errors(_derived_files(records={f"records/commit/{other}.json": bad_key}), "derived")
-    assert got == [f"records/commit/{other}.json: cannot derive the document's own path "
-                   f"(key '{other}' is not the record's sha)"]
     # an extra field in a record, a guard file that is not main's, a wrong FORMAT
     recs = {f"records/commit/{SHA}.json": dict(_records()[f"records/commit/{SHA}.json"], note="x")}
     assert _tree_errors(_derived_files(records=recs), "derived") == [

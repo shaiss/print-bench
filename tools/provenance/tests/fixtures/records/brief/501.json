@@ -332,7 +332,6 @@
  "format": "record@1",
  "incomplete": [],
  "issue": 501,
- "key": "501",
  "kind": "brief",
  "labels": [
   "design-brief"
