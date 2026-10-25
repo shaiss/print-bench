@@ -4266,8 +4266,18 @@ EOF
     echo "selftest: deliver step does not drop GIT_CONFIG_PARAMETERS" >&2
     exit 1
   }
-  grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/routine-lock-cleanup.sh"' "$workflow" || {
+  # #923: settle restore must pin --no-replace-objects + hooksPath and use
+  # mktemp→mv (never redirect onto a fixed path that may be a symlink).
+  grep -E 'git --no-replace-objects -c core\.hooksPath=/dev/null( -c core\.(fsmonitor=false|sshCommand=))* show "\$START_SHA:scripts/routine-lock-cleanup\.sh"' "$workflow" >/dev/null || {
     echo "selftest: lock-cleanup restore is missing --no-replace-objects and hooksPath" >&2
+    exit 1
+  }
+  grep 'mktemp "${RUNNER_TEMP}/routine-lock-cleanup-blob.XXXXXX"' "$workflow" >/dev/null || {
+    echo "selftest: lock-cleanup restore is missing mktemp→mv (#923)" >&2
+    exit 1
+  }
+  grep 'lock-cleanup restore did not leave a regular file' "$workflow" >/dev/null || {
+    echo "selftest: lock-cleanup restore dropped the regular-file refusal (#923)" >&2
     exit 1
   }
   printf '%s\n' "$deliver_run" | grep 'RUNNER_TEMP' >/dev/null || {
@@ -4930,8 +4940,17 @@ PY
     echo "selftest: expected the settle lock cleanup, red gate, and triage gated on bundle_pending, found ${burn_pending_n}" >&2
     exit 1
   }
-  grep -q 'git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/routine-lock-cleanup.sh"' "$burn" || {
+  # #923: burn settle restore — same mktemp→mv + pinned git show as design-run.
+  grep -E 'git --no-replace-objects -c core\.hooksPath=/dev/null( -c core\.(fsmonitor=false|sshCommand=))* show "\$START_SHA:scripts/routine-lock-cleanup\.sh"' "$burn" >/dev/null || {
     echo "selftest: burn lock-cleanup restore is missing --no-replace-objects and hooksPath" >&2
+    exit 1
+  }
+  grep 'mktemp "${RUNNER_TEMP}/routine-lock-cleanup-blob.XXXXXX"' "$burn" >/dev/null || {
+    echo "selftest: burn lock-cleanup restore is missing mktemp→mv (#923)" >&2
+    exit 1
+  }
+  grep 'Prove lock-cleanup restore leaves a regular file' "$burn" >/dev/null || {
+    echo "selftest: burn is missing the early lock-cleanup restore preflight (#923)" >&2
     exit 1
   }
   burn_routine_n="$(grep -v '^[[:space:]]*#' "$burn" | grep -c -- '--routine backlog-burn' || true)"
