@@ -3,26 +3,43 @@
 # PATH surface before a keyed agent link or SCRUB smoke (issue #875 / Cipher
 # follow-up on #876).
 #
-# Claude's SCRUB wrap PATH-resolves `srt`, `bwrap`, `socat`, and `rg` by name.
+# Claude's SCRUB wrap PATH-resolves `srt`, `bwrap`, `socat`, and `rg` by name
+# unless absolute paths are configured (managed-settings + srt settings).
 # AppArmor only confines `/usr/bin/bwrap`. Two PATH traps on GHA runners:
 #   • ~/.local/bin is ahead of /usr/bin by default
 #   • /usr/local/bin is chmod 777 (no sticky bit) on the hosted image, so the
 #     runner uid can plant bwrap/srt there without sudo
-# This script strips those shadows, requires the absolute /opt srt wrapper
-# (root-owned, not a symlink, no `env node`), and requires `command -v` to
-# resolve bwrap/socat/rg/srt to the expected non-writable pins.
+#   • GITHUB_PATH entries are prepended *ahead of* step-level env PATH, so a
+#     planted fake bwrap can run unsandboxed (Cipher MED-2 on #876)
+# This script refuses a polluted inherited PATH under GITHUB_ACTIONS (must be
+# exactly /usr/bin:/bin — never re-set PATH before that check), strips runner
+# shadows, requires the absolute /opt srt wrapper (root-owned, not a symlink,
+# no `env node`), and requires `command -v` to resolve bwrap/socat/rg/srt to
+# the expected non-writable pins on the hardened agent-shaped PATH.
 #
 # Agent steps set PATH=/opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin
 # (no /usr/local/bin) so a mid-link plant cannot shadow SCRUB tools while pip
-# user scripts under ~/.local/bin remain reachable after system pins.
+# user scripts under ~/.local/bin remain reachable after system pins — and
+# Claude/srt configs pin absolute /usr/bin/{bwrap,socat,rg} so GITHUB_PATH
+# prepends cannot hijack the wrap.
 #
 # Usage: verify-sandbox-runtime-pin.sh [srt-bin]
 # Default bin: /opt/sandbox-runtime/bin/srt
 set -euo pipefail
-export PATH="/usr/bin:/bin"
-# Hardcoded — never honor RM_BIN/etc from GITHUB_ENV.
+# Hardcoded — never honor RM_BIN/etc from GITHUB_ENV. Do NOT re-export PATH
+# before the inherited-PATH check (Cipher MED-2): GITHUB_PATH prepends ahead
+# of step env PATH, and a re-set would hide that plant.
 RM_BIN="/usr/bin/rm"
 STAT_BIN="/usr/bin/stat"
+
+# Under GHA, the verify step must inherit exactly /usr/bin:/bin. Anything else
+# means GITHUB_PATH (or GITHUB_ENV) polluted the process — refuse to proceed.
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  if [ "${PATH}" != "/usr/bin:/bin" ]; then
+    echo "error: inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); refusing GITHUB_PATH pollution" >&2
+    exit 1
+  fi
+fi
 
 bin="${1:-/opt/sandbox-runtime/bin/srt}"
 
@@ -143,7 +160,8 @@ grep -Fq "$cli_js" "$bin" || {
 }
 
 # Resolve on a PATH shaped like the hardened agent PATH (system + /opt first,
-# ~/.local/bin last for pip scripts, no /usr/local/bin).
+# ~/.local/bin last for pip scripts, no /usr/local/bin). Absolute tool paths
+# in Claude managed-settings / srt settings are the GITHUB_PATH backstop.
 resolve_path="/opt/sandbox-runtime/bin:/usr/bin:/bin:${local_bin}"
 assert_resolved() {
   local name="$1" want="$2" got
@@ -175,4 +193,4 @@ got_ver="$(PATH="$resolve_path" srt --version 2>/dev/null | tr -d '[:space:]' ||
   exit 1
 }
 
-echo "verify-sandbox-runtime-pin: ${bin} version=${got_ver}; bwrap/socat/rg pins ok"
+echo "verify-sandbox-runtime-pin: ${bin} version=${got_ver}; bwrap/socat/rg pins ok; inherited PATH ok"

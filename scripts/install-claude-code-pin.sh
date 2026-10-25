@@ -138,9 +138,41 @@ owner_mode="$(stat -c '%u:%g %a' "$claude_bin")"
 claude_sha="$(sha256sum "$claude_bin" | cut -d' ' -f1)"
 [ "$claude_sha" = "$expected_sha" ]
 
+# Absolute SCRUB helper paths for Claude's sandbox (Cipher MED-2 on #876).
+# sandbox.bwrapPath / sandbox.socatPath are managed-settings-only; ripgrep is
+# user-or-managed. Install root-owned under /etc/claude-code/ while sudo still
+# works (preflight, before disable-sudo). GITHUB_PATH prepends ahead of step
+# env PATH, so PATH-resolved bwrap can run unsandboxed — absolute pins close
+# that hole for the Claude wrap.
+managed_dir="/etc/claude-code"
+managed_json="${managed_dir}/managed-settings.json"
+sudo mkdir -p "$managed_dir"
+managed_tmp="$(mktemp)"
+cat > "$managed_tmp" <<'EOF'
+{
+  "sandbox": {
+    "bwrapPath": "/usr/bin/bwrap",
+    "socatPath": "/usr/bin/socat",
+    "ripgrep": {
+      "command": "/usr/bin/rg"
+    }
+  }
+}
+EOF
+sudo install -o root -g root -m 0644 "$managed_tmp" "$managed_json"
+rm -f "$managed_tmp"
+sudo chown root:root "$managed_dir"
+sudo chmod 0755 "$managed_dir"
+sudo chmod go-w "$managed_dir"
+[ ! -w "$managed_json" ]
+[ ! -L "$managed_json" ]
+grep -Fq '"bwrapPath": "/usr/bin/bwrap"' "$managed_json"
+grep -Fq '"socatPath": "/usr/bin/socat"' "$managed_json"
+grep -Fq '"command": "/usr/bin/rg"' "$managed_json"
+
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "claude_bin=${claude_bin}" >> "$GITHUB_OUTPUT"
   echo "claude_sha256=${claude_sha}" >> "$GITHUB_OUTPUT"
 fi
 
-echo "install-claude-code-pin: ${claude_bin} sha256=${claude_sha}"
+echo "install-claude-code-pin: ${claude_bin} sha256=${claude_sha}; managed-settings=${managed_json}"

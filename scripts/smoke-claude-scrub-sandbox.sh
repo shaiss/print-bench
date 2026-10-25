@@ -46,11 +46,17 @@ cleanup() { rm -rf "$smoke_home"; }
 trap cleanup EXIT
 mkdir -p "${smoke_home}/.claude"
 # Enable Claude's sandbox stack so dependency checks exercise bwrap+socat.
+# Absolute ripgrep here (user-or-managed); bwrapPath/socatPath are
+# managed-only and come from /etc/claude-code/managed-settings.json
+# installed in preflight (Cipher MED-2).
 cat > "${smoke_home}/.claude/settings.json" <<'EOF'
 {
   "sandbox": {
     "enabled": true,
-    "autoAllowBashIfSandboxed": true
+    "autoAllowBashIfSandboxed": true,
+    "ripgrep": {
+      "command": "/usr/bin/rg"
+    }
   }
 }
 EOF
@@ -66,6 +72,8 @@ EOF
 # srt settings: required network+filesystem keys, plus allowAllUnixSockets
 # so the wrap uses bwrap (covered by bwrap-userns-restrict) instead of
 # apply-seccomp's nested userns (which fails setgroups under sysctl=1).
+# Absolute bwrapPath/socatPath/ripgrep so a poisoned PATH cannot hijack the
+# wrap (Cipher MED-2 on #876).
 cat > "${smoke_home}/.srt-settings.json" <<'EOF'
 {
   "network": {
@@ -77,6 +85,11 @@ cat > "${smoke_home}/.srt-settings.json" <<'EOF'
     "denyRead": [],
     "allowWrite": ["/tmp"],
     "denyWrite": []
+  },
+  "bwrapPath": "/usr/bin/bwrap",
+  "socatPath": "/usr/bin/socat",
+  "ripgrep": {
+    "command": "/usr/bin/rg"
   }
 }
 EOF
@@ -100,11 +113,14 @@ fi
 }
 
 # Re-strip ~/.local/bin/srt and confirm the root-owned /opt wrapper
-# (absolute node — not env) before PATH-resolving srt for the smoke.
-"${GITHUB_WORKSPACE:-$(cd "$(dirname "$0")/.." && pwd)}/scripts/verify-sandbox-runtime-pin.sh"   /opt/sandbox-runtime/bin/srt
+# (absolute node — not env) before invoking srt for the smoke. Invoke via
+# /usr/bin/bash so a planted `#!/usr/bin/env bash` cannot PATH-hijack; the
+# caller must inherit PATH=/usr/bin:/bin (GITHUB_ACTIONS check in verify).
+verify_srt="${GITHUB_WORKSPACE:-$(cd "$(dirname "$0")/.." && pwd)}/scripts/verify-sandbox-runtime-pin.sh"
+/usr/bin/bash "$verify_srt" /opt/sandbox-runtime/bin/srt
 srt_bin="/opt/sandbox-runtime/bin/srt"
-command -v rg >/dev/null || {
-  echo "::error::ripgrep (rg) not on PATH — srt requires it; apt-install ripgrep in preflight" >&2
+[ -x /usr/bin/rg ] || {
+  echo "::error::ripgrep missing at /usr/bin/rg — apt-install ripgrep in preflight" >&2
   exit 1
 }
 
