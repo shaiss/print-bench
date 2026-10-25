@@ -4641,8 +4641,10 @@ EOF
     echo "selftest: design-run missing verify-sandbox-runtime-pin.sh" >&2
     exit 1
   }
-  # Preflight/scrub failure must score walk_outcome as failure (not not-run),
-  # or settle leaves the SHIP-LOCK starving the claimed issue.
+  # Preflight/scrub/verify failure must score walk_outcome as failure (not
+  # not-run), or settle leaves the SHIP-LOCK starving the claimed issue.
+  # verify_claude_N is required: a pin-verify fail skips every ship and would
+  # otherwise take the all-skipped not-run branch (Bugbot on #876).
   for wf in "$burn" "$workflow"; do
     grep -q "steps.preflight.outcome == 'failure'" "$wf" || {
       echo "selftest: $(basename "$wf") walk_outcome does not treat preflight failure as failure" >&2
@@ -4650,6 +4652,19 @@ EOF
     }
     grep -q "steps.scrub_smoke.outcome == 'failure'" "$wf" || {
       echo "selftest: $(basename "$wf") walk_outcome does not treat scrub_smoke failure as failure" >&2
+      exit 1
+    }
+    for n in 1 2 3 4 5; do
+      grep -q "steps.verify_claude_${n}.outcome == 'failure'" "$wf" || {
+        echo "selftest: $(basename "$wf") walk_outcome does not treat verify_claude_${n} failure as failure" >&2
+        exit 1
+      }
+    done
+    # The failure clause must appear on every walk_outcome twin (job output +
+    # metadata + red-gate env), not only once in a comment.
+    verify_fail_n="$(grep -c "steps.verify_claude_1.outcome == 'failure'" "$wf" || true)"
+    [ "$verify_fail_n" -ge 3 ] || {
+      echo "selftest: $(basename "$wf") expected >=3 walk_outcome twins scoring verify_claude_1 failure, found ${verify_fail_n}" >&2
       exit 1
     }
   done
