@@ -1,0 +1,7 @@
+# Multi-object 3MF plate deliverable (scripts/plate.sh).
+# Segments × N are identical — plate one; print N in the slicer.
+# Coupon is not a plate part.
+rim-segment
+hub
+stand
+axle

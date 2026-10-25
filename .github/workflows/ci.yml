@@ -53,6 +53,29 @@ permissions:
   contents: read
 
 jobs:
+  # agent-head-secret-gate (issue #869): secret trust is computed HERE, not
+  # in a job that checks out the head. Head-controlled scripts
+  # (regen-stamp.sh, render, composite actions) can append to $GITHUB_ENV;
+  # if TRUSTED_FOR_SECRETS lived in regen's job env, a PR could flip it to
+  # true after checkout and materialize REGEN_TOKEN / ANTHROPIC_API_KEY.
+  # This job checks out nothing and runs no repo code — only event metadata.
+  # trusted == true only on push to main. Every secret spend in regen reads
+  # needs.trust.outputs.trusted (never env.*).
+  trust:
+    name: Secret trust
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      trusted: ${{ steps.decide.outputs.trusted }}
+    steps:
+      - id: decide
+        name: Decide whether secrets may materialize
+        env:
+          # Expression-only; no checkout, so nothing can forge this via
+          # $GITHUB_ENV before the step starts.
+          TRUSTED: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: echo "trusted=${TRUSTED}" >> "$GITHUB_OUTPUT"
+
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
@@ -116,6 +139,16 @@ jobs:
     # gallery, and — when a product page is missing or too thin to pass its
     # gate — an AI-drafted README.md.
     #
+    # Secrets (REGEN_TOKEN, ANTHROPIC_API_KEY, and would-be ZAI_KEY /
+    # ZAI_API_KEY / OPENROUTER_API_KEY) are available ONLY when
+    # needs.trust.outputs.trusted is true — push to main (issue #869).
+    # On pull_request this job still RUNS (required checks must not skip)
+    # with github.token and no provider keys; product-page drafting and the
+    # PAT commit-back are post-merge on the main push. Trust lives in the
+    # separate `trust` job (no checkout) so head scripts cannot forge it
+    # via $GITHUB_ENV. The model-registry drift guard fails if a secret
+    # spend is not behind needs.trust.outputs.trusted.
+    #
     # These used to be run by hand and committed. Every gate on them is
     # presence-only *because* a human committed them, which is exactly the
     # hole issue #69 describes: a geometry change staled three
@@ -144,8 +177,13 @@ jobs:
     # mismatching stamp always regenerates — staleness in a stamp costs
     # time, never correctness.
     name: Regenerate previews and product pages
-    needs: changes
-    runs-on: ubuntu-latest
+    needs: [changes, trust]
+    # Pin 24.04 with every other setup-openscad-nightly job (issue #916
+    # reopen): ubuntu-latest is 26.04, and a cache-miss install of the
+    # xUbuntu_24.04 OBS nightly (or any cross-suite mix) dies on
+    # libpython3.12t64, which resolute does not ship. Same pin as
+    # render-gate / release for PrusaSlicer --merge.
+    runs-on: ubuntu-24.04
     permissions:
       # The one job in this workflow that writes.
       contents: write
@@ -202,7 +240,9 @@ jobs:
           # a not-yet-configured repo still regenerates; the commit step says
           # loudly what that costs. (With persist-credentials off this only
           # authenticates the clone; the push re-supplies it explicitly.)
-          token: ${{ secrets.REGEN_TOKEN || github.token }}
+          # agent-head-secret-gate (issue #869): REGEN_TOKEN only when
+          # needs.trust.outputs.trusted — never on pull_request.
+          token: ${{ needs.trust.outputs.trusted == 'true' && (secrets.REGEN_TOKEN || github.token) || github.token }}
 
       - name: Fetch the preview-diff cross-check base
         # preview-diff (issue #470, the measure step below) cross-checks each
@@ -243,7 +283,13 @@ jobs:
           REGEN: ${{ needs.changes.outputs.regen }}
           REGEN_DESIGNS: ${{ needs.changes.outputs.regen_designs }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' }}
+          # agent-head-secret-gate: pull_request never counts as having the
+          # PAT, even when the secret exists — checkout/push already omit it;
+          # this keeps the commit step's messaging honest. TRUSTED is step
+          # env for shell messaging only; secret materialization gates on
+          # needs.trust.outputs.trusted in the YAML expressions above/below.
+          HAVE_PAT: ${{ secrets.REGEN_TOKEN != '' && needs.trust.outputs.trusted == 'true' }}
+          TRUSTED: ${{ needs.trust.outputs.trusted }}
         run: |
           set -euo pipefail
           designs=""
@@ -323,12 +369,20 @@ jobs:
             done
           fi
           # A fork PR's GITHUB_TOKEN is read-only, so there is nothing to push
-          # back to. The commit step turns that into a clear failure with the
-          # file list rather than a permissions error nobody can act on.
+          # back to. Every pull_request is treated the same for the PAT-
+          # backed commit-back (issue #869 default-deny): secrets and the
+          # PAT push are main-push only; a GITHUB_TOKEN push would strand
+          # the PR without re-triggering checks. The commit step turns
+          # either case into a clear failure with the file list. TRUSTED
+          # mirrors needs.trust.outputs.trusted for messaging only.
           can_push=true
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] \
              && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
             can_push=false
+          fi
+          if [ "${TRUSTED:-}" != "true" ]; then
+            can_push=false
+            echo "regen: not a main push — commit-back disabled (no REGEN_TOKEN / LLM keys on pull_request; issue #869)"
           fi
           # LOOP GUARD. Pushing with a PAT re-triggers this workflow, so a
           # regeneration that is not byte-stable would push, re-trigger,
@@ -392,6 +446,11 @@ jobs:
         # .github/actions/setup-openscad-nightly fails here until it merges in
         # the default branch.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          # Bump when the OBS package set must be re-fetched (issue #916).
+          # 2026-10-24 salts the key so this PR proves a cache-miss install
+          # on ubuntu-24.04 (VERSION_ID is also in the action's cache key).
+          cache-version: "2026-10-24"
       - name: Install the render toolchain (xvfb, ImageMagick, gifsicle)
         if: steps.plan.outputs.render == 'true'
         # Deliberately plain apt-get rather than awalsh128/cache-apt-pkgs-action,
@@ -478,7 +537,13 @@ jobs:
         # `needs:` it, one required — see the job comment above), so the AI
         # andon cord (docs/andon-cord.md) skips only this one step, the only
         # place in ci.yml a provider key is materialized.
-        if: steps.plan.outputs.designs != '' && vars.AI_ANDON_CORD != 'pulled'
+        # agent-head-secret-gate (issue #869): skip unless trusted (main
+        # push) so ANTHROPIC_API_KEY is never materialized next to
+        # branch-controlled scripts/product-page.sh on a PR.
+        if: >-
+          steps.plan.outputs.designs != ''
+          && vars.AI_ANDON_CORD != 'pulled'
+          && needs.trust.outputs.trusted == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DESIGNS: ${{ steps.plan.outputs.designs }}
@@ -503,6 +568,15 @@ jobs:
         # docs-only PR (nothing to draft either way) does not carry the notice.
         if: steps.plan.outputs.designs != '' && vars.AI_ANDON_CORD == 'pulled'
         run: echo "::notice::AI andon cord is pulled (repo variable AI_ANDON_CORD=pulled) — product-page drafting (the one Claude API call in CI) was skipped; previews, animations, product shots and the gallery were regenerated deterministically as usual; no provider API call was made. Release the cord to resume — see docs/andon-cord.md."
+
+      - name: Pull request — product-page drafting and regen secrets bypassed
+        # agent-head-secret-gate (issue #869): say why the AI step and the
+        # PAT-backed commit-back did not run (secrets are main-push only).
+        if: >-
+          steps.plan.outputs.designs != ''
+          && needs.trust.outputs.trusted != 'true'
+        run: |
+          echo "::notice::not a main push - product-page drafting and REGEN_TOKEN commit-back were skipped so branch-controlled scripts/ never share a job with REGEN_TOKEN / ANTHROPIC_API_KEY / ZAI_KEY / OPENROUTER_API_KEY (issue #869). Commit regenerated artifacts on the branch if needed; product-page drafting runs post-merge on the main push."
 
       - name: Measure regenerated previews against the committed bytes (advisory)
         # The faithfulness half of #69 (issue #470): preview-diff classes each
@@ -574,7 +648,10 @@ jobs:
           AUTHOR_TOUCHES_DESIGNS: ${{ steps.plan.outputs.author_touches_designs }}
           # Scoped to this step alone — see persist-credentials on the
           # checkout. Actions masks it in the log.
-          PUSH_TOKEN: ${{ secrets.REGEN_TOKEN || github.token }}
+          # agent-head-secret-gate (issue #869): REGEN_TOKEN only when
+          # needs.trust.outputs.trusted (can_push is already false otherwise).
+          PUSH_TOKEN: ${{ needs.trust.outputs.trusted == 'true' && (secrets.REGEN_TOKEN || github.token) || github.token }}
+          TRUSTED: ${{ needs.trust.outputs.trusted }}
           # The measure step's verdict (data only — see that step).
           PREVIEW_VERDICT: ${{ steps.pdiff.outputs.verdict }}
           BRANCH: >-
@@ -629,7 +706,11 @@ jobs:
             exit 0
           fi
           if [ "$CAN_PUSH" != "true" ]; then
-            echo "::error::Committed artifacts are stale and CI cannot push to a fork. Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them, or re-open this PR from a branch in this repository."
+            if [ "${TRUSTED:-}" != "true" ]; then
+              echo "::error::Committed artifacts are stale and CI will not push on a pull_request (issue #869 — REGEN_TOKEN / LLM keys only on push to main). Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them on this branch."
+            else
+              echo "::error::Committed artifacts are stale and CI cannot push to a fork. Regenerate the files listed above locally (./scripts/render.sh <name> --previews, ./scripts/animate.sh <name>, ./scripts/product-shot.sh <name>, ./scripts/assembly.sh <name>, ./scripts/gallery.sh) and commit them, or re-open this PR from a branch in this repository."
+            fi
             exit 1
           fi
           git config user.name "github-actions[bot]"
@@ -1075,7 +1156,9 @@ jobs:
     name: Style packs and conformance
     needs: changes
     if: needs.changes.outputs.styles == 'true'
-    runs-on: ubuntu-latest
+    # Same 24.04 pin as render-gate / regen (issue #916 reopen) — shares
+    # the openscad-nightly OBS cache with the other nightly jobs.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1094,6 +1177,8 @@ jobs:
         # Same engine as render-gate, so a swatch measures the same here as
         # it does in the gate that judges the printable parts.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10-24"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -1234,7 +1319,8 @@ jobs:
     # Same regen decoupling as scad-check above.
     needs: changes
     if: needs.changes.outputs.scad == 'true'
-    runs-on: ubuntu-latest
+    # Same 24.04 pin as render-gate / regen (issue #916 reopen).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1248,6 +1334,8 @@ jobs:
           version: "2026-08"
       - name: Install OpenSCAD nightly (cached)
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10-24"
       # Same reason as scad-check above: check.sh's fusecheck selftest needs
       # printcheck, and the selftest has no skip path.
       - uses: actions/setup-python@v7
@@ -1267,7 +1355,14 @@ jobs:
     name: Render designs, gate STLs, test-slice
     needs: changes
     if: needs.changes.outputs.gate == 'true'
-    runs-on: ubuntu-latest
+    # Pin 24.04: ubuntu-latest has rolled to 26.04, whose prusa-slicer 2.9.4
+    # breaks `prusa-slicer --merge --export-3mf` (upstream #14632) used by
+    # plate.sh. 24.04 still ships the 2.7.x build the plate gate was written
+    # against. Same pin keeps openscad-nightly on the OBS xUbuntu_24.04
+    # suite (issue #916 reopen — 26.04 cannot install the 24.04 nightly's
+    # libpython3.12t64). setup-openscad-nightly still keys the cache on
+    # VERSION_ID so a future runner change cannot mix suites.
+    runs-on: ubuntu-24.04
     permissions:
       # contents:write only for the telemetry roll-up on default-branch
       # pushes (the checkout itself is persist-credentials: false, so the
@@ -1293,26 +1388,26 @@ jobs:
           echo "No geometry-affecting path changed and no design is in scope."
           echo "This required context runs as a formality — see the soft-infra"
           echo "note in the 'Detect changed paths' job."
-      - name: Install xvfb, PrusaSlicer and f3d (cached)
+      - name: Install xvfb, PrusaSlicer and f3d
         if: needs.changes.outputs.gate_designs != ''
-        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
-        with:
-          # PrusaSlicer stays on the Ubuntu package: upstream stopped
-          # shipping Linux binaries after 2.9.0 (Flatpak-only now), so
-          # apt 2.7.x is the newest CI-practical build. f3d likewise uses
-          # the Ubuntu package (2.2.x; upstream 3.x ships .debs if we ever
-          # need newer) — it only renders artifact previews here.
-          # Postinst-free packages only (no update-alternatives) — a cache
-          # restore skips postinst, see issue #85; docs-check.sh enforces.
-          packages: xvfb prusa-slicer f3d
-          # cache key; bump to pull fresh package versions (see scad-check)
-          version: "2026-08"
+        # Plain apt-get, not cache-apt-pkgs-action: on ubuntu-26.04 that
+        # action swallowed apt mirror 404s, cached 0 packages, and left
+        # prusa-slicer off PATH while reporting success (issue #916). Plain
+        # apt-get fails the step on fetch errors. PrusaSlicer stays on the
+        # Ubuntu package (upstream Flatpak-only after 2.9.0); f3d likewise.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb prusa-slicer f3d
+          command -v prusa-slicer
+          prusa-slicer --help >/dev/null
       - name: Install OpenSCAD nightly (cached)
         # Dev snapshots render with the Manifold backend — order-of-
         # magnitude faster than 2021.01's CGAL on these models. The stable
         # binary remains covered by the scad-check job.
         if: needs.changes.outputs.gate_designs != ''
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10-24"
       - uses: actions/setup-python@v7
         if: needs.changes.outputs.gate_designs != ''
         with:
@@ -1643,7 +1738,8 @@ jobs:
       github.event_name == 'pull_request' &&
       needs.changes.outputs.gate == 'true' &&
       needs.changes.outputs.gate_designs != ''
-    runs-on: ubuntu-latest
+    # Same 24.04 pin as render-gate / regen (issue #916 reopen).
+    runs-on: ubuntu-24.04
     continue-on-error: true
     permissions:
       contents: read
@@ -1676,6 +1772,8 @@ jobs:
       - name: Install OpenSCAD nightly (cached)
         # Same engine as render-gate so base and head render identically.
         uses: ./.github/actions/setup-openscad-nightly
+        with:
+          cache-version: "2026-10-24"
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -2001,6 +2099,7 @@ jobs:
     name: CI OK
     needs:
       - changes
+      - trust
       - lint
       - regen
       - printcheck-tests
