@@ -4678,14 +4678,16 @@ need = ("LD_PRELOAD: \"\"", "LD_LIBRARY_PATH: \"\"", "LD_AUDIT: \"\"",
         "BASH_ENV: \"\"", "ENV: \"\"", "NODE_OPTIONS: \"\"", "NODE_PATH: \"\"",
         "HTTP_PROXY: \"\"", "HTTPS_PROXY: \"\"", "ALL_PROXY: \"\"",
         "NODE_TLS_REJECT_UNAUTHORIZED: \"\"", "NODE_EXTRA_CA_CERTS: \"\"",
-        "SSLKEYLOGFILE: \"\"")
+        "SSLKEYLOGFILE: \"\"", "HOME: /home/runner",
+        "CLAUDE_CONFIG_DIR: /home/runner/.claude",
+        "XDG_CONFIG_HOME: /home/runner/.config")
 hits = 0
 for i, line in enumerate(lines):
     if needle not in line:
         continue
     # 36 lines covers PATH + comments + LD/NODE/proxy/TLS pins (+ Anthropic
     # BASE_URL pin on the tail links). Keep this ahead of the pin list length.
-    window = "\n".join(lines[i:i+36])
+    window = "\n".join(lines[i:i+44])
     missing = [n for n in need if n not in window]
     if missing:
         print(f"selftest: {path} SCRUB PATH at line {i+1} missing process-start pins: {', '.join(missing)}", file=sys.stderr)
