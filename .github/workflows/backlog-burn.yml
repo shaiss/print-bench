@@ -581,6 +581,7 @@ jobs:
           && steps.scrub_smoke.outcome == 'success'
         env:
           ANTHROPIC_API_KEY: ''
+          HOME: /home/runner
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -681,6 +682,7 @@ jobs:
           && steps.ship_zai_1.outcome != 'success'
         env:
           ANTHROPIC_API_KEY: ''
+          HOME: /home/runner
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -767,6 +769,7 @@ jobs:
           && steps.ship_zai_2.outcome != 'success'
         env:
           ANTHROPIC_API_KEY: ''
+          HOME: /home/runner
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -865,6 +868,7 @@ jobs:
           && steps.ship_zai_3.outcome != 'success'
         env:
           ANTHROPIC_API_KEY: ''
+          HOME: /home/runner
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -959,6 +963,7 @@ jobs:
           && steps.ship_anthropic_4.outcome != 'success'
         env:
           ANTHROPIC_API_KEY: ''
+          HOME: /home/runner
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''

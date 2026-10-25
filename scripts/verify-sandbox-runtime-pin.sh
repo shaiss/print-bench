@@ -30,6 +30,13 @@ case "$bin" in
     ;;
 esac
 
+# Under GHA, refuse a redirected HOME — a prior continue-on-error agent can
+# append HOME=… to GITHUB_ENV, which would make the ~/.local/bin strip miss
+# the real runner plant and let verify pass against an attacker tree.
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ "${HOME}" != "/home/runner" ]; then
+  echo "error: HOME must be /home/runner under GITHUB_ACTIONS (got '${HOME}')" >&2
+  exit 1
+fi
 local_bin="${HOME}/.local/bin"
 # Drop planted SCRUB-toolchain shadows under runner-writable prefixes.
 # ~/.local/bin: strip SCRUB names + node (a planted node would hijack
