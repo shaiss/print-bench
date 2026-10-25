@@ -228,6 +228,21 @@ bed.
   facets), style 6/6 at support-free 0.0888 (the flat ceiling band
   x ∈ [1, 5.1] is the honest cost), printcheck 100/100 on both parts,
   fusecheck 11/1. Telemetry: scores 92→92→100→100, fail lines 2→0→2→0.
+- **front-tab wall fix (post-#717, PM triage)** — the last link's front M4
+  tab left **0.23 mm** of plastic outboard of the Ø4.5 clearance hole
+  (`screw_clearance_d("M4")`): the hole was placed at
+  `(plate_x1 + x1)/2` instead of the slab centre `(x0+x1)/2`, offset
+  ~0.5 mm toward the free end. Even a centred hole in the old 5.96 mm slab
+  would have been only 0.73 mm — under the repo's 0.8 mm (two-line) floor.
+  Fix: derive `tab_front_x0/x1/hole_x` from `tab_hole_pad = m4_clr_r +
+  0.8` plus a 0.2 mm `tab_edge_ov` burial (centred hole, actual wall
+  1.0 mm; last-link-only, so the old "short of the next ear" cap does
+  not bind; slab ~0.54 mm longer, still short of pitch). Pitch, mid-link
+  interfaces and the rear tab unchanged. New `tab-wall` / `tab-wall-neg`
+  fitchecks (0.8 mm annulus minus the printed link must be empty; the
+  same probe at 3 mm must leave leftover) so printcheck's silence on
+  hole-edge margins cannot hide a regression. Measured after: outboard
+  = inboard = 1.00 mm (floor claim 0.80 mm).
 
 ## Print this first
 

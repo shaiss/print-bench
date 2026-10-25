@@ -119,8 +119,12 @@ demo_bend = 0; // [0:5:45]
 // check can fail). "pose_up44"/"pose_dn44" = link 1 rotated ±44° about
 // joint 1 against link 0 (must be EMPTY — articulation short of the stop).
 // "stop_up47"/"stop_dn47" = rotated ±47° (must be NON-EMPTY — the printed
-// stop blocks it). "fused" = oversized stubs at every joint, welding the
-// run into ONE body for ci.fusecheck's known-fused control.
+// stop blocks it). "tab-wall" = the 0.8 mm annulus around the last link's
+// front M4 hole minus the printed tab (must be EMPTY — ≥0.8 mm of plastic
+// all around the Ø4.5 clearance hole). "tab-wall-neg" = the same probe at
+// 3 mm (must be NON-EMPTY — proves the wall check can fail). "fused" =
+// oversized stubs at every joint, welding the run into ONE body for
+// ci.fusecheck's known-fused control.
 part = "";
 
 /* [Quality] */
@@ -215,6 +219,30 @@ crest_z = wall + passage_h + wall + passage_w / 2 - ridge_c;
 ridge_x0 = (plate_x1 + 0.3 - pitch
             + (crest_z - z_pin) * sin(stop_angle - 1)) / cos(stop_angle - 1);
 arm_x1b = plate_x1;   // arm front face flush with the plate front edge
+// ---- Mounting tabs (M4 clearance holes, ends only) ----
+// Repo feature floor: ≥0.8 mm (two 0.4 mm nozzle lines) of plastic around
+// every bolt hole. The front tab on the LAST link is free to grow past the
+// old "short of the next ear low web" cap — there is no next link — so its
+// length is sized from the clearance diameter, not borrowed from a
+// mid-chain clearance. (PM triage on #717: the shipped hole sat at
+// (plate_x1+x1)/2 instead of the slab centre, leaving 0.23 mm outboard of
+// the Ø4.5 hole; even a centred hole in the old 5.96 mm slab was only
+// 0.73 mm. Re-centre + lengthen; pitch and mid-link interfaces untouched.)
+tab_min_wall = 0.8;
+m4_clr_d     = screw_clearance_d("M4");   // 4.5 — ISO 273 normal fit
+m4_clr_r     = m4_clr_d / 2;
+tab_hole_pad = m4_clr_r + tab_min_wall;   // centre-to-edge minimum
+// Small oversize past the 0.8 mm floor so (a) the printed ligament is a
+// full two lines with margin and (b) the tab-wall annulus probe sits
+// strictly inside the slab — an exactly-tangent outer circle leaves
+// CGAL coincident-face slivers that fail the empty check vacuously.
+tab_edge_ov = 0.2;
+// Front tab: rear edge keeps its plate overlap; length = 2·(pad+ov) so a
+// centred hole has tab_min_wall+ov on both sides (~0.54 mm longer than
+// the old 5.96 mm slab; still well short of pitch, run length unchanged).
+tab_front_x0     = plate_x1 - 1;
+tab_front_x1     = tab_front_x0 + 2 * (tab_hole_pad + tab_edge_ov);
+tab_front_hole_x = (tab_front_x0 + tab_front_x1) / 2;
 
 // The bore cutter: the lib's gated teardrop profile, offset-grown (CC4)
 // with the ±dz copies that open roof AND floor to the whole-layer clear_z.
@@ -364,8 +392,10 @@ module link(tab_rear = false, tab_front = false, stub_d = pin_d) {
     for (sy = [-1, 1])
         translate([pitch, sy * stub_y_out, z_pin])
             rotate([90 * sy, 0, 0]) cylinder(d = stub_d, h = stub_len);
-    // Mounting tabs: flat bed-level plates with an M4 hole, ends only. The
-    // front tab stops short of the next link's ear low web (x = pitch-1).
+    // Mounting tabs: flat bed-level plates with an M4 clearance hole, ends
+    // only. Front tab sized/centred from tab_hole_pad (see derived block) —
+    // last-link-only, so its forward edge is free of the next-ear clearance
+    // that used to cap it at pitch+ear_low_x0-0.4.
     if (tab_rear)
         difference() {
             chamfered_slab(-8, plate_x0, 0, wall, true);
@@ -373,8 +403,8 @@ module link(tab_rear = false, tab_front = false, stub_d = pin_d) {
         }
     if (tab_front)
         difference() {
-            chamfered_slab(plate_x1 - 1, pitch + ear_low_x0 - 0.4, 0, wall, true);
-            translate([(plate_x1 + pitch + ear_low_x0 - 0.4) / 2, 0, -0.01])
+            chamfered_slab(tab_front_x0, tab_front_x1, 0, wall, true);
+            translate([tab_front_hole_x, 0, -0.01])
                 screw_hole("M4", l = wall + 0.02);
         }
     // Roof fins: twin proud ribs at the style's tokens (crest 1, flanks 45°
@@ -396,6 +426,24 @@ module link(tab_rear = false, tab_front = false, stub_d = pin_d) {
                              [style_rib_depth + style_rib_crest, style_rib_depth],
                              [2 * style_rib_depth + style_rib_crest, 0],
                              [2 * style_rib_depth + style_rib_crest, -0.3]]);
+}
+
+// Annulus probe for the front-tab wall fitcheck. Height stays inside the
+// un-chamfered band of chamfered_slab (bottom wall − chamfer mm are full
+// footprint) so the top-face edge break cannot vacate the outer ring.
+// `wall_req` is the radial stock outside the M4 clearance hole that must
+// be solid plastic in the printed link. The inner edge is inset a hair
+// past the clearance diameter so the probe sits in bulk plastic — a
+// co-facet ring against screw_hole()'s $fn=96 cylinder leaves CGAL
+// slivers that fail the empty check on a real ≥0.8 mm ligament.
+module tab_wall_annulus(wall_req) {
+    h = wall - style_edge_chamfer;
+    inner_d = m4_clr_d + 0.05;
+    difference() {
+        cylinder(d = m4_clr_d + 2 * wall_req, h = h);
+        translate([0, 0, -0.01])
+            cylinder(d = inner_d, h = h + 0.02);
+    }
 }
 
 // The straight printed run.
@@ -453,6 +501,22 @@ module main() {
            "ear rear-top corner sweeps into the previous link's ear nose (chamfer too small)");
     assert(ridge_x0 > plate_x0 && plate_x1 - ridge_x0 > 3,
            "vault ridge span degenerate — the ceiling would open or the ridge vanish");
+    assert(tab_min_wall >= 0.8,
+           "tab_min_wall under the repo's two-line feature floor (0.8 mm)");
+    assert(tab_front_x1 - tab_front_hole_x - m4_clr_r >= tab_min_wall - 1e-9
+           && tab_front_hole_x - tab_front_x0 - m4_clr_r >= tab_min_wall - 1e-9,
+           "front M4 tab wall under tab_min_wall — re-centre or lengthen the tab");
+    // Actual built wall (pad + ov) — kept as a separate assert so shrinking
+    // tab_edge_ov to zero still leaves the floor assert above green while
+    // this one names the intentional print margin.
+    assert(tab_front_x1 - tab_front_hole_x - m4_clr_r >= tab_min_wall + tab_edge_ov - 1e-9,
+           "front M4 tab lost its tab_edge_ov print margin");
+    // Rear tab (hole at x=-4, slab [-8, plate_x0]): both sides already clear
+    // the floor with margin; keep the same assert so a future edit can't
+    // quietly thin it.
+    assert(-4 - (-8) - m4_clr_r >= tab_min_wall - 1e-9
+           && plate_x0 - (-4) - m4_clr_r >= tab_min_wall - 1e-9,
+           "rear M4 tab wall under tab_min_wall");
 
     // Preview / printed run only for the empty selector. An unknown part
     // (a typo'd -D part=...) must not fall through to run() or demo_bend:
@@ -486,6 +550,27 @@ module main() {
         // ci.fusecheck's known-fused control: oversized stubs weld every
         // joint, the whole run renders as ONE body
         run(stub_d = pin_d + 2 * clear_xy + 1);
+    } else if (part == "tab-wall") {
+        // Front M4 tab ligament: the 0.8 mm annulus around the clearance
+        // hole must lie entirely inside the printed tab (difference empty
+        // against the real link() mesh — so a hole translate that drifts
+        // off the derived centre fails, not only a thinned pad formula).
+        // Probe height stays inside the un-chamfered band; tab_edge_ov
+        // buries the outer ring so CGAL coincident faces cannot sliver.
+        // Catches the #717 defect (0.23 mm outboard of Ø4.5).
+        difference() {
+            translate([tab_front_hole_x, 0, 0])
+                tab_wall_annulus(tab_min_wall);
+            link(tab_front = true);
+        }
+    } else if (part == "tab-wall-neg") {
+        // Demand 3 mm of radial wall — more than the tab has — MUST leave
+        // leftover solid. Without this the empty check is unfalsifiable.
+        difference() {
+            translate([tab_front_hole_x, 0, 0])
+                tab_wall_annulus(3.0);
+            link(tab_front = true);
+        }
     } else if (part == "") {
         if (demo_bend > 0) {
             link();             // preview pose: joint 1 bent, the rest straight
