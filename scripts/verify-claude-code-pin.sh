@@ -69,3 +69,14 @@ if [ "$got" != "$want" ]; then
   echo "error: Claude Code sha256 mismatch for ${bin} (got ${got} want ${want})" >&2
   exit 1
 fi
+
+# Drop any user Claude config a prior continue-on-error agent link may have
+# planted under the pinned HOME / CLAUDE_CONFIG_DIR / XDG_CONFIG_HOME. The
+# next secret-bearing claude-code-action parent process loads hooks/settings
+# from these paths; SCRUB/AppArmor only wrap sandboxed children. Recreate
+# empty dirs so Claude starts with a clean control plane each link.
+claude_cfg="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+xdg_claude="${XDG_CONFIG_HOME:-${HOME}/.config}/claude"
+rm -rf -- "${claude_cfg}" "${xdg_claude}" "${HOME}/.claude"
+mkdir -p -- "${claude_cfg}"
+echo "verify-claude-code-pin: ${bin} sha256 ok; wiped ${claude_cfg} (+ ${xdg_claude})"
