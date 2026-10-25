@@ -50,7 +50,7 @@ full body (see the coupon section below).
 | `finger_t` | 1.3 mm | Spring blade thickness — **the** release-force knob (stiffness ∝ t³) |
 | `pinch` | 0.35 mm | How far each blade protrudes past the cell surface |
 | `cell_clearance` | 0.4 mm | Bore over cell Ø — raise if your cells caliper fat |
-| `aa_lanes` / `aaa_lanes` | 4 / 4 | Lane counts; either can be 0 |
+| `aa_lanes` / `aaa_lanes` | 4 / 4 | Lane counts (v1 is 4+4; the mount spine and holes only exist when both groups are > 0) |
 | `aa_cells` / `aaa_cells` | 4 / 4 | Cells a lane holds (sets lane height) |
 | `mount_pitch` | 16 mm | Vertical spacing of the two M4 mounting holes |
 
@@ -64,14 +64,16 @@ Mount with two M4 screws through the spine (holes are Ø 4.5 clearance,
 top — the funnel guides the cell in and the springs ride its shoulder open;
 pull the bottom cell out the front to dispense.
 
-**Storing mixed orientations:** terminals of adjacent cells in one lane can
-touch end-to-end. Storing a lane all one way round (or mixing charged /
-flat consistently) avoids terminal contact — worth a habit, not a redesign.
+**Storing cells:** alternate adjacent cells in a lane so like terminals face
+(positive against positive), and do not mix charged cells with flat ones in
+the same lane — end-to-end contact in a same-way stack can make an unintended
+series path.
 
 **No lid:** the lanes are open at the top and front of the bottom grip, so a
-*fully inverted* caddy spills its column. Mounted or shelf-standing upright,
-shaking will not release anything — the grip holds the bottom cell and the
-bores leave the rest ~0.2 mm of play.
+*fully inverted* caddy spills its column. Mounted upright, the design intent
+is that no cell falls out when shaken — the grip holds the bottom cell and
+the bores leave the rest ~0.2 mm of play — until a field test confirms it
+(see PM.md v1 checklist).
 
 **Print this first:** `battery-caddy-coupon.scad` — one AA lane at
 production spring geometry. If the pull is too hard, drop `finger_t` by 0.1

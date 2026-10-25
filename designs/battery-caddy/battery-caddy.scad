@@ -185,8 +185,11 @@ module guards() {
 // Back plate: the wall rail, rounded in the vertical plane. Authored in a
 // local frame and rotated so the style's corner radius lands on the wall
 // face and the 0.6 mm chamfer on the bed face (use-y = 0).
+// rounded_box chamfers local z=0; rotate([-90,0,0]) maps that to world y
+// (bed). The older rotate([90,0,0])+translate([0,back_t,0]) put the chamfer
+// on the lane face at y=back_t and left the bed edge square.
 module back_plate() {
-    translate([0, back_t, 0]) rotate([90, 0, 0])
+    translate([0, 0, body_h()]) rotate([-90, 0, 0])
         rounded_box([body_w(), body_h(), back_t], r = style_corner_r,
                     bottom_chamfer = style_edge_chamfer);
 }
@@ -264,6 +267,35 @@ module spring_pockets() {
                       fh + 1.5 - foot_h + 0.02]);
 }
 
+// Front thumb scoop at the bottom of each lane: cuts the floor lip and the
+// wall mouths past the blade tips so a finger can pinch the bottom cell and
+// pull it forward. Wall-mouth depth stops a hair short of the blade tips so
+// the pinch band and its rooted feet stay intact; the floor groove reaches
+// further under the cell (inside the bore in x) without eating divider
+// roots. Blades are unioned after fixed_body and are not part of this cut.
+module thumb_scoops() {
+    each_lane()
+        let (b = bore_d($cd),
+             wall_d = max(1.2, (1 - blade_reach) * b - 0.4),
+             floor_d = min(b * 0.55, 9),
+             h = floor_t + min($cd * 0.65, $fh),
+             r = 1.6)
+        union() {
+            // open the wall mouths at the front of the grip band
+            translate([-pocket_d() - 0.02, back_t + b - wall_d, -0.01])
+                cube([b + 2 * pocket_d() + 0.04, wall_d + 0.02, h + 0.01]);
+            // rounded floor scoop — thumb under the cell's front
+            hull() {
+                for (sx = [r + 0.4, b - r - 0.4]) {
+                    translate([sx, back_t + b + 0.01, -0.01])
+                        cylinder(r = r, h = floor_t + 0.8, $fn = 20);
+                    translate([sx, back_t + b - floor_d + r, -0.01])
+                        cylinder(r = r, h = floor_t + 0.8, $fn = 20);
+                }
+            }
+        }
+}
+
 // Top loading funnel: a wedge that flares each lane's opening near the top,
 // so a cell dropped in square still finds the bore. The wedge widens upward
 // from the wall's inner face — a slope in the bed plane, not an overhang.
@@ -307,6 +339,7 @@ module fixed_body() {
             lane_floors();
         }
         spring_pockets();
+        thumb_scoops();
         funnels();
         mount_holes_cut();
     }
@@ -363,8 +396,10 @@ module spring_blade(b, fh, side) {
 module blades(delta = 0) {
     each_lane()
         let (b = bore_d($cd)) {
-        translate([delta, 0, 0]) spring_blade(b, $fh, 1);
-        translate([delta, 0, 0]) spring_blade(b, $fh, -1);
+        // +delta drives the right blade into its pocket; -delta drives the
+        // left blade the other way — same outward deflection on both sides.
+        translate([ delta, 0, 0]) spring_blade(b, $fh,  1);
+        translate([-delta, 0, 0]) spring_blade(b, $fh, -1);
     }
 }
 

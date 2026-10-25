@@ -114,22 +114,27 @@ Back plate flat on the bed; lanes run along the printer X. Footprint
 206.5 × 164.4 × 18.1 mm (the 4-high AA column claims the long axis; fits a
 250 × 210 × 220 volume). **No supports** — every overhang is either a bed
 chamfer, a funnel wall at 45°, or a vertical fin. PETG preferred for the
-springs (fatigue-tolerant); PLA workable with a coupon-thinned finger. A
-brim helps if the bed adhesion is marginal — the 18.1 mm-tall walls are long
-and thin. 0.2 mm layers, 3 perimeters.
+springs (fatigue-tolerant); PLA workable with a coupon-thinned finger.
+**Brim not needed** — the back plate is ~340 cm² of bed contact; skip a brim
+on a 220-class bed, where brim + footprint clips the printable width. 0.2 mm
+layers, 3 perimeters.
 
 ## Print this first
 
 `battery-caddy-coupon.scad` — one AA lane, two cells tall, production finger
-geometry (~1 h 53 m, 22 g). Load it with two cells and pull the bottom one
-out:
+geometry (~1 h 53 m, 22 g). Load it with two cells; reach the bottom cell
+through the front thumb scoop and pull it out:
 
-1. **Too hard to pull** (target is one-handed, firm but not a fight):
+1. **One pull → one cell**: the bottom cell should come free through the
+   scoop while the cell above drops into the grip. If you cannot get a
+   finger on the cell, file a follow-up on scoop depth; if both cells come
+   out together, raise `pinch`.
+2. **Too hard to pull** (target is one-handed, firm but not a fight):
    reduce `finger_t` 1.3 → 1.2 in 0.1 steps — stiffness goes as t³, so 0.1
    is a big step; try the pull after each.
-2. **Cells fall out on their own**: increase `finger_t`, or raise `pinch`
+3. **Cells fall out on their own**: increase `finger_t`, or raise `pinch`
    0.35 → 0.45.
-3. **PLA**: start at `finger_t = 1.2` — PLA prints stiffer than modeled
+4. **PLA**: start at `finger_t = 1.2` — PLA prints stiffer than modeled
    (the pop-fidget-card field test's 1.5 → 1.3 finding).
 
 Reprint the coupon per change; only print the full body once the pull feels
