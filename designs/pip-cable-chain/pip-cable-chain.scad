@@ -231,15 +231,20 @@ arm_x1b = plate_x1;   // arm front face flush with the plate front edge
 tab_min_wall = 0.8;
 m4_clr_d     = screw_clearance_d("M4");   // 4.5 — ISO 273 normal fit
 m4_clr_r     = m4_clr_d / 2;
-tab_hole_pad = m4_clr_r + tab_min_wall;   // centre-to-edge minimum
-// Small oversize past the 0.8 mm floor so (a) the printed ligament is a
-// full two lines with margin and (b) the tab-wall annulus probe sits
-// strictly inside the slab — an exactly-tangent outer circle leaves
-// CGAL coincident-face slivers that fail the empty check vacuously.
+// Centre-to-edge must cover the 0.8 mm floor AND the top-face inset of
+// chamfered_slab (style_edge_chamfer = 1 mm): without the chamfer term the
+// footprint wall is 1.0 mm but the top edge of the hole has zero ligament
+// where the 45° break meets the bore (CodeRabbit on #929).
+tab_hole_pad = m4_clr_r + tab_min_wall + style_edge_chamfer;
+// Small oversize past that so (a) the printed top-face ligament keeps a
+// hair of margin and (b) the tab-wall annulus probe sits strictly inside
+// the inset top footprint — an exactly-tangent outer circle leaves CGAL
+// coincident-face slivers that fail the empty check vacuously.
 tab_edge_ov = 0.2;
-// Front tab: rear edge keeps its plate overlap; length = 2·(pad+ov) so a
-// centred hole has tab_min_wall+ov on both sides (~0.54 mm longer than
-// the old 5.96 mm slab; still well short of pitch, run length unchanged).
+// Front tab: rear edge keeps its plate overlap; length = 2·(pad+ov).
+// Extends past pitch (~local x 17.1) — last-link-only, so no next-ear
+// interface; still short of the lug tip, run length (rear tab → lug tip)
+// unchanged. Pitch and mid-link geometry untouched.
 tab_front_x0     = plate_x1 - 1;
 tab_front_x1     = tab_front_x0 + 2 * (tab_hole_pad + tab_edge_ov);
 tab_front_hole_x = (tab_front_x0 + tab_front_x1) / 2;
@@ -428,21 +433,20 @@ module link(tab_rear = false, tab_front = false, stub_d = pin_d) {
                              [2 * style_rib_depth + style_rib_crest, -0.3]]);
 }
 
-// Annulus probe for the front-tab wall fitcheck. Height stays inside the
-// un-chamfered band of chamfered_slab (bottom wall − chamfer mm are full
-// footprint) so the top-face edge break cannot vacate the outer ring.
-// `wall_req` is the radial stock outside the M4 clearance hole that must
-// be solid plastic in the printed link. The inner edge is inset a hair
-// past the clearance diameter so the probe sits in bulk plastic — a
-// co-facet ring against screw_hole()'s $fn=96 cylinder leaves CGAL
-// slivers that fail the empty check on a real ≥0.8 mm ligament.
+// Annulus probe for the front-tab wall fitcheck. Spans the FULL tab
+// thickness (including the chamfered top band) so a footprint-only wall
+// that the top-face inset eats cannot pass. `wall_req` is the radial
+// stock outside the M4 clearance hole that must be solid plastic. The
+// inner edge is inset a hair past the clearance diameter so the probe
+// sits in bulk plastic — a co-facet ring against screw_hole()'s $fn=96
+// cylinder leaves CGAL slivers that fail the empty check on a real
+// ≥0.8 mm ligament.
 module tab_wall_annulus(wall_req) {
-    h = wall - style_edge_chamfer;
     inner_d = m4_clr_d + 0.05;
     difference() {
-        cylinder(d = m4_clr_d + 2 * wall_req, h = h);
+        cylinder(d = m4_clr_d + 2 * wall_req, h = wall);
         translate([0, 0, -0.01])
-            cylinder(d = inner_d, h = h + 0.02);
+            cylinder(d = inner_d, h = wall + 0.02);
     }
 }
 
@@ -506,11 +510,15 @@ module main() {
     assert(tab_front_x1 - tab_front_hole_x - m4_clr_r >= tab_min_wall - 1e-9
            && tab_front_hole_x - tab_front_x0 - m4_clr_r >= tab_min_wall - 1e-9,
            "front M4 tab wall under tab_min_wall — re-centre or lengthen the tab");
-    // Actual built wall (pad + ov) — kept as a separate assert so shrinking
-    // tab_edge_ov to zero still leaves the floor assert above green while
-    // this one names the intentional print margin.
-    assert(tab_front_x1 - tab_front_hole_x - m4_clr_r >= tab_min_wall + tab_edge_ov - 1e-9,
-           "front M4 tab lost its tab_edge_ov print margin");
+    // Top-face wall after chamfered_slab's inset: footprint wall minus the
+    // chamfer leg must still meet the floor (the #929 finding).
+    assert(tab_front_x1 - tab_front_hole_x - m4_clr_r - style_edge_chamfer
+               >= tab_min_wall - 1e-9,
+           "front M4 tab top-face wall under tab_min_wall after chamfer inset");
+    // Actual built footprint wall (pad + ov), naming the print margin.
+    assert(tab_front_x1 - tab_front_hole_x - m4_clr_r
+               >= tab_min_wall + style_edge_chamfer + tab_edge_ov - 1e-9,
+           "front M4 tab lost its chamfer+ov print margin");
     // Rear tab (hole at x=-4, slab [-8, plate_x0]): both sides already clear
     // the floor with margin; keep the same assert so a future edit can't
     // quietly thin it.
