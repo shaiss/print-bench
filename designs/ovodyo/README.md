@@ -245,10 +245,11 @@ bed**; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
 0.05 mm steps until the puck runs on by hand with light drag and seats without
 rattle — then render the halves with that value. If the coupon's male ring feels
 tight only at the very start of the turn, that's **first-layer squish on the
-coupon**, not the fit — don't loosen `seam_tol` for it; the production seam
-never touches the bed. If a seam threads on but won't seat flat, it's
-**cross-threaded** — back it all the way off and restart; don't loosen
-`seam_tol` for that either.
+coupon flange** (the thread sits ~1.5 mm above the bed), not the fit — don't
+loosen `seam_tol` for it. If the **thread lead-in itself binds** through the
+first half-turn, that *is* the fit — raise `seam_tol` by 0.05. If a seam
+threads on but won't seat flat, it's **cross-threaded** — back it all the way
+off and restart; don't loosen `seam_tol` for that either.
 
 **Stalks (v0 display):** trial-fit the rod dry in the `base-end` boss before
 final assembly, then seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
