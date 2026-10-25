@@ -308,8 +308,11 @@ module socket_body(clear = ball_xy_clear, collar = true, dome = true) {
 module base() {
     hd = socket_head("M4");
     difference() {
-        rounded_box([base_w, base_w, base_t], r = style_corner_r,
-                    bottom_chamfer = style_edge_chamfer);
+        // rounded_box is corner-anchored at its origin; the recess / counterbore
+        // / mount holes below assume a plate centred on (0,0). Shift the solid.
+        translate([-base_w / 2, -base_w / 2, 0])
+            rounded_box([base_w, base_w, base_t], r = style_corner_r,
+                        bottom_chamfer = style_edge_chamfer);
         // tenon recess. Lead-in at the TOP mouth: wide at the plate top,
         // narrowing into the pocket (the previous cone was inverted and
         // lived above the part — Drik R3.2).
