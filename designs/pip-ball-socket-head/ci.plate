@@ -1,0 +1,10 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/pip-ball-socket-head-plate.3mf (scripts/plate.sh, gate.sh --check).
+#
+# Head and base print SEPARATELY (PIP joint + M4 foot). A single STL of both
+# imports into the slicer as ONE fused body and prints welded. The plate packs
+# them as N distinct objects; the assembled render stays a preview.
+#
+# A subset of ci.parts: the coupon is NOT a plate part.
+head
+base
