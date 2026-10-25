@@ -1,0 +1,8 @@
+{
+  "name": "print-bench-sandbox-runtime-pin",
+  "private": true,
+  "description": "Locked install tree for @anthropic-ai/sandbox-runtime (issue #875 / Cipher on #876). Install only via scripts/install-sandbox-runtime-pin.sh (npm ci --ignore-scripts).",
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.80"
+  }
+}

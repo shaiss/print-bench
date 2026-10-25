@@ -4040,10 +4040,72 @@ EOF
     echo "selftest: expected 5 subprocess env scrubs, found ${scrub_n}" >&2
     exit 1
   }
+  if grep -q 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"' "$workflow"; then
+    echo "selftest: design-run must not set SCRUB=0 (issue #875 / Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$workflow"; then
+    echo "selftest: design-run must not clear apparmor_restrict_unprivileged_userns (Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'curl .*install\.sh(\s|\|)|install\.sh \| bash|bootstrap\.sh' "$workflow"; then
+    echo "selftest: design-run must not curl|bash install.sh (Cipher #876)" >&2
+    exit 1
+  fi
+  preflight_line="$(grep -n 'name: Install bubblewrap and pinned Claude Code before disabling sudo' "$workflow" | head -1 | cut -d: -f1)"
   sudo_line="$(grep -n 'name: Disable sudo before the agent' "$workflow" | head -1 | cut -d: -f1)"
+  smoke_line="$(grep -n 'name: Smoke-test Claude SCRUB=1 sandbox as the agent user' "$workflow" | head -1 | cut -d: -f1)"
+  verify1_line="$(grep -n 'name: Verify Claude Code pin (before link 1)' "$workflow" | head -1 | cut -d: -f1)"
   agent_line="$(grep -n 'name: Run via Z.AI (GLM, chain link 1)' "$workflow" | head -1 | cut -d: -f1)"
-  [ -n "$sudo_line" ] && [ -n "$agent_line" ] && [ "$sudo_line" -lt "$agent_line" ] || {
-    echo "selftest: sudo is not disabled before the agent steps" >&2
+  [ -n "$preflight_line" ] && [ -n "$sudo_line" ] && [ -n "$smoke_line" ] \
+    && [ -n "$verify1_line" ] && [ -n "$agent_line" ] \
+    && [ "$preflight_line" -lt "$sudo_line" ] && [ "$sudo_line" -lt "$smoke_line" ] \
+    && [ "$smoke_line" -lt "$verify1_line" ] && [ "$verify1_line" -lt "$agent_line" ] || {
+    echo "selftest: design-run preflight → disable-sudo → scrub smoke → verify → agent (Cipher #876)" >&2
+    exit 1
+  }
+  grep -q 'bubblewrap apparmor-profiles' "$workflow" && grep -q 'ripgrep' "$workflow" || {
+    echo "selftest: design-run preflight does not apt-get bubblewrap+apparmor-profiles+ripgrep" >&2
+    exit 1
+  }
+  grep -q 'setup-bwrap-apparmor.sh' "$workflow" || {
+    echo "selftest: design-run missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  grep -q 'install-claude-code-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing install-claude-code-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'smoke-claude-scrub-sandbox.sh' "$workflow" || {
+    echo "selftest: design-run missing smoke-claude-scrub-sandbox.sh" >&2
+    exit 1
+  }
+  grep -q 'verify-claude-code-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing verify-claude-code-pin.sh" >&2
+    exit 1
+  }
+  path_pin_n="$(grep -c 'path_to_claude_code_executable: \${{ steps.preflight.outputs.claude_bin }}' "$workflow" || true)"
+  [ "$path_pin_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run path_to_claude_code_executable pins, found ${path_pin_n}" >&2
+    exit 1
+  }
+  for gate in "steps.preflight.outcome == 'success'" "steps.disable_sudo.outcome == 'success'" \
+    "steps.scrub_smoke.outcome == 'success'"; do
+    gate_n="$(grep -c "$gate" "$workflow" || true)"
+    # 5 agent + 5 verify + smoke/disable references vary; require >= 5 on agent path
+    [ "$gate_n" -ge 5 ] || {
+      echo "selftest: design-run expected >=5 gates on ${gate}, found ${gate_n}" >&2
+      exit 1
+    }
+  done
+  verify_gate_n="$(grep -c "steps.verify_claude_[1-5].outcome == 'success'" "$workflow" || true)"
+  [ "$verify_gate_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run agent steps gated on verify_claude_N, found ${verify_gate_n}" >&2
+    exit 1
+  }
+  verify_step_n="$(grep -c 'name: Verify Claude Code pin (before link' "$workflow" || true)"
+  [ "$verify_step_n" -eq 5 ] || {
+    echo "selftest: expected 5 design-run per-link verify steps, found ${verify_step_n}" >&2
     exit 1
   }
   grep -q 'sudo -n true' "$workflow" || {
@@ -4358,10 +4420,33 @@ EOF
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2
     exit 1
   }
+  if grep -q 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"' "$burn"; then
+    echo "selftest: backlog-burn must not set SCRUB=0 (issue #875 / Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$burn"; then
+    echo "selftest: backlog-burn must not clear apparmor_restrict_unprivileged_userns (Cipher #876)" >&2
+    exit 1
+  fi
+  if grep -Eiq 'curl .*install\.sh(\s|\|)|install\.sh \| bash|bootstrap\.sh' "$burn"; then
+    echo "selftest: backlog-burn must not curl|bash install.sh (Cipher #876)" >&2
+    exit 1
+  fi
   burn_install_line="$(grep -n 'name: Install preflight toolchain before disabling sudo' "$burn" | head -1 | cut -d: -f1)"
   burn_sudo_line="$(grep -n 'name: Disable sudo before the agent' "$burn" | head -1 | cut -d: -f1)"
-  burn_pip_line="$(grep -n 'name: Install preflight Python tools after disabling sudo' "$burn" | head -1 | cut -d: -f1)"
+  burn_smoke_line="$(grep -n 'name: Smoke-test Claude SCRUB=1 sandbox as the agent user' "$burn" | head -1 | cut -d: -f1)"
+  burn_verify1_line="$(grep -n 'name: Verify Claude Code pin (before link 1)' "$burn" | head -1 | cut -d: -f1)"
   burn_agent_line="$(grep -n 'name: Ship via Z.AI (GLM, chain link 1)' "$burn" | head -1 | cut -d: -f1)"
+  [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_smoke_line" ] \
+    && [ -n "$burn_verify1_line" ] && [ -n "$burn_agent_line" ] \
+    && [ "$burn_install_line" -lt "$burn_sudo_line" ] \
+    && [ "$burn_sudo_line" -lt "$burn_smoke_line" ] \
+    && [ "$burn_smoke_line" -lt "$burn_verify1_line" ] \
+    && [ "$burn_verify1_line" -lt "$burn_agent_line" ] || {
+    echo "selftest: burn preflight → disable-sudo → scrub smoke → verify → agent (Cipher #876)" >&2
+    exit 1
+  }
+  burn_pip_line="$(grep -n 'name: Install preflight Python tools after disabling sudo' "$burn" | head -1 | cut -d: -f1)"
   # apt (needs root) before disable-sudo; pip (no root) after it; then the agent.
   # A pip install that drifts back before disable-sudo reopens Cipher #868 LOW.
   [ -n "$burn_install_line" ] && [ -n "$burn_sudo_line" ] && [ -n "$burn_pip_line" ] \
@@ -4459,10 +4544,604 @@ EOF
     echo "selftest: expected at least 5 burn steps gated on preflight_pip (keyed ships), found ${burn_pip_gate_n}" >&2
     exit 1
   }
-  grep -q 'openscad xvfb imagemagick prusa-slicer ffmpeg gifsicle jq' "$burn" || {
-    echo "selftest: the burn preflight install does not apt-get the session-start toolchain" >&2
+  # apt line may wrap after prusa-slicer; require both halves.
+  grep -q 'openscad xvfb imagemagick prusa-slicer' "$burn" \
+    &&   grep -q 'ffmpeg gifsicle jq bubblewrap apparmor-profiles' "$burn" \
+    && grep -q 'ripgrep' "$burn" || {
+    echo "selftest: the burn preflight install does not apt-get toolchain + bubblewrap + apparmor-profiles + ripgrep" >&2
     exit 1
   }
+  grep -q 'setup-bwrap-apparmor.sh' "$burn" || {
+    echo "selftest: burn missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  grep -q 'install-claude-code-pin.sh' "$burn" || {
+    echo "selftest: burn missing install-claude-code-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'smoke-claude-scrub-sandbox.sh' "$burn" || {
+    echo "selftest: burn missing smoke-claude-scrub-sandbox.sh" >&2
+    exit 1
+  }
+  grep -q 'verify-claude-code-pin.sh' "$burn" || {
+    echo "selftest: burn missing verify-claude-code-pin.sh" >&2
+    exit 1
+  }
+  burn_path_pin_n="$(grep -c 'path_to_claude_code_executable: \${{ steps.preflight.outputs.claude_bin }}' "$burn" || true)"
+  [ "$burn_path_pin_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn path_to_claude_code_executable pins, found ${burn_path_pin_n}" >&2
+    exit 1
+  }
+  for gate in "steps.preflight.outcome == 'success'" "steps.disable_sudo.outcome == 'success'" \
+    "steps.scrub_smoke.outcome == 'success'"; do
+    gate_n="$(grep -c "$gate" "$burn" || true)"
+    [ "$gate_n" -ge 5 ] || {
+      echo "selftest: burn expected >=5 gates on ${gate}, found ${gate_n}" >&2
+      exit 1
+    }
+  done
+  burn_verify_gate_n="$(grep -c "steps.verify_claude_[1-5].outcome == 'success'" "$burn" || true)"
+  [ "$burn_verify_gate_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn agent steps gated on verify_claude_N, found ${burn_verify_gate_n}" >&2
+    exit 1
+  }
+  burn_verify_step_n="$(grep -c 'name: Verify Claude Code pin (before link' "$burn" || true)"
+  [ "$burn_verify_step_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn per-link verify steps, found ${burn_verify_step_n}" >&2
+    exit 1
+  }
+  claude_ver_file="${repo_root}/.github/claude-code-version"
+  [ -f "$claude_ver_file" ] || {
+    echo "selftest: .github/claude-code-version is missing" >&2
+    exit 1
+  }
+  claude_ver="$(awk '/^version:/{print $2; exit}' "$claude_ver_file")"
+  claude_sha="$(awk '/^linux-x64-sha256:/{print $2; exit}' "$claude_ver_file")"
+  claude_fpr="$(awk '/^gpg-fingerprint:/{print $2; exit}' "$claude_ver_file")"
+  [[ "$claude_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "selftest: .github/claude-code-version has no exact version: pin" >&2
+    exit 1
+  }
+  [ "$claude_sha" = "bc1aad9982c7b59c7d889ff92595d61cf46e0a6eae074cb551d932a989bcd222" ] || {
+    echo "selftest: committed linux-x64-sha256 is not the Cipher-pinned 2.1.301 digest" >&2
+    exit 1
+  }
+  [ "$claude_fpr" = "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE" ] || {
+    echo "selftest: committed gpg-fingerprint is not the Anthropic Claude Code signing key" >&2
+    exit 1
+  }
+  srt_pin="${repo_root}/.github/sandbox-runtime-version"
+  [ -f "$srt_pin" ] || {
+    echo "selftest: .github/sandbox-runtime-version is missing" >&2
+    exit 1
+  }
+  srt_ver="$(awk '/^version:/{print $2; exit}' "$srt_pin")"
+  srt_integrity="$(awk '/^dist-integrity:/{print $2; exit}' "$srt_pin")"
+  [ "$srt_ver" = "0.0.80" ] || {
+    echo "selftest: sandbox-runtime version pin is not 0.0.80 (got ${srt_ver:-empty})" >&2
+    exit 1
+  }
+  [ "$srt_integrity" = "sha512-WG4P8faU/JDH90I8NLUBPmg7e72zhanlW3AVCD0OF06JCtId9IDFewFgv4YRvHLcnn//h1r6a1AMosBsMLpxnA==" ] || {
+    echo "selftest: sandbox-runtime dist-integrity is not the committed 0.0.80 pin" >&2
+    exit 1
+  }
+  for script in install-claude-code-pin.sh install-sandbox-runtime-pin.sh \
+    verify-claude-code-pin.sh verify-sandbox-runtime-pin.sh \
+    setup-bwrap-apparmor.sh smoke-claude-scrub-sandbox.sh; do
+    [ -x "${repo_root}/scripts/${script}" ] || {
+      echo "selftest: scripts/${script} missing or not executable" >&2
+      exit 1
+    }
+  done
+  grep -q 'verify-sandbox-runtime-pin.sh' "$burn" || {
+    echo "selftest: burn missing verify-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'verify-sandbox-runtime-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing verify-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  # Preflight/scrub/verify failure must score walk_outcome as failure (not
+  # not-run), or settle leaves the SHIP-LOCK starving the claimed issue.
+  # verify_claude_N is required: a pin-verify fail skips every ship and would
+  # otherwise take the all-skipped not-run branch (Bugbot on #876).
+  for wf in "$burn" "$workflow"; do
+    grep -q "steps.preflight.outcome == 'failure'" "$wf" || {
+      echo "selftest: $(basename "$wf") walk_outcome does not treat preflight failure as failure" >&2
+      exit 1
+    }
+    grep -q "steps.scrub_smoke.outcome == 'failure'" "$wf" || {
+      echo "selftest: $(basename "$wf") walk_outcome does not treat scrub_smoke failure as failure" >&2
+      exit 1
+    }
+    for n in 1 2 3 4 5; do
+      grep -q "steps.verify_claude_${n}.outcome == 'failure'" "$wf" || {
+        echo "selftest: $(basename "$wf") walk_outcome does not treat verify_claude_${n} failure as failure" >&2
+        exit 1
+      }
+    done
+    # The failure clause must appear on every walk_outcome twin (job output +
+    # metadata + red-gate env), not only once in a comment.
+    verify_fail_n="$(grep -c "steps.verify_claude_1.outcome == 'failure'" "$wf" || true)"
+    [ "$verify_fail_n" -ge 3 ] || {
+      echo "selftest: $(basename "$wf") expected >=3 walk_outcome twins scoring verify_claude_1 failure, found ${verify_fail_n}" >&2
+      exit 1
+    }
+  done
+  grep -q '\.local/bin/srt' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not strip ~/.local/bin/srt" >&2
+    exit 1
+  }
+  grep -q '\.local/bin' "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not strip ~/.local/bin shadows" >&2
+    exit 1
+  }
+  for tool in srt bwrap socat rg; do
+    grep -q "$tool" "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+      echo "selftest: verify-sandbox-runtime-pin.sh does not pin ${tool}" >&2
+      exit 1
+    }
+  done
+  grep -q 'assert_resolved bwrap /usr/bin/bwrap' \
+    "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not require /usr/bin/bwrap" >&2
+    exit 1
+  }
+  # Cipher MED-2: verify scripts must check the real inherited PATH (never
+  # re-export PATH=/usr/bin:/bin before that check — GITHUB_PATH prepends
+  # ahead of step env PATH and a re-set would hide a planted fake bwrap).
+  for vscript in verify-sandbox-runtime-pin.sh verify-claude-code-pin.sh; do
+    vpath="${repo_root}/scripts/${vscript}"
+    grep -Fq 'inherited PATH must be exactly /usr/bin:/bin' "$vpath" || {
+      echo "selftest: ${vscript} does not refuse a polluted inherited PATH" >&2
+      exit 1
+    }
+    # The PATH check must appear before any `export PATH=` (if any).
+    check_line="$(grep -n 'inherited PATH must be exactly /usr/bin:/bin' "$vpath" | head -1 | cut -d: -f1)"
+    export_line="$(grep -n 'export PATH=' "$vpath" | head -1 | cut -d: -f1 || true)"
+    if [ -n "${export_line:-}" ] && [ -n "${check_line:-}" ] \
+      && [ "$export_line" -le "$check_line" ]; then
+      echo "selftest: ${vscript} re-exports PATH before the inherited-PATH check (Cipher MED-2)" >&2
+      exit 1
+    fi
+  done
+  # Absolute bwrap/socat/rg pins: Claude managed-settings (preflight) + srt smoke.
+  grep -Fq '"bwrapPath": "/usr/bin/bwrap"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed bwrapPath" >&2
+    exit 1
+  }
+  grep -Fq '"socatPath": "/usr/bin/socat"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed socatPath" >&2
+    exit 1
+  }
+  grep -Fq '"command": "/usr/bin/rg"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed ripgrep path" >&2
+    exit 1
+  }
+  grep -Fq 'managed_dir="/etc/claude-code"' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not target /etc/claude-code" >&2
+    exit 1
+  }
+  grep -Fq 'managed-settings.json' \
+    "${repo_root}/scripts/install-claude-code-pin.sh" || {
+    echo "selftest: install-claude-code-pin.sh does not write managed-settings.json" >&2
+    exit 1
+  }
+  grep -Fq 'managed="/etc/claude-code/managed-settings.json"' \
+    "${repo_root}/scripts/verify-claude-code-pin.sh" || {
+    echo "selftest: verify-claude-code-pin.sh does not require managed-settings path pins" >&2
+    exit 1
+  }
+  grep -Fq '"bwrapPath": "/usr/bin/bwrap"' \
+    "${repo_root}/scripts/smoke-claude-scrub-sandbox.sh" || {
+    echo "selftest: smoke-claude-scrub-sandbox.sh srt settings lack absolute bwrapPath" >&2
+    exit 1
+  }
+  grep -Fq '"socatPath": "/usr/bin/socat"' \
+    "${repo_root}/scripts/smoke-claude-scrub-sandbox.sh" || {
+    echo "selftest: smoke-claude-scrub-sandbox.sh srt settings lack absolute socatPath" >&2
+    exit 1
+  }
+  grep -Fq '"command": "/usr/bin/rg"' \
+    "${repo_root}/scripts/smoke-claude-scrub-sandbox.sh" || {
+    echo "selftest: smoke-claude-scrub-sandbox.sh lacks absolute rg path" >&2
+    exit 1
+  }
+  # Cipher MED-1 hardened (#876): verify_claude_N uses deliver-restore
+  # discipline plus the Bugbot MEDIUM class close — uid-based orphan reap
+  # (not cwd/cmdline heuristics), fd+unlink helper/verify exec (no stable
+  # path TOCTOU), and a fresh mktemp CLAUDE_CONFIG_DIR per keyed ship.
+  [ -f "${repo_root}/scripts/restore-verify-pins.sh" ] || {
+    echo "selftest: scripts/restore-verify-pins.sh is missing" >&2
+    exit 1
+  }
+  grep -q 'reap_agent_orphans' "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not reap agent orphans" >&2
+    exit 1
+  }
+  # Uid/ancestor reap — must NOT key off cwd/cmdline/in_tree/mentions.
+  grep -Fq "/^Uid:/" "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not reap by process uid" >&2
+    exit 1
+  }
+  grep -q 'is_ancestor' "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not preserve the step ancestor chain" >&2
+    exit 1
+  }
+  if grep -qE 'in_tree=|mentions=' "${repo_root}/scripts/restore-verify-pins.sh"; then
+    echo "selftest: restore-verify-pins.sh still uses cwd/cmdline reap heuristics" >&2
+    exit 1
+  fi
+  grep -q 'mktemp -d "${RUNNER_TEMP}/verify-pins.XXXXXX"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not restore into a fresh mktemp dir" >&2
+    exit 1
+  }
+  grep -q 'sha256 does not match the pre-agent pin' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not compare restored bytes to the pre-agent pin" >&2
+    exit 1
+  }
+  grep -q "stat -c '%u'" "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not check restored-file owner" >&2
+    exit 1
+  }
+  # Verify scripts exec via /dev/fd after unlink (TOCTOU close).
+  grep -q '/usr/bin/bash "/dev/fd/${VERIFY_CLAUDE_FD}"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not exec verify-claude-code-pin via /dev/fd" >&2
+    exit 1
+  }
+  grep -q 'echo "claude_config_dir=${cfg_dir}" >> "$GITHUB_OUTPUT"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not publish claude_config_dir to GITHUB_OUTPUT" >&2
+    exit 1
+  }
+  grep -q 'mktemp -d "${RUNNER_TEMP}/claude-cfg.XXXXXX"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not allocate a fresh claude-cfg dir" >&2
+    exit 1
+  }
+  for wf in "$burn" "$workflow"; do
+    grep -q 'verify_claude_sha256=' "$wf" || {
+      echo "selftest: $(basename "$wf") start_ref does not record verify_claude_sha256" >&2
+      exit 1
+    }
+    grep -q 'verify_srt_sha256=' "$wf" || {
+      echo "selftest: $(basename "$wf") start_ref does not record verify_srt_sha256" >&2
+      exit 1
+    }
+    grep -q 'restore_verify_pins_sha256=' "$wf" || {
+      echo "selftest: $(basename "$wf") start_ref does not record restore_verify_pins_sha256" >&2
+      exit 1
+    }
+    # Digests must land in GITHUB_OUTPUT (step outputs), never a writable file
+    # the agent can rewrite.
+    grep -q 'echo "verify_claude_sha256=${verify_claude_sha256}" >> "$GITHUB_OUTPUT"' "$wf" || {
+      echo "selftest: $(basename "$wf") verify_claude_sha256 is not written to GITHUB_OUTPUT" >&2
+      exit 1
+    }
+    helper_restore_n="$(grep -c 'show "$START_SHA:scripts/restore-verify-pins.sh"' "$wf" || true)"
+    [ "$helper_restore_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 START_SHA restores of restore-verify-pins.sh, found ${helper_restore_n}" >&2
+      exit 1
+    }
+    helper_digest_n="$(grep -c 'RESTORE_VERIFY_PINS_SHA256: \${{ steps.start_ref.outputs.restore_verify_pins_sha256 }}' "$wf" || true)"
+    [ "$helper_digest_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 RESTORE_VERIFY_PINS_SHA256 env pins, found ${helper_digest_n}" >&2
+      exit 1
+    }
+    claude_digest_n="$(grep -c 'VERIFY_CLAUDE_SHA256: \${{ steps.start_ref.outputs.verify_claude_sha256 }}' "$wf" || true)"
+    [ "$claude_digest_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 VERIFY_CLAUDE_SHA256 env pins, found ${claude_digest_n}" >&2
+      exit 1
+    }
+    srt_digest_n="$(grep -c 'VERIFY_SRT_SHA256: \${{ steps.start_ref.outputs.verify_srt_sha256 }}' "$wf" || true)"
+    [ "$srt_digest_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 VERIFY_SRT_SHA256 env pins, found ${srt_digest_n}" >&2
+      exit 1
+    }
+    # No stable helper path — TOCTOU class.
+    if grep -q 'restore_tmp="${RUNNER_TEMP}/restore-verify-pins.sh"' "$wf"; then
+      echo "selftest: $(basename "$wf") still restores helper to a stable RUNNER_TEMP path" >&2
+      exit 1
+    fi
+    fd_exec_n="$(grep -c '/usr/bin/bash "/dev/fd/${helper_fd}"' "$wf" || true)"
+    [ "$fd_exec_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 /dev/fd helper execs, found ${fd_exec_n}" >&2
+      exit 1
+    }
+    # Every keyed ship/run must take CLAUDE_CONFIG_DIR from the preceding
+    # verify step's fresh mktemp output — never the shared /home/runner/.claude.
+    for n in 1 2 3 4 5; do
+      grep -q "CLAUDE_CONFIG_DIR: \${{ steps.verify_claude_${n}.outputs.claude_config_dir }}" "$wf" || {
+        echo "selftest: $(basename "$wf") ship/run link ${n} does not use verify_claude_${n} claude_config_dir" >&2
+        exit 1
+      }
+    done
+    # Every verify_claude_N step must pin RUNNER_TEMP and blank GIT_* the
+    # same way the deliver/bundle step does (step env wins over GITHUB_ENV).
+    python3 - "$wf" <<'PY' || exit 1
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines()
+need = (
+    "RUNNER_TEMP: ${{ runner.temp }}",
+    "VERIFY_CLAUDE_SHA256:",
+    "VERIFY_SRT_SHA256:",
+    "RESTORE_VERIFY_PINS_SHA256:",
+    'GIT_DIR: ""',
+    'GIT_WORK_TREE: ""',
+    'GIT_OBJECT_DIRECTORY: ""',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES: ""',
+    "GIT_CONFIG_PARAMETERS: \"\"",
+    "GIT_SSH_COMMAND: \"\"",
+)
+hits = 0
+for i, line in enumerate(lines):
+    if "id: verify_claude_" not in line:
+        continue
+    hits += 1
+    # env (~45 lines) + restore/digest/fd-exec (~60 lines); keep headroom.
+    window = "\n".join(lines[i:i+140])
+    missing = [n for n in need if n not in window]
+    if missing:
+        print(
+            f"selftest: {path} verify step at line {i+1} missing hardened pins: "
+            + ", ".join(missing),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if 'show "$START_SHA:scripts/restore-verify-pins.sh"' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not restore "
+            "restore-verify-pins.sh from START_SHA",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if 'restored restore-verify-pins.sh sha256 does not match the pre-agent pin' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not digest-check "
+            "the restored helper",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if '/usr/bin/bash "/dev/fd/${helper_fd}"' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not exec helper "
+            "via /dev/fd",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if 'exec {helper_fd}<' not in window or 'rm -f "$blob_tmp"' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not fd-hold + "
+            "unlink the helper before exec",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+if hits != 5:
+    print(f"selftest: {path} expected 5 verify_claude_N steps, found {hits}", file=sys.stderr)
+    sys.exit(1)
+PY
+    # Must not still invoke the workspace verify scripts directly in verify_claude_N.
+    if grep -E '^\s+"\$\{GITHUB_WORKSPACE\}/scripts/verify-(claude-code|sandbox-runtime)-pin\.sh"' "$wf" >/dev/null; then
+      echo "selftest: $(basename "$wf") still invokes workspace verify-*.sh directly (Cipher MED-1)" >&2
+      exit 1
+    fi
+    # Legacy un-hardened restore helper must be gone.
+    if grep -q 'restore_verify verify-claude-code-pin.sh' "$wf"; then
+      echo "selftest: $(basename "$wf") still uses the un-hardened restore_verify helper" >&2
+      exit 1
+    fi
+    start_sha_env_n="$(grep -c 'START_SHA: \${{ steps.start_ref.outputs.sha }}' "$wf" || true)"
+    # start_ref START_SHA appears on verify (5) plus other trusted steps; require
+    # at least the five verify steps carry it (grep counts all occurrences).
+    [ "$start_sha_env_n" -ge 5 ] || {
+      echo "selftest: $(basename "$wf") expected >=5 START_SHA env pins from start_ref, found ${start_sha_env_n}" >&2
+      exit 1
+    }
+  done
+  for wf in "$burn" "$workflow"; do
+    grep -q 'PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin' "$wf" || {
+      echo "selftest: $(basename "$wf") agent steps lack /opt+/usr/bin-before-~/.local/bin PATH" >&2
+      exit 1
+    }
+    # Every SCRUB agent PATH block must blank NODE_OPTIONS/LD_PRELOAD/…
+    # at process start (GITHUB_ENV plant from a prior continue-on-error link).
+    python3 - "$wf" <<'PY' || exit 1
+import re
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines()
+needle = "PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin"
+need = ("LD_PRELOAD: \"\"", "LD_LIBRARY_PATH: \"\"", "LD_AUDIT: \"\"",
+        "BASH_ENV: \"\"", "ENV: \"\"", "NODE_OPTIONS: \"\"", "NODE_PATH: \"\"",
+        "HTTP_PROXY: \"\"", "HTTPS_PROXY: \"\"", "ALL_PROXY: \"\"",
+        "NODE_TLS_REJECT_UNAUTHORIZED: \"\"", "NODE_EXTRA_CA_CERTS: \"\"",
+        "SSLKEYLOGFILE: \"\"", "HOME: /home/runner",
+        "XDG_CONFIG_HOME: /home/runner/.config")
+cfg_re = re.compile(
+    r"CLAUDE_CONFIG_DIR: \$\{\{ steps\.verify_claude_[1-5]\.outputs\.claude_config_dir \}\}"
+)
+hits = 0
+for i, line in enumerate(lines):
+    if needle not in line:
+        continue
+    # 36 lines covers PATH + comments + LD/NODE/proxy/TLS pins (+ Anthropic
+    # BASE_URL pin on the tail links). Keep this ahead of the pin list length.
+    window = "\n".join(lines[i:i+44])
+    missing = [n for n in need if n not in window]
+    if missing:
+        print(f"selftest: {path} SCRUB PATH at line {i+1} missing process-start pins: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+    if "CLAUDE_CONFIG_DIR: /home/runner/.claude" in window:
+        print(
+            f"selftest: {path} SCRUB PATH at line {i+1} still pins shared "
+            "/home/runner/.claude (must use verify_claude_N output)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not cfg_re.search(window):
+        print(
+            f"selftest: {path} SCRUB PATH at line {i+1} missing per-link "
+            "claude_config_dir from verify_claude_N",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    hits += 1
+if hits != 5:
+    print(f"selftest: {path} expected 5 SCRUB agent PATH blocks with hijack pins, found {hits}", file=sys.stderr)
+    sys.exit(1)
+# Anthropic tail (links 4–5): pin native BASE_URL + blank AUTH_TOKEN so a
+# prior GLM GITHUB_ENV plant cannot redirect the Anthropic API key.
+native = sum(1 for line in lines
+             if line.strip() == 'ANTHROPIC_BASE_URL: https://api.anthropic.com')
+blank_auth = sum(1 for line in lines if line.strip() == 'ANTHROPIC_AUTH_TOKEN: ""')
+if native != 2:
+    print(f"selftest: {path} expected 2 Anthropic-tail native ANTHROPIC_BASE_URL pins, found {native}", file=sys.stderr)
+    sys.exit(1)
+if blank_auth != 2:
+    print(f"selftest: {path} expected 2 Anthropic-tail ANTHROPIC_AUTH_TOKEN blanks, found {blank_auth}", file=sys.stderr)
+    sys.exit(1)
+PY
+  done
+  # Wrapper is built with absolute /opt node copy + cli.js (never env node,
+  # never /usr/local/bin/node — that path is world-writable on GHA).
+  grep -Fq 'exec ${pinned_node} ${cli_js}' \
+    "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not emit absolute-node wrapper" >&2
+    exit 1
+  }
+  grep -Fq 'pinned_node="${INSTALL_ROOT}/bin/node"' \
+    "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not copy node under /opt" >&2
+    exit 1
+  }
+  grep -Fq 'pinned_node="/opt/sandbox-runtime/bin/node"' \
+    "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not require /opt node pin" >&2
+    exit 1
+  }
+  grep -Eiq 'env[[:space:]]+node' "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not refuse env node" >&2
+    exit 1
+  }
+  grep -q 'install-sandbox-runtime-pin.sh' "$burn" || {
+    echo "selftest: burn missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'install-sandbox-runtime-pin.sh' "$workflow" || {
+    echo "selftest: design-run missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  # Actual install lines only — comments may mention the forbidden form.
+  if grep -E '^[[:space:]]*(sudo[[:space:]]+)?npm install -g.*@anthropic-ai/sandbox-runtime' \
+       "$burn" "$workflow" >/dev/null; then
+    echo "selftest: ship workflows still bare-npm-install sandbox-runtime (Cipher #876)" >&2
+    exit 1
+  fi
+  canary="${repo_root}/.github/workflows/claude-sandbox-canary.yml"
+  [ -f "$canary" ] || {
+    echo "selftest: claude-sandbox-canary.yml is missing" >&2
+    exit 1
+  }
+  grep -q 'permissions:' "$canary" && grep -A2 '^permissions:' "$canary" | grep -q 'contents: read' || {
+    echo "selftest: canary must set permissions contents: read" >&2
+    exit 1
+  }
+  if grep -E '\$\{\{[[:space:]]*secrets\.|ANTHROPIC_API_KEY: \$\{|ZAI_KEY: \$\{|GH_TOKEN: \$\{|REGEN_TOKEN: \$\{' \
+       "$canary" >/dev/null; then
+    echo "selftest: canary must not reference provider/PAT secrets" >&2
+    exit 1
+  fi
+  grep -q 'install-sandbox-runtime-pin.sh' "$canary" || {
+    echo "selftest: canary missing install-sandbox-runtime-pin.sh" >&2
+    exit 1
+  }
+  grep -q 'smoke-claude-scrub-sandbox.sh' "$canary" || {
+    echo "selftest: canary missing smoke-claude-scrub-sandbox.sh" >&2
+    exit 1
+  }
+  grep -q 'setup-bwrap-apparmor.sh' "$canary" || {
+    echo "selftest: canary missing setup-bwrap-apparmor.sh" >&2
+    exit 1
+  }
+  grep -q 'ripgrep' "$canary" || {
+    echo "selftest: canary preflight does not apt-get ripgrep (srt dependency)" >&2
+    exit 1
+  }
+  if grep -Eiq 'sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0|echo 0 \| sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns' "$canary"; then
+    echo "selftest: canary must not clear apparmor_restrict_unprivileged_userns" >&2
+    exit 1
+  fi
+  grep -q 'dist-integrity' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not check dist-integrity" >&2
+    exit 1
+  }
+  grep -q -- 'npm ci' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not use npm ci" >&2
+    exit 1
+  }
+  grep -q -- '--ignore-scripts' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not use --ignore-scripts" >&2
+    exit 1
+  }
+  srt_pkg="${repo_root}/.github/sandbox-runtime/package.json"
+  srt_lock="${repo_root}/.github/sandbox-runtime/package-lock.json"
+  [ -f "$srt_pkg" ] || {
+    echo "selftest: .github/sandbox-runtime/package.json is missing" >&2
+    exit 1
+  }
+  [ -f "$srt_lock" ] || {
+    echo "selftest: .github/sandbox-runtime/package-lock.json is missing" >&2
+    exit 1
+  }
+  if ! python3 - "$srt_pkg" "$srt_lock" "$srt_ver" "$srt_integrity" <<'PY'
+import json, sys
+pkg_path, lock_path, want_ver, want_integrity = sys.argv[1:5]
+pkg = json.load(open(pkg_path))
+lock = json.load(open(lock_path))
+dep = (pkg.get("dependencies") or {}).get("@anthropic-ai/sandbox-runtime", "")
+if dep != want_ver:
+    print(f"package.json dep {dep!r} != pin {want_ver!r}", file=sys.stderr)
+    sys.exit(1)
+if lock.get("lockfileVersion") != 3:
+    print(f"lockfileVersion {lock.get('lockfileVersion')!r} != 3", file=sys.stderr)
+    sys.exit(1)
+entry = (lock.get("packages") or {}).get("node_modules/@anthropic-ai/sandbox-runtime") or {}
+if entry.get("version") != want_ver or entry.get("integrity") != want_integrity:
+    print("lockfile entry mismatches pin", file=sys.stderr)
+    sys.exit(1)
+missing = [
+    name for name, meta in (lock.get("packages") or {}).items()
+    if name.startswith("node_modules/") and not (meta or {}).get("integrity")
+]
+if missing:
+    print("lock packages missing integrity:", missing, file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    echo "selftest: sandbox-runtime package/lock disagree with pin" >&2
+    exit 1
+  fi
+  for wf in "$burn" "$workflow" "$canary"; do
+    # The ship/canary jobs that call setup-bwrap-apparmor must pin 24.04.
+    if ! awk '
+      BEGIN { runs=0; hit=0; ok=0 }
+      /runs-on:[[:space:]]*ubuntu-24\.04/ { runs=1 }
+      /runs-on:[[:space:]]*ubuntu-latest/ { runs=0 }
+      /setup-bwrap-apparmor\.sh/ { hit=1; if (runs==1) ok=1 }
+      END { exit (hit && ok) ? 0 : 1 }
+    ' "$wf"; then
+      echo "selftest: $(basename "$wf") must pin runs-on: ubuntu-24.04 for AppArmor bwrap (got ubuntu-latest or missing)" >&2
+      exit 1
+    fi
+  done
   grep -q 'sudo -n true' "$burn" || {
     echo "selftest: the burn sudo disable step does not prove sudo is gone" >&2
     exit 1

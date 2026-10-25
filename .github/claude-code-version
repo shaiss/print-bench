@@ -1,0 +1,25 @@
+# Exact Claude Code CLI pin for backlog-burn.yml and design-run.yml
+# (issue #875 / Cipher rulings on #876). Both workflows read this file in
+# trusted preflight: GPG-verify the release manifest, sha256-check the
+# linux-x64 binary against the signed manifest AND the pin below, then
+# install root-owned under /opt/claude-code/<ver>/claude.
+#
+# How to bump:
+#   1. Change `version:` to the new exact X.Y.Z (never "latest").
+#   2. Fetch https://downloads.claude.ai/claude-code-releases/<ver>/manifest.json
+#      (+ .sig), gpg --verify with the fingerprint below, and copy
+#      platforms.linux-x64.checksum into `linux-x64-sha256:`.
+#   3. Confirm anthropics/claude-code-action still matches or keep
+#      path_to_claude_code_executable authoritative.
+#   4. Keep CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1; do not set SCRUB=0.
+#   5. Do NOT add kernel.apparmor_restrict_unprivileged_userns=0 — use the
+#      bwrap-userns-restrict AppArmor profile instead (Cipher on #876).
+#
+# Supply chain: claude.ai/install.sh is NOT used. The vendor HTTPS manifest
+# is GPG-signed; we import the key, require this fingerprint, gpg --verify
+# the .sig, then check the binary digest against both the signed manifest
+# and linux-x64-sha256 below.
+version: 2.1.301
+linux-x64-sha256: bc1aad9982c7b59c7d889ff92595d61cf46e0a6eae074cb551d932a989bcd222
+gpg-fingerprint: 31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+signing-key-url: https://downloads.claude.ai/keys/claude-code.asc

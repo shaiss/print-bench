@@ -331,6 +331,28 @@ surfaces studies awaiting a read live in
   - `assembly.sh` — generates assembly instructions (exploded view + BOM) from a
     per-design `assembly.conf` manifest, using NopSCADlib's BOM/assembly tooling;
     no design ships a manifest yet (issue #156, stage 2 of #98)
+  - `setup-bwrap-apparmor.sh` — loads Ubuntu's `bwrap-userns-restrict` AppArmor
+    profile so bubblewrap can create unprivileged user namespaces without clearing
+    `kernel.apparmor_restrict_unprivileged_userns` (Cipher #876); asserts `bwrap`
+    and `unpriv_bwrap` are in enforce and the sysctl still reads 1
+  - `install-claude-code-pin.sh` — GPG-verifies and installs the pinned Claude Code
+    CLI to `/opt/claude-code/<ver>/` from `.github/claude-code-version` (no
+    `install.sh` / curl|bash)
+  - `install-sandbox-runtime-pin.sh` — installs the pinned
+    `@anthropic-ai/sandbox-runtime` from the committed
+    `.github/sandbox-runtime/{package.json,package-lock.json}` via
+    `npm ci --ignore-scripts` (top-level + transitive deps integrity-checked),
+    cross-checked against `.github/sandbox-runtime-version`
+  - `smoke-claude-scrub-sandbox.sh` — real `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
+    Claude sandbox Bash smoke under AppArmor `unpriv_bwrap` after disable-sudo;
+    never falls back to clearing the userns sysctl
+  - `verify-claude-code-pin.sh` — re-verifies the root-owned Claude Code pin before
+    each keyed agent link (path, ownership, mode, parent writability, sha256)
+  - `verify-sandbox-runtime-pin.sh` — re-strips `~/.local/bin/{srt,bwrap,socat,rg,node}`
+    and `/usr/local/bin/{srt,bwrap,socat,rg}` and re-verifies the root-owned
+    `/opt/sandbox-runtime/bin/{srt,node}` pair (wrapper execs the /opt node
+    copy, not `env node` / `/usr/local/bin/node`) plus `/usr/bin/{bwrap,socat,rg}`
+    before each keyed agent link and the SCRUB smoke
   - `chunker-perms-check.sh` — proves the chunker's deny backstop
     (`.claude/chunker-settings.json`) still neutralizes every dangerous tool
     allow it would otherwise inherit from `.claude/settings.json`, which
