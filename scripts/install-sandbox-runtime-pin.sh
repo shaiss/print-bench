@@ -106,22 +106,25 @@ node_bin="$(command -v node)"
   echo "error: node not executable at ${node_bin:-empty}" >&2
   exit 1
 }
-# Node must be outside $HOME so a planted ~/.local/bin/node cannot be the
-# interpreter the root-owned wrapper permanently binds.
+# Source node must be outside $HOME (a planted ~/.local/bin/node cannot be
+# what we copy). We still refuse to BIND the wrapper to /usr/local/bin/node
+# itself — that directory is chmod 777 on GHA, so after disable-sudo a
+# runner-uid plant would replace the interpreter the root-owned wrapper
+# permanently execs. Copy into /opt instead (below).
 case "$node_bin" in
   "${HOME}"/*|/home/*)
     echo "error: node at ${node_bin} is under a home directory — refuse to pin a hijackable interpreter" >&2
     exit 1
     ;;
 esac
-node_bin="$(readlink -f "$node_bin")"
-[ -x "$node_bin" ] || {
-  echo "error: resolved node not executable: ${node_bin}" >&2
+node_src="$(readlink -f "$node_bin")"
+[ -x "$node_src" ] || {
+  echo "error: resolved node not executable: ${node_src}" >&2
   exit 1
 }
-case "$node_bin" in
+case "$node_src" in
   "${HOME}"/*|/home/*)
-    echo "error: resolved node at ${node_bin} is under a home directory" >&2
+    echo "error: resolved node at ${node_src} is under a home directory" >&2
     exit 1
     ;;
 esac
@@ -133,7 +136,7 @@ sudo rm -rf "$INSTALL_ROOT"
 sudo mkdir -p "${INSTALL_ROOT}/bin"
 sudo install -o root -g root -m 0644 \
   "${PKG_DIR}/package.json" "${PKG_DIR}/package-lock.json" "$INSTALL_ROOT/"
-sudo env "PATH=$(dirname "$npm_bin"):$(dirname "$node_bin"):/usr/local/bin:/usr/bin:/bin" \
+sudo env "PATH=$(dirname "$npm_bin"):$(dirname "$node_src"):/usr/local/bin:/usr/bin:/bin" \
   "$npm_bin" ci --ignore-scripts --prefix "$INSTALL_ROOT"
 
 cli_js="${INSTALL_ROOT}/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js"
@@ -142,12 +145,25 @@ cli_js="${INSTALL_ROOT}/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js"
   exit 1
 }
 
-# Root-owned wrapper with ABSOLUTE node + cli.js — never `#!/usr/bin/env node`
-# (a planted ~/.local/bin/node would intercept env). Not a symlink.
+# Root-owned Node copy under /opt — the wrapper binds THIS path, never the
+# world-writable /usr/local/bin/node source. Regular file, not a symlink.
+pinned_node="${INSTALL_ROOT}/bin/node"
+sudo install -o root -g root -m 0755 "$node_src" "$pinned_node"
+if [ -L "$pinned_node" ]; then
+  echo "error: pinned node must not be a symlink: ${pinned_node}" >&2
+  exit 1
+fi
+[ -x "$pinned_node" ] || {
+  echo "error: pinned node not executable: ${pinned_node}" >&2
+  exit 1
+}
+
+# Root-owned wrapper with ABSOLUTE /opt node + cli.js — never `#!/usr/bin/env
+# node` and never /usr/local/bin/node. Not a symlink.
 wrapper_tmp="$(mktemp)"
 cat > "$wrapper_tmp" <<EOF
 #!/bin/bash
-exec ${node_bin} ${cli_js} "\$@"
+exec ${pinned_node} ${cli_js} "\$@"
 EOF
 srt_bin="${INSTALL_ROOT}/bin/srt"
 sudo install -o root -g root -m 0755 "$wrapper_tmp" "$srt_bin"

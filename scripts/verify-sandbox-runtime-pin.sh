@@ -38,10 +38,9 @@ for name in srt bwrap socat rg node; do
   rm -f "${local_bin}/${name}" 2>/dev/null || true
 done
 # /usr/local/bin is world-writable on GHA — remove SCRUB names there too
-# (no sudo needed). Never strip `node`: hosted images keep the real Node
-# at /usr/local/bin/node, and the pin installer binds the root-owned srt
-# wrapper to that absolute interpreter. Deleting it after disable-sudo
-# breaks srt and every later SCRUB smoke that re-runs this verify.
+# (no sudo needed). Never strip `/usr/local/bin/node` (other tools may still
+# need the hosted-image Node); the srt wrapper binds a root-owned copy at
+# /opt/sandbox-runtime/bin/node instead, so a plant there cannot hijack SCRUB.
 for name in srt bwrap socat rg; do
   rm -f "/usr/local/bin/${name}" 2>/dev/null || true
 done
@@ -88,6 +87,38 @@ fi
 
 if grep -Eiq 'env[[:space:]]+node|/usr/bin/env[[:space:]]+node' "$bin"; then
   echo "error: pinned srt wrapper must not use env node: ${bin}" >&2
+  exit 1
+fi
+# Wrapper must exec the root-owned /opt node copy — never /usr/local/bin/node
+# (world-writable on GHA) or a home-dir plant.
+pinned_node="/opt/sandbox-runtime/bin/node"
+[ -e "$pinned_node" ] || {
+  echo "error: pinned node missing: ${pinned_node}" >&2
+  exit 1
+}
+if [ -L "$pinned_node" ]; then
+  echo "error: pinned node must not be a symlink: ${pinned_node}" >&2
+  exit 1
+fi
+[ -x "$pinned_node" ] || {
+  echo "error: pinned node not executable: ${pinned_node}" >&2
+  exit 1
+}
+node_owner_mode="$(stat -c '%u:%g %a' "$pinned_node")"
+if [ "$node_owner_mode" != "0:0 755" ]; then
+  echo "error: expected owner 0:0 mode 755 for ${pinned_node}, got ${node_owner_mode}" >&2
+  exit 1
+fi
+if [ -w "$pinned_node" ]; then
+  echo "error: ${pinned_node} is writable by $(id -un)" >&2
+  exit 1
+fi
+grep -Fq "$pinned_node" "$bin" || {
+  echo "error: pinned srt wrapper does not exec ${pinned_node}" >&2
+  exit 1
+}
+if grep -Eiq '/usr/local/bin/node|/\$\{?HOME|/home/' "$bin"; then
+  echo "error: pinned srt wrapper must not exec a hijackable node path: ${bin}" >&2
   exit 1
 fi
 cli_js="/opt/sandbox-runtime/node_modules/@anthropic-ai/sandbox-runtime/dist/cli.js"
