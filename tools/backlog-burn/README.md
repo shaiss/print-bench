@@ -85,9 +85,17 @@ branch), `select` returns **at most one** issue, applying, in order:
    disposition classification reads (`scripts/routine-lock-cleanup.sh`,
    PR #695), so the selector and the cleanup never disagree about what a
    defer is.
-6. **oldest-first** — among what survives, the oldest issue by creation time
+6. **not freshly burn-cooled** (issue #923) — excluded while the thread's
+   *latest* `🚢 BURN-COOLDOWN` comment is inside a 24 h cooldown:
+   `scripts/routine-lock-cleanup.sh` posts that marker when a ship walk
+   recorded neither delivered nor declined (the #885 spin: agent
+   `success`, no PR, no decline, re-picked every hour). Same expiry
+   semantics as decline/defer — it **expires, never buries**, and owner
+   activity re-arms — and it does **not** set `declined=true`, so the
+   settle job still goes red on that death.
+7. **oldest-first** — among what survives, the oldest issue by creation time
    (tie-broken by number, so the pick is deterministic across runs).
-7. **cap of one** — everything past the first eligible issue is deferred to
+8. **cap of one** — everything past the first eligible issue is deferred to
    the next firing, so a bad night costs one PR, not five.
 
 `select` is a **pure function of the snapshot** — no network — which is what

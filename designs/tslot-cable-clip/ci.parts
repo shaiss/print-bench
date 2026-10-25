@@ -1,0 +1,6 @@
+# Printable parts to render and gate in CI: the three stations. The
+# default render is the lineup preview (not a deliverable); the coupon is
+# gated via its wrapper file (tslot-cable-clip-coupon.scad).
+station-a
+station-b
+station-c
