@@ -4674,10 +4674,65 @@ EOF
     echo "selftest: install-sandbox-runtime-pin.sh does not check dist-integrity" >&2
     exit 1
   }
+  grep -q -- 'npm ci' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
+    echo "selftest: install-sandbox-runtime-pin.sh does not use npm ci" >&2
+    exit 1
+  }
   grep -q -- '--ignore-scripts' "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {
     echo "selftest: install-sandbox-runtime-pin.sh does not use --ignore-scripts" >&2
     exit 1
   }
+  srt_pkg="${repo_root}/.github/sandbox-runtime/package.json"
+  srt_lock="${repo_root}/.github/sandbox-runtime/package-lock.json"
+  [ -f "$srt_pkg" ] || {
+    echo "selftest: .github/sandbox-runtime/package.json is missing" >&2
+    exit 1
+  }
+  [ -f "$srt_lock" ] || {
+    echo "selftest: .github/sandbox-runtime/package-lock.json is missing" >&2
+    exit 1
+  }
+  if ! python3 - "$srt_pkg" "$srt_lock" "$srt_ver" "$srt_integrity" <<'PY'
+import json, sys
+pkg_path, lock_path, want_ver, want_integrity = sys.argv[1:5]
+pkg = json.load(open(pkg_path))
+lock = json.load(open(lock_path))
+dep = (pkg.get("dependencies") or {}).get("@anthropic-ai/sandbox-runtime", "")
+if dep != want_ver:
+    print(f"package.json dep {dep!r} != pin {want_ver!r}", file=sys.stderr)
+    sys.exit(1)
+if lock.get("lockfileVersion") != 3:
+    print(f"lockfileVersion {lock.get('lockfileVersion')!r} != 3", file=sys.stderr)
+    sys.exit(1)
+entry = (lock.get("packages") or {}).get("node_modules/@anthropic-ai/sandbox-runtime") or {}
+if entry.get("version") != want_ver or entry.get("integrity") != want_integrity:
+    print("lockfile entry mismatches pin", file=sys.stderr)
+    sys.exit(1)
+missing = [
+    name for name, meta in (lock.get("packages") or {}).items()
+    if name.startswith("node_modules/") and not (meta or {}).get("integrity")
+]
+if missing:
+    print("lock packages missing integrity:", missing, file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    echo "selftest: sandbox-runtime package/lock disagree with pin" >&2
+    exit 1
+  fi
+  for wf in "$burn" "$workflow" "$canary"; do
+    # The ship/canary jobs that call setup-bwrap-apparmor must pin 24.04.
+    if ! awk '
+      BEGIN { runs=0; hit=0; ok=0 }
+      /runs-on:[[:space:]]*ubuntu-24\.04/ { runs=1 }
+      /runs-on:[[:space:]]*ubuntu-latest/ { runs=0 }
+      /setup-bwrap-apparmor\.sh/ { hit=1; if (runs==1) ok=1 }
+      END { exit (hit && ok) ? 0 : 1 }
+    ' "$wf"; then
+      echo "selftest: $(basename "$wf") must pin runs-on: ubuntu-24.04 for AppArmor bwrap (got ubuntu-latest or missing)" >&2
+      exit 1
+    fi
+  done
   grep -q 'sudo -n true' "$burn" || {
     echo "selftest: the burn sudo disable step does not prove sudo is gone" >&2
     exit 1

@@ -334,10 +334,11 @@ surfaces studies awaiting a read live in
   - `install-claude-code-pin.sh` — GPG-verifies and installs the pinned Claude Code
     CLI to `/opt/claude-code/<ver>/` from `.github/claude-code-version` (no
     `install.sh` / curl|bash)
-  - `install-sandbox-runtime-pin.sh` — fetches the pinned
-    `@anthropic-ai/sandbox-runtime` tarball, verifies npm `dist.integrity` sha512
-    against `.github/sandbox-runtime-version`, then installs that verified local
-    tarball with `npm install -g --ignore-scripts`
+  - `install-sandbox-runtime-pin.sh` — installs the pinned
+    `@anthropic-ai/sandbox-runtime` from the committed
+    `.github/sandbox-runtime/{package.json,package-lock.json}` via
+    `npm ci --ignore-scripts` (top-level + transitive deps integrity-checked),
+    cross-checked against `.github/sandbox-runtime-version`
   - `smoke-claude-scrub-sandbox.sh` — real `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`
     Claude sandbox Bash smoke under AppArmor `unpriv_bwrap` after disable-sudo;
     never falls back to clearing the userns sysctl

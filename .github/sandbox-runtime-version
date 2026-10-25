@@ -3,15 +3,19 @@
 #
 # How to bump:
 #   1. Change `version:` to the new exact X.Y.Z (never a range / "latest").
-#   2. `npm view @anthropic-ai/sandbox-runtime@<ver> dist.integrity` and
-#      copy that value into `dist-integrity:` (must start with sha512-).
-#   3. Update `tarball-url:` to the matching registry URL (fallback if
-#      `npm pack` is unavailable).
-#   4. Install only via scripts/install-sandbox-runtime-pin.sh — never a
+#   2. Update `.github/sandbox-runtime/package.json` to the same exact version.
+#   3. In `.github/sandbox-runtime/`, run:
+#        npm install --package-lock-only --ignore-scripts
+#      and commit the regenerated package-lock.json (lockfileVersion 3).
+#   4. `npm view @anthropic-ai/sandbox-runtime@<ver> dist.integrity` and
+#      copy that value into `dist-integrity:` (must match the lockfile entry).
+#   5. Update `tarball-url:` to the matching registry URL (documentation).
+#   6. Install only via scripts/install-sandbox-runtime-pin.sh — never a
 #      bare `npm install -g @anthropic-ai/sandbox-runtime@…`.
 #
-# Supply chain: the committed dist-integrity is checked against the fetched
-# tarball bytes before `npm install -g --ignore-scripts` of that local file.
+# Supply chain: install-sandbox-runtime-pin.sh runs `npm ci --ignore-scripts`
+# against the committed package-lock.json, so the top-level tarball AND every
+# transitive dependency are integrity-checked before install.
 version: 0.0.80
 dist-integrity: sha512-WG4P8faU/JDH90I8NLUBPmg7e72zhanlW3AVCD0OF06JCtId9IDFewFgv4YRvHLcnn//h1r6a1AMosBsMLpxnA==
 tarball-url: https://registry.npmjs.org/@anthropic-ai/sandbox-runtime/-/sandbox-runtime-0.0.80.tgz
