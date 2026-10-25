@@ -32,10 +32,17 @@ esac
 
 local_bin="${HOME}/.local/bin"
 # Drop planted SCRUB-toolchain shadows under runner-writable prefixes.
+# ~/.local/bin: strip SCRUB names + node (a planted node would hijack
+# `#!/usr/bin/env node`; the pin wrapper binds an absolute node instead).
 for name in srt bwrap socat rg node; do
   rm -f "${local_bin}/${name}" 2>/dev/null || true
-  # /usr/local/bin is world-writable on GHA — remove SCRUB names there too
-  # (no sudo needed). Never rely on /usr/local/bin for these tools.
+done
+# /usr/local/bin is world-writable on GHA — remove SCRUB names there too
+# (no sudo needed). Never strip `node`: hosted images keep the real Node
+# at /usr/local/bin/node, and the pin installer binds the root-owned srt
+# wrapper to that absolute interpreter. Deleting it after disable-sudo
+# breaks srt and every later SCRUB smoke that re-runs this verify.
+for name in srt bwrap socat rg; do
   rm -f "/usr/local/bin/${name}" 2>/dev/null || true
 done
 
