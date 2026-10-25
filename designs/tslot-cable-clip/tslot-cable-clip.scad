@@ -281,8 +281,10 @@ module coupon() {
             translate([base[0], base[1], 0])
                 rounded_box([base_x - base[0], base[2] - base[1], 1.6],
                             r = min(corner_r, 2), bottom_chamfer = 0);
-            // back strip + the production lug fin on top of the base
-            translate([0, 0, 1.6])
+            // back strip + the production lug fin on top of the base.
+            // rounded_box is corner-anchored; centre the strip on y=0 with
+            // the lug (y0 below assumes that seating face).
+            translate([0, -strip_w / 2, 1.6])
                 rounded_box([3, strip_w, h - 1.6], r = min(corner_r, 1.5),
                             bottom_chamfer = 0);
             translate([0, 0, 1.6])
@@ -297,8 +299,11 @@ module coupon() {
 }
 
 module main() {
-    assert(lug_neck_w < slot_mouth - 0.2,
-           "lug neck must slide through the slot mouth — lower slot_fit_tol");
+    // At the documented rattling step slot_fit_tol=0.10, neck == mouth-0.2
+    // (0.10 per side). Strict `<` blocked that tune; `<=` keeps the 0.2 mm
+    // total floor while letting the coupon ladder reach 0.10.
+    assert(lug_neck_w <= slot_mouth - 0.2,
+           "lug neck must slide through the slot mouth — raise slot_fit_tol");
     assert(lug_head_w > slot_mouth + 0.5,
            "lug head must be wider than the mouth to hook the lips");
     assert(lug_head_w < slot_cavity_w - 2 * cavity_tol,
