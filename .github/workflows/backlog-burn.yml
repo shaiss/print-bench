@@ -631,6 +631,18 @@ jobs:
           # chmod 777 — runner can plant bwrap/srt there). AppArmor only
           # matches /usr/bin/bwrap. Pip user scripts stay reachable last.
           PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin
+          # Process-start pins: a prior continue-on-error agent link can
+          # append these to GITHUB_ENV. Step env wins at process start so
+          # Claude + the /opt srt→node wrapper cannot load a planted hook
+          # while ZAI_KEY / ANTHROPIC_* are still present. Same set the
+          # post-agent trusted steps already blank.
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -694,6 +706,18 @@ jobs:
           # chmod 777 — runner can plant bwrap/srt there). AppArmor only
           # matches /usr/bin/bwrap. Pip user scripts stay reachable last.
           PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin
+          # Process-start pins: a prior continue-on-error agent link can
+          # append these to GITHUB_ENV. Step env wins at process start so
+          # Claude + the /opt srt→node wrapper cannot load a planted hook
+          # while ZAI_KEY / ANTHROPIC_* are still present. Same set the
+          # post-agent trusted steps already blank.
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -756,6 +780,18 @@ jobs:
           # chmod 777 — runner can plant bwrap/srt there). AppArmor only
           # matches /usr/bin/bwrap. Pip user scripts stay reachable last.
           PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin
+          # Process-start pins: a prior continue-on-error agent link can
+          # append these to GITHUB_ENV. Step env wins at process start so
+          # Claude + the /opt srt→node wrapper cannot load a planted hook
+          # while ZAI_KEY / ANTHROPIC_* are still present. Same set the
+          # post-agent trusted steps already blank.
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -827,6 +863,18 @@ jobs:
           # chmod 777 — runner can plant bwrap/srt there). AppArmor only
           # matches /usr/bin/bwrap. Pip user scripts stay reachable last.
           PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin
+          # Process-start pins: a prior continue-on-error agent link can
+          # append these to GITHUB_ENV. Step env wins at process start so
+          # Claude + the /opt srt→node wrapper cannot load a planted hook
+          # while ZAI_KEY / ANTHROPIC_* are still present. Same set the
+          # post-agent trusted steps already blank.
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -890,6 +938,18 @@ jobs:
           # chmod 777 — runner can plant bwrap/srt there). AppArmor only
           # matches /usr/bin/bwrap. Pip user scripts stay reachable last.
           PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin
+          # Process-start pins: a prior continue-on-error agent link can
+          # append these to GITHUB_ENV. Step env wins at process start so
+          # Claude + the /opt srt→node wrapper cannot load a planted hook
+          # while ZAI_KEY / ANTHROPIC_* are still present. Same set the
+          # post-agent trusted steps already blank.
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          NODE_PATH: ""
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
