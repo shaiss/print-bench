@@ -564,6 +564,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          PATH: /usr/bin:/bin
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -586,6 +587,7 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+        shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
           "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
@@ -679,6 +681,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          PATH: /usr/bin:/bin
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -701,6 +704,7 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+        shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
           "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
@@ -780,6 +784,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          PATH: /usr/bin:/bin
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -802,6 +807,7 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+        shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
           "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
@@ -893,6 +899,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          PATH: /usr/bin:/bin
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -915,6 +922,7 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+        shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
           "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \
@@ -1008,6 +1016,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ''
           HOME: /home/runner
+          PATH: /usr/bin:/bin
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -1030,6 +1039,7 @@ jobs:
           OPENROUTER_API_KEY: ''
           GH_TOKEN: ''
           REGEN_TOKEN: ''
+        shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
           "${GITHUB_WORKSPACE}/scripts/verify-claude-code-pin.sh" \

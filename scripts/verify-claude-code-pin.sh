@@ -7,6 +7,13 @@
 # Requires: path under /opt/claude-code/, regular file (not symlink),
 # owner 0:0, mode 755, parents not writable by the runner user, sha256 match.
 set -euo pipefail
+# Pin tooling PATH so a planted ~/.local/bin/{rm,sha256sum,bash} cannot no-op
+# the wipe or forge a checksum. Absolute binaries below are belt-and-suspenders.
+export PATH="/usr/bin:/bin"
+RM_BIN="${RM_BIN:-/usr/bin/rm}"
+MKDIR_BIN="${MKDIR_BIN:-/usr/bin/mkdir}"
+SHA256SUM_BIN="${SHA256SUM_BIN:-/usr/bin/sha256sum}"
+STAT_BIN="${STAT_BIN:-/usr/bin/stat}"
 
 bin="${1:?usage: $0 <bin> <sha256>}"
 want="${2:?usage: $0 <bin> <sha256>}"
@@ -41,7 +48,7 @@ fi
   exit 1
 }
 
-owner_mode="$(stat -c '%u:%g %a' "$bin")"
+owner_mode="$("${STAT_BIN}" -c '%u:%g %a' "$bin")"
 if [ "$owner_mode" != "0:0 755" ]; then
   echo "error: expected owner 0:0 mode 755 for ${bin}, got ${owner_mode}" >&2
   exit 1
@@ -64,7 +71,7 @@ if [ -w "$bin" ]; then
   exit 1
 fi
 
-got="$(sha256sum "$bin" | cut -d' ' -f1)"
+got="$("${SHA256SUM_BIN}" "$bin" | cut -d' ' -f1)"
 if [ "$got" != "$want" ]; then
   echo "error: Claude Code sha256 mismatch for ${bin} (got ${got} want ${want})" >&2
   exit 1
@@ -79,7 +86,7 @@ runner_home="/home/runner"
 claude_cfg="${runner_home}/.claude"
 xdg_claude="${runner_home}/.config/claude"
 claude_json="${runner_home}/.claude.json"
-rm -rf -- "${claude_cfg}" "${xdg_claude}"
-rm -f -- "${claude_json}"
-mkdir -p -- "${claude_cfg}"
+"${RM_BIN}" -rf -- "${claude_cfg}" "${xdg_claude}"
+"${RM_BIN}" -f -- "${claude_json}"
+"${MKDIR_BIN}" -p -- "${claude_cfg}"
 echo "verify-claude-code-pin: ${bin} sha256 ok; wiped ${claude_cfg}, ${xdg_claude}, ${claude_json}"

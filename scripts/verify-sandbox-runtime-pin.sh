@@ -19,6 +19,9 @@
 # Usage: verify-sandbox-runtime-pin.sh [srt-bin]
 # Default bin: /opt/sandbox-runtime/bin/srt
 set -euo pipefail
+export PATH="/usr/bin:/bin"
+RM_BIN="${RM_BIN:-/usr/bin/rm}"
+STAT_BIN="${STAT_BIN:-/usr/bin/stat}"
 
 bin="${1:-/opt/sandbox-runtime/bin/srt}"
 
@@ -42,14 +45,14 @@ local_bin="${HOME}/.local/bin"
 # ~/.local/bin: strip SCRUB names + node (a planted node would hijack
 # `#!/usr/bin/env node`; the pin wrapper binds an absolute node instead).
 for name in srt bwrap socat rg node; do
-  rm -f "${local_bin}/${name}" 2>/dev/null || true
+  "${RM_BIN}" -f "${local_bin}/${name}" 2>/dev/null || true
 done
 # /usr/local/bin is world-writable on GHA — remove SCRUB names there too
 # (no sudo needed). Never strip `/usr/local/bin/node` (other tools may still
 # need the hosted-image Node); the srt wrapper binds a root-owned copy at
 # /opt/sandbox-runtime/bin/node instead, so a plant there cannot hijack SCRUB.
 for name in srt bwrap socat rg; do
-  rm -f "/usr/local/bin/${name}" 2>/dev/null || true
+  "${RM_BIN}" -f "/usr/local/bin/${name}" 2>/dev/null || true
 done
 
 [ -e "$bin" ] || {
@@ -69,7 +72,7 @@ fi
   exit 1
 }
 
-owner_mode="$(stat -c '%u:%g %a' "$bin")"
+owner_mode="$("${STAT_BIN}" -c '%u:%g %a' "$bin")"
 if [ "$owner_mode" != "0:0 755" ]; then
   echo "error: expected owner 0:0 mode 755 for ${bin}, got ${owner_mode}" >&2
   exit 1
@@ -111,7 +114,7 @@ fi
   echo "error: pinned node not executable: ${pinned_node}" >&2
   exit 1
 }
-node_owner_mode="$(stat -c '%u:%g %a' "$pinned_node")"
+node_owner_mode="$("${STAT_BIN}" -c '%u:%g %a' "$pinned_node")"
 if [ "$node_owner_mode" != "0:0 755" ]; then
   echo "error: expected owner 0:0 mode 755 for ${pinned_node}, got ${node_owner_mode}" >&2
   exit 1
