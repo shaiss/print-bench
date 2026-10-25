@@ -141,6 +141,94 @@ test("fetchLatestReleaseManifests reads *.manifest.json assets into an ok map", 
   assert.equal(designReleaseStatus(got, "nuggs"), SEAM.EMPTY, "a design the release doesn't carry");
 });
 
+// Authorization must stay on api.github.com (issue #903). browser_download_url
+// redirects github.com → objects.githubusercontent.com; a shared headers object
+// that carries Bearer would follow those hops. This mock follows that chain and
+// fails the test if any non-API host sees Authorization.
+test("fetchLatestReleaseManifests never sends Authorization off api.github.com (redirect path)", async () => {
+  const TOKEN = "ghs_test_token_do_not_leak";
+  const CDN_URL =
+    "https://objects.githubusercontent.com/github-production-release-asset/1/calibration-cube-v0.1.manifest.json";
+  const seen = [];
+
+  const fetchImpl = async (url, init = {}) => {
+    const headers = init.headers || {};
+    const auth =
+      headers.Authorization ??
+      headers.authorization ??
+      (typeof headers.get === "function" ? headers.get("Authorization") : null);
+    let host;
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      host = "";
+    }
+    seen.push({ url, host, auth: auth || null });
+
+    if (host !== "api.github.com" && auth) {
+      assert.fail(
+        `Authorization leaked to ${host} (${url}); must only be sent to api.github.com`
+      );
+    }
+
+    if (url === LATEST) {
+      assert.equal(auth, `Bearer ${TOKEN}`, "API /releases/latest should still authenticate");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          tag_name: "v0.1",
+          assets: [
+            {
+              name: "calibration-cube-v0.1.manifest.json",
+              browser_download_url: MF_URL,
+            },
+          ],
+        }),
+      };
+    }
+
+    // Simulate GitHub's browser_download_url redirect chain. A real fetch would
+    // follow these; we recurse so each hop is checked for Authorization.
+    if (url === MF_URL) {
+      return fetchImpl(CDN_URL, init);
+    }
+    if (url === CDN_URL) {
+      return { ok: true, status: 200, json: async () => MANIFEST };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+
+  const got = await fetchLatestReleaseManifests({
+    fetchImpl,
+    owner: OWNER,
+    repo: REPO,
+    token: TOKEN,
+  });
+  assert.equal(got.status, SEAM.OK);
+  assert.equal(got.items.get("calibration-cube").version, "v0.1");
+
+  // Exact hostname equality (not substring) — CodeQL flags hostname.includes("…")
+  // as incomplete URL sanitization even on a host list.
+  assert.ok(
+    seen.some((s) => s.host === "api.github.com"),
+    "hit the API"
+  );
+  assert.ok(
+    seen.some((s) => s.host === "github.com"),
+    "hit browser_download_url host"
+  );
+  assert.ok(
+    seen.some((s) => s.host === "objects.githubusercontent.com"),
+    "followed CDN redirect"
+  );
+  assert.equal(
+    seen.filter((s) => s.auth).length,
+    1,
+    "Authorization only on the one API request"
+  );
+});
+
 test("fetchLatestReleaseManifests: no published release (404) is empty, not unavailable", async () => {
   const got = await fetchLatestReleaseManifests({ fetchImpl: stubFetch({}), owner: OWNER, repo: REPO });
   assert.equal(got.status, SEAM.EMPTY);

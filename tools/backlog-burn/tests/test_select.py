@@ -54,6 +54,17 @@ def deferred(hours_ago, **extra):
     }
 
 
+def burn_cooldown(hours_ago, **extra):
+    """A 🚢 BURN-COOLDOWN marker comment `hours_ago` before NOW — posted by
+    routine-lock-cleanup when a ship walk neither delivered nor declined
+    (issue #923)."""
+    return {
+        "body": "🚢 BURN-COOLDOWN — neither delivered nor declined; skip for picking.",
+        "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
+        **extra,
+    }
+
+
 def snap(issues, *, open_prs=(), branches=()):
     return {
         "issues": list(issues),
@@ -594,6 +605,46 @@ def test_no_now_treats_defer_as_fresh():
     # reading keeps the brief out (mirrors the lock's undated-claim rule).
     undated = issue(121, "2026-08-01T00:00:00Z", comments=[deferred(48)])
     assert select_issue(snap([undated]))["selected"] is None
+
+
+# --------------------------------------------------------------------------
+# Guard: a neither-delivered-nor-declined burn parks the brief (issue #923)
+# --------------------------------------------------------------------------
+
+def test_recent_burn_cooldown_skips_for_the_next_brief():
+    # The #885 shape: the oldest brief got a claimless success that posted
+    # nothing, cleanup left a BURN-COOLDOWN, and the hourly firing must move
+    # past it instead of re-picking it forever.
+    blocked = issue(130, "2026-08-01T00:00:00Z", comments=[burn_cooldown(3)])
+    runnable = issue(131, "2026-08-02T00:00:00Z")
+    r = select_issue(snap([blocked, runnable]), now=NOW)
+    assert r["selected"] == 131
+    assert "burn-cool" in r["excluded"]["130"]
+
+
+def test_burn_cooldown_expires():
+    fresh = issue(132, "2026-08-01T00:00:00Z", comments=[burn_cooldown(23)])
+    assert select_issue(snap([fresh]), now=NOW)["selected"] is None
+    expired = issue(132, "2026-08-01T00:00:00Z", comments=[burn_cooldown(25)])
+    assert select_issue(snap([expired]), now=NOW)["selected"] == 132
+
+
+def test_owner_reply_re_arms_a_burn_cooldown():
+    answered = issue(133, "2026-08-01T00:00:00Z", comments=[
+        burn_cooldown(2),
+        {"body": "please retry this one — the agent just stalled.",
+         "createdAt": _iso(NOW - timedelta(hours=1))},
+    ])
+    assert select_issue(snap([answered]), now=NOW)["selected"] == 133
+
+
+def test_burn_cooldown_is_not_a_decline_or_defer():
+    cooled = issue(134, "2026-08-01T00:00:00Z", comments=[burn_cooldown(2)])
+    r = select_issue(snap([cooled]), now=NOW)
+    assert r["selected"] is None
+    assert "burn-cool" in r["excluded"]["134"]
+    assert "declin" not in r["excluded"]["134"]
+    assert "defer" not in r["excluded"]["134"]
 
 
 def _strip_created_at(comment, created_at):
