@@ -205,20 +205,30 @@ module coupon() {
     blade();
     translate([lug_x0 - 3, -7, z_plate])
         cube([lug_span + 6, 14, plate_t]);
-    // axle rings with the clearance value sunk into each ring's TOP face
-    // (non-fit surface — OD is the bore trial, ID rides the stub). Labels
-    // travel with the ring when a user breaks one off to test in a spool.
+    // axle rings with the clearance value sunk into each ring's TOP-FACE
+    // ANNULUS (non-fit surface — OD is the bore trial, ID rides the stub).
+    // Labels travel with the ring when a user breaks one off to test in a
+    // spool. Centre-on-axis text (size 5) sat inside the Øaxle_bore hole and
+    // printed blank — offset to mid-radius of the ~5 mm band instead.
     for (i = [0:2]) {
         x = lug_span + 42 + i * 62;
+        ring_od = spool_bore - sweep[i];
+        r_in = axle_bore_d / 2;
+        r_out = ring_od / 2;
+        r_mid = (r_in + r_out) / 2;
+        // Cap height leaves ≥0.8 mm radial margin inside the band so glyphs
+        // stay on solid (band ≈ 4.85–5.15 mm). size ≥ 3 keeps stroke ≥0.5
+        // at a 0.4 mm nozzle; deboss depth 0.7 ≥ 0.6.
+        label_h = min(3.2, r_out - r_in - 0.8);
         translate([x, 0, 0])
             difference() {
-                chamfered_cylinder(d = spool_bore - sweep[i], h = 10,
+                chamfered_cylinder(d = ring_od, h = 10,
                                    chamfer1 = 0.6, chamfer2 = 0.6);
                 translate([0, 0, -0.5])
                     cylinder(d = axle_bore_d, h = 11);
-                translate([0, 0, 10 - 0.6])
+                translate([0, r_mid, 10 - 0.6])
                     linear_extrude(0.7)
-                        text(str(sweep[i]), size = 5, halign = "center",
+                        text(str(sweep[i]), size = label_h, halign = "center",
                              valign = "center");
             }
     }
