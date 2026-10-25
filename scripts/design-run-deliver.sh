@@ -4751,32 +4751,143 @@ EOF
     echo "selftest: smoke-claude-scrub-sandbox.sh lacks absolute rg path" >&2
     exit 1
   }
-  # Cipher MED-1: verify_claude_N restores verify-*.sh from START_SHA into
-  # RUNNER_TEMP and invokes via /usr/bin/bash (not the agent-writable tree
-  # shebang).
+  # Cipher MED-1 hardened (#876 Bugbot HIGH): verify_claude_N uses the same
+  # deliver-restore discipline — pre-agent digests in start_ref outputs,
+  # pinned RUNNER_TEMP, blanked GIT_*, shared restore-verify-pins.sh helper
+  # (itself digest-checked) that reaps orphans, restores both verify-*.sh into
+  # a fresh mktemp dir, re-checks digest/owner, and execs via /usr/bin/bash.
+  [ -f "${repo_root}/scripts/restore-verify-pins.sh" ] || {
+    echo "selftest: scripts/restore-verify-pins.sh is missing" >&2
+    exit 1
+  }
+  grep -q 'reap_agent_orphans' "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not reap agent orphans" >&2
+    exit 1
+  }
+  grep -q 'mktemp -d "${RUNNER_TEMP}/verify-pins.XXXXXX"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not restore into a fresh mktemp dir" >&2
+    exit 1
+  }
+  grep -q 'sha256 does not match the pre-agent pin' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not compare restored bytes to the pre-agent pin" >&2
+    exit 1
+  }
+  grep -q "stat -c '%u'" "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not check restored-file owner" >&2
+    exit 1
+  }
+  grep -q '/usr/bin/bash "${workdir}/verify-claude-code-pin.sh"' \
+    "${repo_root}/scripts/restore-verify-pins.sh" || {
+    echo "selftest: restore-verify-pins.sh does not invoke verify-claude-code-pin via /usr/bin/bash" >&2
+    exit 1
+  }
   for wf in "$burn" "$workflow"; do
-    restore_n="$(grep -c 'restore_verify verify-claude-code-pin.sh' "$wf" || true)"
-    [ "$restore_n" = "5" ] || {
-      echo "selftest: $(basename "$wf") expected 5 START_SHA restores of verify-claude-code-pin.sh, found ${restore_n}" >&2
+    grep -q 'verify_claude_sha256=' "$wf" || {
+      echo "selftest: $(basename "$wf") start_ref does not record verify_claude_sha256" >&2
       exit 1
     }
-    restore_srt_n="$(grep -c 'restore_verify verify-sandbox-runtime-pin.sh' "$wf" || true)"
-    [ "$restore_srt_n" = "5" ] || {
-      echo "selftest: $(basename "$wf") expected 5 START_SHA restores of verify-sandbox-runtime-pin.sh, found ${restore_srt_n}" >&2
+    grep -q 'verify_srt_sha256=' "$wf" || {
+      echo "selftest: $(basename "$wf") start_ref does not record verify_srt_sha256" >&2
       exit 1
     }
-    bash_inv_n="$(grep -c '/usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh"' "$wf" || true)"
-    [ "$bash_inv_n" = "5" ] || {
-      echo "selftest: $(basename "$wf") expected 5 /usr/bin/bash invokes of restored verify-claude-code-pin.sh, found ${bash_inv_n}" >&2
+    grep -q 'restore_verify_pins_sha256=' "$wf" || {
+      echo "selftest: $(basename "$wf") start_ref does not record restore_verify_pins_sha256" >&2
       exit 1
     }
-    grep -F 'show "$START_SHA:scripts/${name}"' "$wf" >/dev/null || {
-      echo "selftest: $(basename "$wf") verify restore does not git-show from START_SHA" >&2
+    # Digests must land in GITHUB_OUTPUT (step outputs), never a writable file
+    # the agent can rewrite.
+    grep -q 'echo "verify_claude_sha256=${verify_claude_sha256}" >> "$GITHUB_OUTPUT"' "$wf" || {
+      echo "selftest: $(basename "$wf") verify_claude_sha256 is not written to GITHUB_OUTPUT" >&2
       exit 1
     }
+    helper_restore_n="$(grep -c 'show "$START_SHA:scripts/restore-verify-pins.sh"' "$wf" || true)"
+    [ "$helper_restore_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 START_SHA restores of restore-verify-pins.sh, found ${helper_restore_n}" >&2
+      exit 1
+    }
+    helper_digest_n="$(grep -c 'RESTORE_VERIFY_PINS_SHA256: \${{ steps.start_ref.outputs.restore_verify_pins_sha256 }}' "$wf" || true)"
+    [ "$helper_digest_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 RESTORE_VERIFY_PINS_SHA256 env pins, found ${helper_digest_n}" >&2
+      exit 1
+    }
+    claude_digest_n="$(grep -c 'VERIFY_CLAUDE_SHA256: \${{ steps.start_ref.outputs.verify_claude_sha256 }}' "$wf" || true)"
+    [ "$claude_digest_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 VERIFY_CLAUDE_SHA256 env pins, found ${claude_digest_n}" >&2
+      exit 1
+    }
+    srt_digest_n="$(grep -c 'VERIFY_SRT_SHA256: \${{ steps.start_ref.outputs.verify_srt_sha256 }}' "$wf" || true)"
+    [ "$srt_digest_n" = "5" ] || {
+      echo "selftest: $(basename "$wf") expected 5 VERIFY_SRT_SHA256 env pins, found ${srt_digest_n}" >&2
+      exit 1
+    }
+    # Every verify_claude_N step must pin RUNNER_TEMP and blank GIT_* the
+    # same way the deliver/bundle step does (step env wins over GITHUB_ENV).
+    python3 - "$wf" <<'PY' || exit 1
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines()
+need = (
+    "RUNNER_TEMP: ${{ runner.temp }}",
+    "VERIFY_CLAUDE_SHA256:",
+    "VERIFY_SRT_SHA256:",
+    "RESTORE_VERIFY_PINS_SHA256:",
+    'GIT_DIR: ""',
+    'GIT_WORK_TREE: ""',
+    'GIT_OBJECT_DIRECTORY: ""',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES: ""',
+    "GIT_CONFIG_PARAMETERS: \"\"",
+    "GIT_SSH_COMMAND: \"\"",
+)
+hits = 0
+for i, line in enumerate(lines):
+    if "id: verify_claude_" not in line:
+        continue
+    hits += 1
+    # env (~45 lines) + restore/digest/exec (~55 lines); keep headroom.
+    window = "\n".join(lines[i:i+130])
+    missing = [n for n in need if n not in window]
+    if missing:
+        print(
+            f"selftest: {path} verify step at line {i+1} missing hardened pins: "
+            + ", ".join(missing),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if 'show "$START_SHA:scripts/restore-verify-pins.sh"' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not restore "
+            "restore-verify-pins.sh from START_SHA",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if 'restored restore-verify-pins.sh sha256 does not match the pre-agent pin' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not digest-check "
+            "the restored helper",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if '/usr/bin/bash "$restore_tmp"' not in window:
+        print(
+            f"selftest: {path} verify step at line {i+1} does not exec helper "
+            "via /usr/bin/bash",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+if hits != 5:
+    print(f"selftest: {path} expected 5 verify_claude_N steps, found {hits}", file=sys.stderr)
+    sys.exit(1)
+PY
     # Must not still invoke the workspace verify scripts directly in verify_claude_N.
     if grep -E '^\s+"\$\{GITHUB_WORKSPACE\}/scripts/verify-(claude-code|sandbox-runtime)-pin\.sh"' "$wf" >/dev/null; then
       echo "selftest: $(basename "$wf") still invokes workspace verify-*.sh directly (Cipher MED-1)" >&2
+      exit 1
+    fi
+    # Legacy un-hardened restore helper must be gone.
+    if grep -q 'restore_verify verify-claude-code-pin.sh' "$wf"; then
+      echo "selftest: $(basename "$wf") still uses the un-hardened restore_verify helper" >&2
       exit 1
     fi
     start_sha_env_n="$(grep -c 'START_SHA: \${{ steps.start_ref.outputs.sha }}' "$wf" || true)"

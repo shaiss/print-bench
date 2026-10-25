@@ -205,6 +205,16 @@ jobs:
           # --routine; backlog-burn hashes the same file.
           deliver_sha256="$(git --no-replace-objects show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
           echo "deliver_sha256=${deliver_sha256}" >> "$GITHUB_OUTPUT"
+          # Digests of the pin-verify scripts (and the shared restore helper)
+          # before any agent step. verify_claude_N compares restored bytes to
+          # these so a replace ref / poisoned object / RUNNER_TEMP plant cannot
+          # swap the checks that gate the next keyed ship.
+          verify_claude_sha256="$(git --no-replace-objects show "HEAD:scripts/verify-claude-code-pin.sh" | sha256sum | awk '{print $1}')"
+          echo "verify_claude_sha256=${verify_claude_sha256}" >> "$GITHUB_OUTPUT"
+          verify_srt_sha256="$(git --no-replace-objects show "HEAD:scripts/verify-sandbox-runtime-pin.sh" | sha256sum | awk '{print $1}')"
+          echo "verify_srt_sha256=${verify_srt_sha256}" >> "$GITHUB_OUTPUT"
+          restore_verify_pins_sha256="$(git --no-replace-objects show "HEAD:scripts/restore-verify-pins.sh" | sha256sum | awk '{print $1}')"
+          echo "restore_verify_pins_sha256=${restore_verify_pins_sha256}" >> "$GITHUB_OUTPUT"
 
       - name: Prove lock-cleanup restore leaves a regular file
         # #923: fail loudly BEFORE any agent work if the settle job's
@@ -641,6 +651,15 @@ jobs:
           HOME: /home/runner
           PATH: /usr/bin:/bin
           START_SHA: ${{ steps.start_ref.outputs.sha }}
+          # Step env wins over a GITHUB_ENV plant. Digests are start_ref
+          # outputs (not a writable file) recorded before any agent ran.
+          RUNNER_TEMP: ${{ runner.temp }}
+          VERIFY_CLAUDE_SHA256: ${{ steps.start_ref.outputs.verify_claude_sha256 }}
+          VERIFY_SRT_SHA256: ${{ steps.start_ref.outputs.verify_srt_sha256 }}
+          RESTORE_VERIFY_PINS_SHA256: ${{ steps.start_ref.outputs.restore_verify_pins_sha256 }}
+          CLAUDE_BIN: ${{ steps.preflight.outputs.claude_bin }}
+          CLAUDE_SHA256: ${{ steps.preflight.outputs.claude_sha256 }}
+          SRT_BIN: /opt/sandbox-runtime/bin/srt
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -657,6 +676,14 @@ jobs:
           NODE_TLS_REJECT_UNAUTHORIZED: ""
           NODE_EXTRA_CA_CERTS: ""
           SSLKEYLOGFILE: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -666,12 +693,18 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
-          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
-          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
-          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          # Cipher MED-1 hardened: restore scripts/restore-verify-pins.sh from
+          # START_SHA (digest-checked against the pre-agent pin), then let that
+          # helper reap orphans, restore both verify-*.sh into a fresh mktemp
+          # dir, re-check digests/owner, and exec via /usr/bin/bash.
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RESTORE_VERIFY_PINS_SHA256:-}" ]; then
+            echo "::error::RESTORE_VERIFY_PINS_SHA256 is empty — the pin step did not hash the helper" >&2
             exit 1
           fi
           if [ -z "${RUNNER_TEMP:-}" ]; then
@@ -682,36 +715,46 @@ jobs:
             echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
             exit 1
           fi
-          restore_verify() {
-            local name="$1"
-            local dest="${RUNNER_TEMP}/${name}"
-            local blob_tmp
-            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
-            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
-              echo "::error::refusing to restore ${name} through a symlink" >&2
-              exit 1
-            fi
-            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
-              /usr/bin/rm -f "$blob_tmp"
-              echo "::error::could not restore ${name} from ${START_SHA}" >&2
-              exit 1
-            fi
-            if [ -L "$dest" ]; then
-              /usr/bin/rm -f "$dest"
-            fi
-            /usr/bin/mv -f "$blob_tmp" "$dest"
-            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
-              echo "::error::${name} restore did not leave a regular file" >&2
-              exit 1
-            fi
-          }
-          restore_verify verify-claude-code-pin.sh
-          restore_verify verify-sandbox-runtime-pin.sh
-          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
-            "${{ steps.preflight.outputs.claude_bin }}" \
-            "${{ steps.preflight.outputs.claude_sha256 }}"
-          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
-            /opt/sandbox-runtime/bin/srt
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore restore-verify-pins: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/restore-verify-pins.sh ]; then
+            echo "::error::refusing to restore restore-verify-pins: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/restore-verify-pins-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore restore-verify-pins through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/restore-verify-pins.sh" > "$blob_tmp"; then
+            /usr/bin/rm -f "$blob_tmp"
+            echo "::error::could not restore restore-verify-pins.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/restore-verify-pins.sh"
+          if [ -L "$restore_tmp" ]; then
+            /usr/bin/rm -f "$restore_tmp"
+          fi
+          /usr/bin/mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::restore-verify-pins restore did not leave a regular file" >&2
+            exit 1
+          fi
+          me="$(id -u)"
+          owner="$(/usr/bin/stat -c '%u' "$restore_tmp")"
+          if [ "$owner" != "$me" ]; then
+            echo "::error::restore-verify-pins.sh not owned by the runner uid (${owner} != ${me})" >&2
+            exit 1
+          fi
+          got="$(/usr/bin/sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$RESTORE_VERIFY_PINS_SHA256" ]; then
+            echo "::error::restored restore-verify-pins.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          /usr/bin/bash "$restore_tmp"
 
       - name: Ship via Z.AI (GLM, chain link 1)
         id: ship_zai_1
@@ -802,6 +845,15 @@ jobs:
           HOME: /home/runner
           PATH: /usr/bin:/bin
           START_SHA: ${{ steps.start_ref.outputs.sha }}
+          # Step env wins over a GITHUB_ENV plant. Digests are start_ref
+          # outputs (not a writable file) recorded before any agent ran.
+          RUNNER_TEMP: ${{ runner.temp }}
+          VERIFY_CLAUDE_SHA256: ${{ steps.start_ref.outputs.verify_claude_sha256 }}
+          VERIFY_SRT_SHA256: ${{ steps.start_ref.outputs.verify_srt_sha256 }}
+          RESTORE_VERIFY_PINS_SHA256: ${{ steps.start_ref.outputs.restore_verify_pins_sha256 }}
+          CLAUDE_BIN: ${{ steps.preflight.outputs.claude_bin }}
+          CLAUDE_SHA256: ${{ steps.preflight.outputs.claude_sha256 }}
+          SRT_BIN: /opt/sandbox-runtime/bin/srt
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -818,6 +870,14 @@ jobs:
           NODE_TLS_REJECT_UNAUTHORIZED: ""
           NODE_EXTRA_CA_CERTS: ""
           SSLKEYLOGFILE: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -827,12 +887,18 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
-          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
-          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
-          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          # Cipher MED-1 hardened: restore scripts/restore-verify-pins.sh from
+          # START_SHA (digest-checked against the pre-agent pin), then let that
+          # helper reap orphans, restore both verify-*.sh into a fresh mktemp
+          # dir, re-check digests/owner, and exec via /usr/bin/bash.
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RESTORE_VERIFY_PINS_SHA256:-}" ]; then
+            echo "::error::RESTORE_VERIFY_PINS_SHA256 is empty — the pin step did not hash the helper" >&2
             exit 1
           fi
           if [ -z "${RUNNER_TEMP:-}" ]; then
@@ -843,36 +909,46 @@ jobs:
             echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
             exit 1
           fi
-          restore_verify() {
-            local name="$1"
-            local dest="${RUNNER_TEMP}/${name}"
-            local blob_tmp
-            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
-            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
-              echo "::error::refusing to restore ${name} through a symlink" >&2
-              exit 1
-            fi
-            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
-              /usr/bin/rm -f "$blob_tmp"
-              echo "::error::could not restore ${name} from ${START_SHA}" >&2
-              exit 1
-            fi
-            if [ -L "$dest" ]; then
-              /usr/bin/rm -f "$dest"
-            fi
-            /usr/bin/mv -f "$blob_tmp" "$dest"
-            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
-              echo "::error::${name} restore did not leave a regular file" >&2
-              exit 1
-            fi
-          }
-          restore_verify verify-claude-code-pin.sh
-          restore_verify verify-sandbox-runtime-pin.sh
-          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
-            "${{ steps.preflight.outputs.claude_bin }}" \
-            "${{ steps.preflight.outputs.claude_sha256 }}"
-          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
-            /opt/sandbox-runtime/bin/srt
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore restore-verify-pins: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/restore-verify-pins.sh ]; then
+            echo "::error::refusing to restore restore-verify-pins: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/restore-verify-pins-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore restore-verify-pins through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/restore-verify-pins.sh" > "$blob_tmp"; then
+            /usr/bin/rm -f "$blob_tmp"
+            echo "::error::could not restore restore-verify-pins.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/restore-verify-pins.sh"
+          if [ -L "$restore_tmp" ]; then
+            /usr/bin/rm -f "$restore_tmp"
+          fi
+          /usr/bin/mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::restore-verify-pins restore did not leave a regular file" >&2
+            exit 1
+          fi
+          me="$(id -u)"
+          owner="$(/usr/bin/stat -c '%u' "$restore_tmp")"
+          if [ "$owner" != "$me" ]; then
+            echo "::error::restore-verify-pins.sh not owned by the runner uid (${owner} != ${me})" >&2
+            exit 1
+          fi
+          got="$(/usr/bin/sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$RESTORE_VERIFY_PINS_SHA256" ]; then
+            echo "::error::restored restore-verify-pins.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          /usr/bin/bash "$restore_tmp"
 
       - name: Ship via Z.AI (GLM, chain link 2)
         id: ship_zai_2
@@ -949,6 +1025,15 @@ jobs:
           HOME: /home/runner
           PATH: /usr/bin:/bin
           START_SHA: ${{ steps.start_ref.outputs.sha }}
+          # Step env wins over a GITHUB_ENV plant. Digests are start_ref
+          # outputs (not a writable file) recorded before any agent ran.
+          RUNNER_TEMP: ${{ runner.temp }}
+          VERIFY_CLAUDE_SHA256: ${{ steps.start_ref.outputs.verify_claude_sha256 }}
+          VERIFY_SRT_SHA256: ${{ steps.start_ref.outputs.verify_srt_sha256 }}
+          RESTORE_VERIFY_PINS_SHA256: ${{ steps.start_ref.outputs.restore_verify_pins_sha256 }}
+          CLAUDE_BIN: ${{ steps.preflight.outputs.claude_bin }}
+          CLAUDE_SHA256: ${{ steps.preflight.outputs.claude_sha256 }}
+          SRT_BIN: /opt/sandbox-runtime/bin/srt
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -965,6 +1050,14 @@ jobs:
           NODE_TLS_REJECT_UNAUTHORIZED: ""
           NODE_EXTRA_CA_CERTS: ""
           SSLKEYLOGFILE: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -974,12 +1067,18 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
-          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
-          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
-          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          # Cipher MED-1 hardened: restore scripts/restore-verify-pins.sh from
+          # START_SHA (digest-checked against the pre-agent pin), then let that
+          # helper reap orphans, restore both verify-*.sh into a fresh mktemp
+          # dir, re-check digests/owner, and exec via /usr/bin/bash.
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RESTORE_VERIFY_PINS_SHA256:-}" ]; then
+            echo "::error::RESTORE_VERIFY_PINS_SHA256 is empty — the pin step did not hash the helper" >&2
             exit 1
           fi
           if [ -z "${RUNNER_TEMP:-}" ]; then
@@ -990,36 +1089,46 @@ jobs:
             echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
             exit 1
           fi
-          restore_verify() {
-            local name="$1"
-            local dest="${RUNNER_TEMP}/${name}"
-            local blob_tmp
-            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
-            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
-              echo "::error::refusing to restore ${name} through a symlink" >&2
-              exit 1
-            fi
-            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
-              /usr/bin/rm -f "$blob_tmp"
-              echo "::error::could not restore ${name} from ${START_SHA}" >&2
-              exit 1
-            fi
-            if [ -L "$dest" ]; then
-              /usr/bin/rm -f "$dest"
-            fi
-            /usr/bin/mv -f "$blob_tmp" "$dest"
-            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
-              echo "::error::${name} restore did not leave a regular file" >&2
-              exit 1
-            fi
-          }
-          restore_verify verify-claude-code-pin.sh
-          restore_verify verify-sandbox-runtime-pin.sh
-          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
-            "${{ steps.preflight.outputs.claude_bin }}" \
-            "${{ steps.preflight.outputs.claude_sha256 }}"
-          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
-            /opt/sandbox-runtime/bin/srt
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore restore-verify-pins: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/restore-verify-pins.sh ]; then
+            echo "::error::refusing to restore restore-verify-pins: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/restore-verify-pins-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore restore-verify-pins through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/restore-verify-pins.sh" > "$blob_tmp"; then
+            /usr/bin/rm -f "$blob_tmp"
+            echo "::error::could not restore restore-verify-pins.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/restore-verify-pins.sh"
+          if [ -L "$restore_tmp" ]; then
+            /usr/bin/rm -f "$restore_tmp"
+          fi
+          /usr/bin/mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::restore-verify-pins restore did not leave a regular file" >&2
+            exit 1
+          fi
+          me="$(id -u)"
+          owner="$(/usr/bin/stat -c '%u' "$restore_tmp")"
+          if [ "$owner" != "$me" ]; then
+            echo "::error::restore-verify-pins.sh not owned by the runner uid (${owner} != ${me})" >&2
+            exit 1
+          fi
+          got="$(/usr/bin/sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$RESTORE_VERIFY_PINS_SHA256" ]; then
+            echo "::error::restored restore-verify-pins.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          /usr/bin/bash "$restore_tmp"
 
       - name: Ship via Z.AI (GLM, chain link 3)
         id: ship_zai_3
@@ -1108,6 +1217,15 @@ jobs:
           HOME: /home/runner
           PATH: /usr/bin:/bin
           START_SHA: ${{ steps.start_ref.outputs.sha }}
+          # Step env wins over a GITHUB_ENV plant. Digests are start_ref
+          # outputs (not a writable file) recorded before any agent ran.
+          RUNNER_TEMP: ${{ runner.temp }}
+          VERIFY_CLAUDE_SHA256: ${{ steps.start_ref.outputs.verify_claude_sha256 }}
+          VERIFY_SRT_SHA256: ${{ steps.start_ref.outputs.verify_srt_sha256 }}
+          RESTORE_VERIFY_PINS_SHA256: ${{ steps.start_ref.outputs.restore_verify_pins_sha256 }}
+          CLAUDE_BIN: ${{ steps.preflight.outputs.claude_bin }}
+          CLAUDE_SHA256: ${{ steps.preflight.outputs.claude_sha256 }}
+          SRT_BIN: /opt/sandbox-runtime/bin/srt
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -1124,6 +1242,14 @@ jobs:
           NODE_TLS_REJECT_UNAUTHORIZED: ""
           NODE_EXTRA_CA_CERTS: ""
           SSLKEYLOGFILE: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -1133,12 +1259,18 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
-          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
-          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
-          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          # Cipher MED-1 hardened: restore scripts/restore-verify-pins.sh from
+          # START_SHA (digest-checked against the pre-agent pin), then let that
+          # helper reap orphans, restore both verify-*.sh into a fresh mktemp
+          # dir, re-check digests/owner, and exec via /usr/bin/bash.
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RESTORE_VERIFY_PINS_SHA256:-}" ]; then
+            echo "::error::RESTORE_VERIFY_PINS_SHA256 is empty — the pin step did not hash the helper" >&2
             exit 1
           fi
           if [ -z "${RUNNER_TEMP:-}" ]; then
@@ -1149,36 +1281,46 @@ jobs:
             echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
             exit 1
           fi
-          restore_verify() {
-            local name="$1"
-            local dest="${RUNNER_TEMP}/${name}"
-            local blob_tmp
-            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
-            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
-              echo "::error::refusing to restore ${name} through a symlink" >&2
-              exit 1
-            fi
-            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
-              /usr/bin/rm -f "$blob_tmp"
-              echo "::error::could not restore ${name} from ${START_SHA}" >&2
-              exit 1
-            fi
-            if [ -L "$dest" ]; then
-              /usr/bin/rm -f "$dest"
-            fi
-            /usr/bin/mv -f "$blob_tmp" "$dest"
-            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
-              echo "::error::${name} restore did not leave a regular file" >&2
-              exit 1
-            fi
-          }
-          restore_verify verify-claude-code-pin.sh
-          restore_verify verify-sandbox-runtime-pin.sh
-          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
-            "${{ steps.preflight.outputs.claude_bin }}" \
-            "${{ steps.preflight.outputs.claude_sha256 }}"
-          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
-            /opt/sandbox-runtime/bin/srt
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore restore-verify-pins: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/restore-verify-pins.sh ]; then
+            echo "::error::refusing to restore restore-verify-pins: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/restore-verify-pins-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore restore-verify-pins through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/restore-verify-pins.sh" > "$blob_tmp"; then
+            /usr/bin/rm -f "$blob_tmp"
+            echo "::error::could not restore restore-verify-pins.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/restore-verify-pins.sh"
+          if [ -L "$restore_tmp" ]; then
+            /usr/bin/rm -f "$restore_tmp"
+          fi
+          /usr/bin/mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::restore-verify-pins restore did not leave a regular file" >&2
+            exit 1
+          fi
+          me="$(id -u)"
+          owner="$(/usr/bin/stat -c '%u' "$restore_tmp")"
+          if [ "$owner" != "$me" ]; then
+            echo "::error::restore-verify-pins.sh not owned by the runner uid (${owner} != ${me})" >&2
+            exit 1
+          fi
+          got="$(/usr/bin/sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$RESTORE_VERIFY_PINS_SHA256" ]; then
+            echo "::error::restored restore-verify-pins.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          /usr/bin/bash "$restore_tmp"
 
       - name: Ship via Anthropic (Claude, chain link 4)
         id: ship_anthropic_4
@@ -1263,6 +1405,15 @@ jobs:
           HOME: /home/runner
           PATH: /usr/bin:/bin
           START_SHA: ${{ steps.start_ref.outputs.sha }}
+          # Step env wins over a GITHUB_ENV plant. Digests are start_ref
+          # outputs (not a writable file) recorded before any agent ran.
+          RUNNER_TEMP: ${{ runner.temp }}
+          VERIFY_CLAUDE_SHA256: ${{ steps.start_ref.outputs.verify_claude_sha256 }}
+          VERIFY_SRT_SHA256: ${{ steps.start_ref.outputs.verify_srt_sha256 }}
+          RESTORE_VERIFY_PINS_SHA256: ${{ steps.start_ref.outputs.restore_verify_pins_sha256 }}
+          CLAUDE_BIN: ${{ steps.preflight.outputs.claude_bin }}
+          CLAUDE_SHA256: ${{ steps.preflight.outputs.claude_sha256 }}
+          SRT_BIN: /opt/sandbox-runtime/bin/srt
           CLAUDE_CONFIG_DIR: /home/runner/.claude
           XDG_CONFIG_HOME: /home/runner/.config
           LD_PRELOAD: ""
@@ -1279,6 +1430,14 @@ jobs:
           NODE_TLS_REJECT_UNAUTHORIZED: ""
           NODE_EXTRA_CA_CERTS: ""
           SSLKEYLOGFILE: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
           ANTHROPIC_AUTH_TOKEN: ''
           CLAUDE_KEY: ''
           ZAI_KEY: ''
@@ -1288,12 +1447,18 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -e {0}
         run: |
           set -euo pipefail
-          # Cipher MED-1: restore verify scripts from START_SHA into RUNNER_TEMP
-          # (agent-writable tree + #!/usr/bin/env bash is not trusted) and invoke
-          # via /usr/bin/bash. Cipher MED-2: refuse unless inherited PATH is
-          # exactly /usr/bin:/bin (GITHUB_PATH prepends ahead of step env PATH).
+          # Cipher MED-1 hardened: restore scripts/restore-verify-pins.sh from
+          # START_SHA (digest-checked against the pre-agent pin), then let that
+          # helper reap orphans, restore both verify-*.sh into a fresh mktemp
+          # dir, re-check digests/owner, and exec via /usr/bin/bash.
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RESTORE_VERIFY_PINS_SHA256:-}" ]; then
+            echo "::error::RESTORE_VERIFY_PINS_SHA256 is empty — the pin step did not hash the helper" >&2
             exit 1
           fi
           if [ -z "${RUNNER_TEMP:-}" ]; then
@@ -1304,36 +1469,46 @@ jobs:
             echo "::error::inherited PATH must be exactly /usr/bin:/bin (got '${PATH}'); GITHUB_PATH may have been planted" >&2
             exit 1
           fi
-          restore_verify() {
-            local name="$1"
-            local dest="${RUNNER_TEMP}/${name}"
-            local blob_tmp
-            blob_tmp="$(mktemp "${RUNNER_TEMP}/${name}.XXXXXX")"
-            if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
-              echo "::error::refusing to restore ${name} through a symlink" >&2
-              exit 1
-            fi
-            if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/${name}" > "$blob_tmp"; then
-              /usr/bin/rm -f "$blob_tmp"
-              echo "::error::could not restore ${name} from ${START_SHA}" >&2
-              exit 1
-            fi
-            if [ -L "$dest" ]; then
-              /usr/bin/rm -f "$dest"
-            fi
-            /usr/bin/mv -f "$blob_tmp" "$dest"
-            if [ -L "$dest" ] || [ ! -f "$dest" ]; then
-              echo "::error::${name} restore did not leave a regular file" >&2
-              exit 1
-            fi
-          }
-          restore_verify verify-claude-code-pin.sh
-          restore_verify verify-sandbox-runtime-pin.sh
-          /usr/bin/bash "${RUNNER_TEMP}/verify-claude-code-pin.sh" \
-            "${{ steps.preflight.outputs.claude_bin }}" \
-            "${{ steps.preflight.outputs.claude_sha256 }}"
-          /usr/bin/bash "${RUNNER_TEMP}/verify-sandbox-runtime-pin.sh" \
-            /opt/sandbox-runtime/bin/srt
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore restore-verify-pins: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/restore-verify-pins.sh ]; then
+            echo "::error::refusing to restore restore-verify-pins: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/restore-verify-pins-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore restore-verify-pins through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/restore-verify-pins.sh" > "$blob_tmp"; then
+            /usr/bin/rm -f "$blob_tmp"
+            echo "::error::could not restore restore-verify-pins.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/restore-verify-pins.sh"
+          if [ -L "$restore_tmp" ]; then
+            /usr/bin/rm -f "$restore_tmp"
+          fi
+          /usr/bin/mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::restore-verify-pins restore did not leave a regular file" >&2
+            exit 1
+          fi
+          me="$(id -u)"
+          owner="$(/usr/bin/stat -c '%u' "$restore_tmp")"
+          if [ "$owner" != "$me" ]; then
+            echo "::error::restore-verify-pins.sh not owned by the runner uid (${owner} != ${me})" >&2
+            exit 1
+          fi
+          got="$(/usr/bin/sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$RESTORE_VERIFY_PINS_SHA256" ]; then
+            echo "::error::restored restore-verify-pins.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          /usr/bin/bash "$restore_tmp"
 
       - name: Ship via Anthropic (Claude, chain link 5)
         id: ship_anthropic_5
