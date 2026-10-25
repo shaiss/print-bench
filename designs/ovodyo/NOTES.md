@@ -473,12 +473,17 @@ print, same material and profile as the halves.
   touches it — that is why the female fit is faithful. The **male** coupon,
   though, stands on a flange *on the bed*, while the production male ring prints
   at the *top* of the pole-down bottom half — so the male coupon can show a
-  first-flank elephant's foot the ball never gets. If the male starts hard but
-  runs free afterwards, that is coupon-only flange foot: fix the first layer
-  (z-offset / flow), and do **not** loosen `seam_tol` to chase it — prefer the
-  looser-feeling end of a clean seat before locking the value for the halves.
-  (Printing the coupon male top-down like the half is a coupon-fidelity
-  follow-up.)
+  first-flank elephant's foot the ball never gets. The male thread itself
+  starts at z ≈ 1.49 mm (on top of the 1.5 mm flange), so first-layer squish
+  fattens the flange foot, not the thread flanks. Diagnose the hard start:
+  - **Hard only at the first bite, then runs free** → coupon-only flange foot:
+    fix the first layer (z-offset / flow); do **not** loosen `seam_tol`.
+  - **Thread lead-in itself binds** (drag stays through the first half-turn) →
+    raise `seam_tol` by 0.05 and reprint the coupon — that is the fit the
+    halves will get.
+  Prefer the looser-feeling end of a clean seat before locking the value for
+  the halves. (Printing the coupon male top-down like the half is a
+  coupon-fidelity follow-up.)
 - Then render the four halves with the winning value and print them
   pole-down (see Key decisions: Ball seam).
 

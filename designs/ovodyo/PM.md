@@ -40,9 +40,9 @@ gears, numerals, slot, core); a committed two-tone reveal render is [#600](https
 2. geodesic-ball lib (#600)
 3. true stencil numerals (#601)
 4. tapered space-frame base (#603)
-5. real bevel differential + `ci.plate` deliverable + **ball-side stalk hub/socket**
-   (#604 — brass rods seat in `base-end` today; the hero's "reaches the ball
-   centre" is preview-only until the hub lands).
+5. real bevel differential + **ball-side stalk hub/socket** (#604 — brass rods
+   seat in `base-end` today; the hero's "reaches the ball centre" is preview-only
+   until the hub lands). The v0 `ci.plate` multi-object plate already ships.
 
 **#602** (flat parting seam) **shipped** as the captive threaded seam — v1 box 1
 then waits only on #601's stencil numerals.
@@ -63,6 +63,41 @@ then waits only on #601's stencil numerals.
 - [ ] A real bevel differential that the kinematics gate proves lands a face upright.
 - [ ] Product page shows the two-tone render (red reads through the cuts).
 - [ ] Human approves the shape (taste is a merge decision, not a gate).
+
+## Product page & shots (art direction)
+
+**Page promise.** A desk conversation piece you can build this weekend: two
+faceted dice-balls over an airy truss — honest about v0 (hand-set desk die; it
+does not yet move), with the two-tone hero as intent and `what-ships` as what
+arrives in single material.
+
+**Mechanism honesty.** Contact-sheet (as-printed) stays embedded; hero may show
+preview-only drivetrain and stalk joins, always captioned. `what-ships` sits
+beside the banner, never replaces the hero.
+
+**Shot list — tier 1 (real studio / OpenSCAD previews).** Frozen once reviewed;
+new region = new camera line.
+
+| Shot | What it sells | View | Look | Pose |
+|---|---|---|---|---|
+| hero | assembled clock intent (two-tone) | three-quarter | red preview + white | assembled |
+| what-ships | single-material honesty | three-quarter | monochrome | `part="what-ships"` |
+| hours-ball | one faceted die, numerals + slot | three-quarter | shell | `part="hours-ball"` |
+| slot-path | #768 corner-crossing band | near-equator | shell (`render`) | `part="hours-ball"` |
+| slot-window | aperture as a window | into the slot | OpenCSG red core | `part="hours-ball"` |
+| base-mech-in-situ | drivetrain has scale + home | side | preview gears in truss | `part="base-mech-in-situ"` |
+| contact-sheet | as-printed 4-view | iso/top/front/bottom-iso | — | default |
+
+**Lifestyle scenes — tier 2 (AI, cosmetic, disclosed).** None — keep the page
+on geometry-true renders until a PM deliberately asks for one.
+
+## Open decisions
+
+| Question | Blocking? | Assumption if unanswered |
+|---|---|---|
+| Owner `/decide yes` on #768 / merge PR #914? | Yes (merge) | Stay ready-for-review; geometry + page honesty land together |
+| Household measure for ~20 g ball heft? | No | Keep grams until someone weighs a spoonful once |
+| Bumper-recess lead-in chamfer on next base touch? | No | Queued to #603 |
 
 ## Decision log (recent)
 
