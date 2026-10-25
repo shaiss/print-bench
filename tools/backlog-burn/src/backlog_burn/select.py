@@ -57,6 +57,14 @@ the red-gate's disposition classification reads
 (``scripts/routine-lock-cleanup.sh``, PR #695), so the selector and the
 cleanup can never disagree about what counts as a defer.
 
+A fifth exclusion (issue #923): a brief whose *latest* ``🚢 BURN-COOLDOWN``
+comment sits inside the same shape of cooldown window is skipped —
+``scripts/routine-lock-cleanup.sh`` posts that marker when a ship walk
+records neither delivered nor declined (the #885 spin: agent ``success``,
+no PR, no decline, re-picked every hour). It is a decline *for picking
+purposes only*: the settle job still goes red on that death, and the
+cooldown **expires** so a later firing can retry. Owner activity re-arms.
+
 The skill re-verifies all of this before it touches a line of code, so this
 module is a best-effort *pre-filter*. Its only jobs are to never hand the run
 an issue that is plainly already taken, and — the hard cap — to never hand it
@@ -149,11 +157,23 @@ DEFERRED_MARKER = "🚢 DEFERRED"
 # the day a measurement says they should.
 DEFER_COOLDOWN_HOURS = 24
 
+# A comment whose first line starts with ``🚢 BURN-COOLDOWN`` is the cooldown
+# marker ``scripts/routine-lock-cleanup.sh`` posts when a ship walk recorded
+# neither delivered nor declined (issue #923). Same *state* semantics as a
+# decline/defer: the cooldown below reads the latest such comment.
+BURN_COOLDOWN_MARKER = "🚢 BURN-COOLDOWN"
+
+# A burn-cooldown this fresh keeps the brief out of selection (issue #923):
+# a run already burned a firing on it without an outcome, so re-selecting it
+# inside the window is the hourly #885 spin. After the window the brief is
+# eligible again — a dead run must never bury. Same 24 h as decline/defer.
+BURN_COOLDOWN_HOURS = 24
+
 # First-line prefixes marking a comment as machine-posted by one of this
 # repo's automation routines: the ship family (🚢 SHIP-LOCK / WITHDRAWN /
-# DECLINED / DEFERRED / "Draft PR up"), the HITL park (🚦 DECISION NEEDED),
-# the labeler's triage (🏷…) and the chunker's completion marker (🧩). 🏷 is
-# the bare
+# DECLINED / DEFERRED / BURN-COOLDOWN / "Draft PR up"), the HITL park
+# (🚦 DECISION NEEDED), the labeler's triage (🏷…) and the chunker's
+# completion marker (🧩). 🏷 is the bare
 # codepoint on purpose, so it matches both with and without the variation
 # selector the labeler emits. A run comment never re-arms a decline — only
 # owner activity does — and since the routines post through the same PAT
@@ -281,9 +301,10 @@ def _stop_marker_cooldown(
     """Why the issue is in the cooldown of its latest ``marker`` stop, or
     ``None`` if it is not.
 
-    One expiry semantics shared by both stop markers — declines (issue #530,
-    waiting on the owner) and defers (issue #694, waiting on dependencies) —
-    so the twin guards in :func:`exclusion_reason` cannot drift:
+    One expiry semantics shared by the stop markers — declines (issue #530,
+    waiting on the owner), defers (issue #694, waiting on dependencies) and
+    burn-cooldowns (issue #923, neither delivered nor declined) — so the
+    guards in :func:`exclusion_reason` cannot drift:
     *eligible iff every matching stop has a parseable ``createdAt`` AND (the
     latest of those is older than the window OR any non-run comment is newer
     than that latest stop)*. The latest dated stop is the state, so a second
@@ -423,6 +444,7 @@ def exclusion_reason(
     decision_label: str = DECISION_PENDING_LABEL,
     decline_cooldown_hours: float = DECLINE_COOLDOWN_HOURS,
     defer_cooldown_hours: float = DEFER_COOLDOWN_HOURS,
+    burn_cooldown_hours: float = BURN_COOLDOWN_HOURS,
     branch_ahead_by: Optional[dict[str, Any]] = None,
 ) -> Optional[str]:
     """Why this issue is *not* eligible, or ``None`` if it is.
@@ -440,13 +462,14 @@ def exclusion_reason(
     even after a pausing run's SHIP-LOCK goes stale, so it cannot be gated
     behind the staleness logic.
 
-    The decline and defer cooldowns sit *after* every claim guard because
-    they are the weakest exclusions — a mere "a run looked recently and
-    walked away" — so a real claim or a parked decision should be the
-    reported reason when more than one holds. Of the two stops the decline is
-    reported first: it names the stronger fact (a blocking question, not just
-    unlanded dependencies). (A declined thread usually carries a withdrawn
-    lock, which is why the lock guard passes it through to here.)
+    The decline, defer and burn-cooldown cooldowns sit *after* every claim
+    guard because they are the weakest exclusions — a mere "a run looked
+    recently and walked away" — so a real claim or a parked decision should
+    be the reported reason when more than one holds. Of the three stops the
+    decline is reported first (blocking question), then defer (unlanded
+    dependencies), then burn-cooldown (neither delivered nor declined). (A
+    declined thread usually carries a withdrawn lock, which is why the lock
+    guard passes it through to here.)
     """
     number = issue["number"]
     labels = issue.get("labels", []) or []
@@ -472,6 +495,12 @@ def exclusion_reason(
     )
     if defer is not None:
         return defer
+    burn = _stop_marker_cooldown(
+        issue.get("comments", []), now, burn_cooldown_hours,
+        BURN_COOLDOWN_MARKER, "burn-cooldown", "burn-cooled",
+    )
+    if burn is not None:
+        return burn
     return None
 
 

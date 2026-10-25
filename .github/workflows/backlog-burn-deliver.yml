@@ -433,16 +433,27 @@ jobs:
             echo "::error::triggering head is not in the default-branch history — refusing to fetch it" >&2
             exit 1
           fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          # mktemp→mv: never redirect onto a fixed path that may already be
+          # a symlink the shell would follow. #923.
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/routine-lock-cleanup-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore lock-cleanup through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$WORKFLOW_HEAD_SHA:scripts/routine-lock-cleanup.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore routine-lock-cleanup.sh from ${WORKFLOW_HEAD_SHA}" >&2
+            exit 1
+          fi
           script="${RUNNER_TEMP}/routine-lock-cleanup.sh"
-          if [ -L "$script" ] || [ -d "$script" ]; then
-            echo "::error::refusing to write lock-cleanup through a symlink" >&2
-            exit 1
-          fi
-          rm -f "$script"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$WORKFLOW_HEAD_SHA:scripts/routine-lock-cleanup.sh" > "$script"; then
+          if [ -L "$script" ]; then
             rm -f "$script"
-            exit 1
           fi
+          mv -f "$blob_tmp" "$script"
           if [ -L "$script" ] || [ ! -f "$script" ]; then
             echo "::error::lock-cleanup restore did not leave a regular file" >&2
             exit 1

@@ -199,6 +199,55 @@ jobs:
           deliver_sha256="$(git --no-replace-objects show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
           echo "deliver_sha256=${deliver_sha256}" >> "$GITHUB_OUTPUT"
 
+      - name: Prove lock-cleanup restore leaves a regular file
+        # #923: fail loudly BEFORE any agent work if the settle job's
+        # restore path cannot materialize routine-lock-cleanup.sh as a
+        # regular file (the same mktemp→mv pattern settle uses). A restore
+        # that only fails after a 15-minute ship walk wastes the firing.
+        env:
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/routine-lock-cleanup-preflight-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::lock-cleanup preflight: mktemp did not leave a regular file" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::lock-cleanup preflight: could not read scripts/routine-lock-cleanup.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          script="${RUNNER_TEMP}/routine-lock-cleanup-preflight.sh"
+          if [ -L "$script" ]; then
+            rm -f "$script"
+          fi
+          mv -f "$blob_tmp" "$script"
+          if [ -L "$script" ] || [ ! -f "$script" ]; then
+            echo "::error::lock-cleanup restore did not leave a regular file" >&2
+            exit 1
+          fi
+          rm -f "$script"
+          echo "lock-cleanup restore preflight ok (regular file from ${START_SHA})"
+
       - name: Note the job window start
         id: job_window
         # Stamped before any ship step and passed to routine-lock-cleanup as
@@ -1243,12 +1292,28 @@ jobs:
               exit 1
             fi
           fi
-          script="${RUNNER_TEMP}/routine-lock-cleanup.sh"
-          rm -f "$script"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$script"; then
-            rm -f "$script"
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
             exit 1
           fi
+          # mktemp→mv (same discipline as design-run-deliver restore): never
+          # redirect onto a fixed path that may already be a symlink the
+          # shell would follow. #923.
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/routine-lock-cleanup-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore lock-cleanup through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/routine-lock-cleanup.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore routine-lock-cleanup.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          script="${RUNNER_TEMP}/routine-lock-cleanup.sh"
+          if [ -L "$script" ]; then
+            rm -f "$script"
+          fi
+          mv -f "$blob_tmp" "$script"
           if [ -L "$script" ] || [ ! -f "$script" ]; then
             echo "::error::lock-cleanup restore did not leave a regular file" >&2
             exit 1
