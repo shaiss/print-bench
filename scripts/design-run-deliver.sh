@@ -4647,10 +4647,27 @@ EOF
     echo "selftest: install-sandbox-runtime-pin.sh does not strip ~/.local/bin/srt" >&2
     exit 1
   }
-  grep -q '\.local/bin/srt' "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
-    echo "selftest: verify-sandbox-runtime-pin.sh does not strip ~/.local/bin/srt" >&2
+  grep -q '\.local/bin' "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not strip ~/.local/bin shadows" >&2
     exit 1
   }
+  for tool in srt bwrap socat rg; do
+    grep -q "$tool" "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+      echo "selftest: verify-sandbox-runtime-pin.sh does not pin ${tool}" >&2
+      exit 1
+    }
+  done
+  grep -q 'assert_resolved bwrap /usr/bin/bwrap' \
+    "${repo_root}/scripts/verify-sandbox-runtime-pin.sh" || {
+    echo "selftest: verify-sandbox-runtime-pin.sh does not require /usr/bin/bwrap" >&2
+    exit 1
+  }
+  for wf in "$burn" "$workflow"; do
+    grep -q 'PATH: /usr/local/bin:/usr/bin:/bin' "$wf" || {
+      echo "selftest: $(basename "$wf") agent steps lack hardened PATH (no ~/.local/bin)" >&2
+      exit 1
+    }
+  done
   # Wrapper is built with absolute node + cli.js (never env node).
   grep -Fq 'exec ${node_bin} ${cli_js}' \
     "${repo_root}/scripts/install-sandbox-runtime-pin.sh" || {

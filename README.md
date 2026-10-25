@@ -344,9 +344,10 @@ surfaces studies awaiting a read live in
     never falls back to clearing the userns sysctl
   - `verify-claude-code-pin.sh` — re-verifies the root-owned Claude Code pin before
     each keyed agent link (path, ownership, mode, parent writability, sha256)
-  - `verify-sandbox-runtime-pin.sh` — re-strips `~/.local/bin/srt` and re-verifies
-    the root-owned `/opt/sandbox-runtime/bin/srt` wrapper (absolute node, not
-    `env node`) before each keyed agent link and the SCRUB smoke
+  - `verify-sandbox-runtime-pin.sh` — re-strips `~/.local/bin/{srt,bwrap,socat,rg,node}`
+    and re-verifies the root-owned `/opt/sandbox-runtime/bin/srt` wrapper
+    (absolute node, not `env node`) plus `/usr/bin/{bwrap,socat,rg}` before each
+    keyed agent link and the SCRUB smoke
   - `chunker-perms-check.sh` — proves the chunker's deny backstop
     (`.claude/chunker-settings.json`) still neutralizes every dangerous tool
     allow it would otherwise inherit from `.claude/settings.json`, which

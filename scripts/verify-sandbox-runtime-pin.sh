@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# Re-verify the root-owned sandbox-runtime (srt) pin before a keyed agent
-# link or SCRUB smoke (issue #875 / Cipher follow-up on #876).
+# Re-verify the root-owned sandbox-runtime (srt) pin AND the SCRUB toolchain
+# PATH surface before a keyed agent link or SCRUB smoke (issue #875 / Cipher
+# follow-up on #876).
 #
-# Mirrors verify-claude-code-pin.sh for the PATH-resolved `srt` binary that
-# Claude's SCRUB wrap invokes by name: strip a runner-writable ~/.local/bin
-# shadow, require the absolute /opt wrapper (root-owned, not a symlink, no
-# `env node`), and require `command -v srt` to resolve to that same file.
+# Claude's SCRUB wrap PATH-resolves `srt`, `bwrap`, `socat`, and `rg` by name.
+# AppArmor only confines `/usr/bin/bwrap`, so a planted `~/.local/bin/bwrap`
+# (ahead of /usr/bin on the GHA PATH) would defeat clearenv. This script:
+#   1. Strips runner-writable ~/.local/bin shadows for the SCRUB toolchain
+#   2. Requires the absolute /opt srt wrapper (root-owned, not a symlink, no
+#      `env node`) and a matching /usr/local/bin/srt copy
+#   3. Requires `command -v` (on a PATH that still prefers ~/.local/bin if
+#      present) to resolve bwrap/socat/rg/srt to the expected system pins
+#
+# Agent steps should ALSO set PATH=/usr/local/bin:/usr/bin:/bin so a plant
+# mid-link cannot shadow the next subprocess inside the same job.
 #
 # Usage: verify-sandbox-runtime-pin.sh [srt-bin]
 # Default bin: /opt/sandbox-runtime/bin/srt
@@ -21,9 +29,12 @@ case "$bin" in
     ;;
 esac
 
-# Runner-writable PATH prefix can shadow /usr/local/bin and /opt. Drop any
-# planted srt (and only srt — do not touch unrelated ~/.local tools).
-rm -f "${HOME}/.local/bin/srt" 2>/dev/null || true
+# Drop planted SCRUB-toolchain shadows under the runner-writable PATH prefix.
+# Keep the strip list tight to tools Claude SCRUB / srt actually resolve.
+local_bin="${HOME}/.local/bin"
+for name in srt bwrap socat rg node; do
+  rm -f "${local_bin}/${name}" 2>/dev/null || true
+done
 
 [ -e "$bin" ] || {
   echo "error: pinned srt missing: ${bin}" >&2
@@ -81,9 +92,6 @@ grep -Fq "$cli_js" "$bin" || {
   exit 1
 }
 
-# Publish the same bytes at /usr/local/bin/srt (root-owned copy, not a
-# symlink into a PATH-hijackable name) so a bare `srt` lookup still hits
-# the pin after ~/.local/bin/srt is removed.
 usr_bin="/usr/local/bin/srt"
 if [ -L "$usr_bin" ]; then
   echo "error: ${usr_bin} must not be a symlink" >&2
@@ -103,19 +111,39 @@ if ! cmp -s "$bin" "$usr_bin"; then
   exit 1
 fi
 
-# Prefer a clean PATH for the resolution check: no ~/.local/bin.
-PATH="/usr/local/bin:/usr/bin:/bin"
-export PATH
-resolved="$(command -v srt || true)"
-if [ "$resolved" != "$usr_bin" ]; then
-  echo "error: command -v srt resolved to '${resolved:-empty}', want ${usr_bin}" >&2
-  exit 1
-fi
+# Resolve on a PATH that still puts ~/.local/bin first when it exists — after
+# the strip above, these must land on the system / root-owned pins. This is
+# what the agent job's inherited PATH looks like before we also harden PATH
+# on the keyed ship/run steps themselves.
+resolve_path="${local_bin}:/usr/local/bin:/usr/bin:/bin"
+assert_resolved() {
+  local name="$1" want="$2" got
+  got="$(PATH="$resolve_path" command -v "$name" || true)"
+  if [ "$got" != "$want" ]; then
+    echo "error: command -v ${name} resolved to '${got:-empty}', want ${want}" >&2
+    exit 1
+  fi
+  case "$got" in
+    "${HOME}"/*)
+      echo "error: ${name} resolved under \$HOME: ${got}" >&2
+      exit 1
+      ;;
+  esac
+  if [ -w "$got" ]; then
+    echo "error: ${got} is writable by $(id -un)" >&2
+    exit 1
+  fi
+}
 
-got_ver="$(srt --version 2>/dev/null | tr -d '[:space:]' || true)"
+assert_resolved srt "$usr_bin"
+assert_resolved bwrap /usr/bin/bwrap
+assert_resolved socat /usr/bin/socat
+assert_resolved rg /usr/bin/rg
+
+got_ver="$(PATH="$resolve_path" srt --version 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$got_ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo "error: srt --version is '${got_ver:-empty}'" >&2
   exit 1
 }
 
-echo "verify-sandbox-runtime-pin: ${bin} (=${usr_bin}) version=${got_ver} ok"
+echo "verify-sandbox-runtime-pin: ${bin} (=${usr_bin}) version=${got_ver}; bwrap/socat/rg pins ok"
