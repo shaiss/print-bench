@@ -13,7 +13,8 @@ fixed once reviewed; a new region gets a new line).
 - **slot-corner** — close three-quarter of numeral plaques with the helical slot
   peeking at the frame edge (original #768 evidence ask; the corner-crossing
   story is carried by `slot-path` after Drik R2 noted this framing). Description
-  corrected to match the committed pixels — freeze rule: no reframe.
+  corrected to match the committed pixels — freeze rule: no reframe. Embedded
+  on the product page beside `slot-path`.
 - **slot-path** — near-equator view of the helical slot band cutting across
   corner facets (the #768 corner-cut money shot). CGAL `render` (inside-face
   green may still show in the void — renderer tint, not filament). Scale in

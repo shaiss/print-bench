@@ -63,6 +63,11 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 *The helical slot cutting across corner facets — a single-material print is one
 colour; any green in the void is a preview artifact, not your filament.*
 
+![Earlier close framing — slot peeking past the numeral plaques](previews/slot-corner.png)
+
+*The original #768 evidence framing — numerals carry the shot; the corner-
+crossing story is in `slot-path` above.*
+
 ![Helical window broadside](previews/slot-window.png)
 
 *Looking into the 10 mm helical window — preview red reads through the cut;
@@ -93,7 +98,7 @@ whole clock would print as one fused lump):
   the drive lands ([#604](https://github.com/shaiss/print-bench/issues/604)), it's a **desk die you set by hand** —
   tumble until the face you want parks on a flat pentagon — not yet a running
   clock face. The 10 mm helical slot is also where you grip the ball to tumble
-  it (thumb or fingernail in the window).
+  it (fingernail or fingertip in the window).
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
   (a Ø5.6 mm round nose) and carry a bored stalk boss over the motor pod, with
@@ -141,7 +146,10 @@ the default render is the assembled clock.
   [#600](https://github.com/shaiss/print-bench/issues/600) caveat, not a slicing mistake — don't chase it with supports.
   The pole-face stencil is layer 1: a small *elephant-foot compensation*
   (0.1–0.15 mm) or first-layer flow trim keeps those ties matching the rest —
-  cosmetic only (the cut is through; nothing functional moves).
+  cosmetic only (the cut is through; nothing functional moves). Print the
+  halves on a **smooth / engineering plate** if the pole numerals come out
+  ragged on textured PEI — the plate grain shows in layer-1 cut edges; the
+  droop band above them is the known #600 caveat, not a reason for supports.
 - **Infill:** 15–20 %.
 - **Supports:** none. The truss and mock drive print support-free, and the
   ball halves print **pole-down** (see Orientation), which makes the cavity an
@@ -159,9 +167,11 @@ the default render is the assembled clock.
   because anything painted inside the lattice can never be removed.
 - **Brim:** **on by default for `base-segment` and `base-end`** (line-contact
   chords lift easily); the ball halves have big flat pole faces and can stay
-  off. Safe on every other part if a tip lifts. No fit on this design touches
-  the bed (the seam rings print at the top of the pole-down halves; the core
-  sockets exit vertical faces).
+  off. Safe on every other part if a tip lifts. No tuned fit on this design
+  touches the bed (the seam rings print at the top of the pole-down halves;
+  the core sockets exit vertical faces) — the only bed-face locator is the
+  Ø4.9 bumper recess on `base-end`, which forgives first-layer squish because
+  the silicone bumper is soft.
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render).
   The pole face carries a numeral, so **layer 1 is the stencil itself**; the
@@ -177,10 +187,11 @@ the default render is the assembled clock.
   the alternative if you prefer. Length ≈ `ball_center_z −` wing height. Also
   Ø2 mm steel shot / Ø2 mm bearing balls (chrome steel — sold as 2 mm
   chrome-steel bearing balls from bearing / grinding-media suppliers, bag
-  quantities) for the core's ballast pockets (check the diameter — most
-  "slingshot ammo" is 6–10 mm and too big;
-  Ø4.5 mm BBs will not pour the Ø3.2 mm ports either; **≈ 55 g is a starting
-  fill you may need to adjust** — `ci.cog` runs the advisory CoG/tip-over check;
+  quantities; **≈ 55 g ≈ 1,700 balls — order two 1000-packs**) for the core's
+  ballast pockets (check the diameter — most "slingshot ammo" is 6–10 mm and
+  too big; Ø4.5 mm BBs will not pour the Ø3.2 mm ports either; **≈ 55 g is a
+  starting fill you may need to adjust** — `ci.cog` runs the advisory
+  CoG/tip-over check;
   TIP-RISK is a WARN, not a gate failure). The first emit on tip `d8d9cf5`
   measured STABLE (38.28 mm clearance); this page still does not claim the clock
   is STABLE for every future change. If a later sticky or `cog-check.sh` line
@@ -261,28 +272,29 @@ mount (there is no v0 "running feel" to tune — that fit is #604's). The shells
 on a facet *rim* (not across the cut-through numeral — putty in a void is hard
 to pick out) until #604, or keep them where a fall lands soft. The three
 truss segments join end to end (printed bolt/flange joints are [#603](https://github.com/shaiss/print-bench/issues/603);
-tape or a dab of glue holds a temporary join — place the assembly before the
-pour, and lift from the centre segment so the taped ends don't peel).
+tape or a dab of glue holds a temporary join — working order below; once taped,
+lift from the centre segment so the ends don't peel).
 
-**The red core goes in before the clock stands up, and the order matters: 1. fill
-each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into each port
-→ 3. slide the keel into the centre segment** until it drops onto the deck struts
-(it seats one way only). Fill and plug *before* you slide — a seated keel has no
-port access. Print the plugs on the coffee-break plate with the other base parts,
-never solo (a Ø5 mm part is easy to lose; a spare is cheap insurance). Weigh the
-pour first (~55 g total starting fill); pour in **~10 g stages and tap between
-stages** (tapping while pouring fights the funnel — the first pour is about
-five minutes of tapping, and that duration is normal, not a broken part). A
-folded-paper funnel with the tip cut to ~3 mm keeps shot off the desk — the
-Ø3.2 mm port is only about one and a half pellets wide, so shot will jam and
-arch. A strong magnet held
-against the pocket wall settles an arch and drags shot around through a couple
-of mm of plastic — worth a try (chrome-steel shot only; stainless bearing balls
-won't follow a magnet). Once the fill that lands STABLE is final, a few drops of
-CA (or epoxy) through each port before the plug locks the CoG you measured —
-loose shot can resettle and quietly eat tip clearance. This is permanent (you
-can't pour some out afterward), so do it only after the tip check passes. Press a Ø5 mm silicone
-bumper into each of the four foot recesses.
+**The red core goes in before the clock stands up, and the order matters:**
+1. fill each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into
+each port → 3. slide the keel into the **bare** centre segment → 4. tape both
+wings on → 5. place the assembly where it lives. Fill and plug *on the bench
+before* you slide — a seated keel has no port access, and taped wings block the
+keel's path into the centre. Print the plugs on the coffee-break plate with the
+other base parts, never solo (a Ø5 mm part is easy to lose; a spare is cheap
+insurance). Weigh the pour first (~55 g total starting fill); pour in **~10 g
+stages and tap between stages** (tapping while pouring fights the funnel — the
+first pour is about five minutes of tapping, and that duration is normal, not a
+broken part). A folded-paper funnel with the tip cut to ~3 mm keeps shot off the
+desk — the Ø3.2 mm port is only about one and a half pellets wide, so shot will
+jam and arch. A strong magnet held against the pocket wall settles an arch and
+drags shot around through a couple of mm of plastic — worth a try (chrome-steel
+shot only; stainless bearing balls won't follow a magnet). Once the fill that
+lands STABLE is final, a few drops of CA (or epoxy) through each port before the
+plug locks the CoG you measured — loose shot can resettle and quietly eat tip
+clearance. This is permanent (you can't pour some out afterward), so do it only
+after the tip check passes. Press a Ø5 mm silicone bumper into each of the four
+foot recesses.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot

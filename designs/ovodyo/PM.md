@@ -134,3 +134,5 @@ on geometry-true renders until a PM deliberately asks for one.
 | 2026-10-24 | cameras.conf slot-corner comment synced to CAMERAS.md (freeze holds) | Jane / PM triage |
 | 2026-10-24 | Ridge-chord finished look (~1 mm PLA droop); cross-thread diagnostic; X1/P1 front-left nudge; rod dry-fit; pour ~5 min tapping | Jane/Drik / PM triage |
 | 2026-10-24 | #601 eyetest gains showroom-squint evidence (render "4"/"00" misread) + rim-wear look | Drik / PM queue |
+| 2026-10-24 | Pour-order single path; brim bumper-recess hedge; smooth-plate pole stencil; ~1700-ball shopping; fingernail grip; embed slot-corner | Jane/Drik / PM triage |
+| 2026-10-24 | #604 test note: bare-keel `ci.cog` stance — if STABLE, pour optional on the page | Drik hunch / PM queue |
