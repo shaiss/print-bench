@@ -12,8 +12,9 @@
 #   3. Requires `command -v` (on a PATH that still prefers ~/.local/bin if
 #      present) to resolve bwrap/socat/rg/srt to the expected system pins
 #
-# Agent steps should ALSO set PATH=/usr/local/bin:/usr/bin:/bin so a plant
-# mid-link cannot shadow the next subprocess inside the same job.
+# Agent steps should ALSO set PATH with /usr/local/bin:/usr/bin:/bin BEFORE
+# ~/.local/bin so a mid-link plant cannot shadow SCRUB tools, while pip
+# user scripts under ~/.local/bin remain reachable.
 #
 # Usage: verify-sandbox-runtime-pin.sh [srt-bin]
 # Default bin: /opt/sandbox-runtime/bin/srt
