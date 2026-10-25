@@ -4675,14 +4675,17 @@ path = sys.argv[1]
 lines = open(path).read().splitlines()
 needle = "PATH: /opt/sandbox-runtime/bin:/usr/bin:/bin:/home/runner/.local/bin"
 need = ("LD_PRELOAD: \"\"", "LD_LIBRARY_PATH: \"\"", "LD_AUDIT: \"\"",
-        "BASH_ENV: \"\"", "ENV: \"\"", "NODE_OPTIONS: \"\"", "NODE_PATH: \"\"")
+        "BASH_ENV: \"\"", "ENV: \"\"", "NODE_OPTIONS: \"\"", "NODE_PATH: \"\"",
+        "HTTP_PROXY: \"\"", "HTTPS_PROXY: \"\"", "ALL_PROXY: \"\"",
+        "NODE_TLS_REJECT_UNAUTHORIZED: \"\"", "NODE_EXTRA_CA_CERTS: \"\"",
+        "SSLKEYLOGFILE: \"\"")
 hits = 0
 for i, line in enumerate(lines):
     if needle not in line:
         continue
-    # 20 lines covers PATH + comment + LD/NODE pins (+ Anthropic BASE_URL
-    # blanks on the tail links). Keep this ahead of the pin list length.
-    window = "\n".join(lines[i:i+20])
+    # 36 lines covers PATH + comments + LD/NODE/proxy/TLS pins (+ Anthropic
+    # BASE_URL pin on the tail links). Keep this ahead of the pin list length.
+    window = "\n".join(lines[i:i+36])
     missing = [n for n in need if n not in window]
     if missing:
         print(f"selftest: {path} SCRUB PATH at line {i+1} missing process-start pins: {', '.join(missing)}", file=sys.stderr)
