@@ -627,9 +627,10 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
-          # No ~/.local/bin: a planted bwrap/socat/srt there would
-          # defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap).
-          PATH: /usr/local/bin:/usr/bin:/bin
+          # System bins BEFORE ~/.local/bin so a planted bwrap/socat/srt
+          # cannot defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap),
+          # while pip user scripts (printcheck/stylelift) remain reachable.
+          PATH: /usr/local/bin:/usr/bin:/bin:/home/runner/.local/bin
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -689,9 +690,10 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
-          # No ~/.local/bin: a planted bwrap/socat/srt there would
-          # defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap).
-          PATH: /usr/local/bin:/usr/bin:/bin
+          # System bins BEFORE ~/.local/bin so a planted bwrap/socat/srt
+          # cannot defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap),
+          # while pip user scripts (printcheck/stylelift) remain reachable.
+          PATH: /usr/local/bin:/usr/bin:/bin:/home/runner/.local/bin
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -750,9 +752,10 @@ jobs:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_KEY }}
           API_TIMEOUT_MS: "3000000"
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
-          # No ~/.local/bin: a planted bwrap/socat/srt there would
-          # defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap).
-          PATH: /usr/local/bin:/usr/bin:/bin
+          # System bins BEFORE ~/.local/bin so a planted bwrap/socat/srt
+          # cannot defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap),
+          # while pip user scripts (printcheck/stylelift) remain reachable.
+          PATH: /usr/local/bin:/usr/bin:/bin:/home/runner/.local/bin
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
@@ -820,9 +823,10 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
-          # No ~/.local/bin: a planted bwrap/socat/srt there would
-          # defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap).
-          PATH: /usr/local/bin:/usr/bin:/bin
+          # System bins BEFORE ~/.local/bin so a planted bwrap/socat/srt
+          # cannot defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap),
+          # while pip user scripts (printcheck/stylelift) remain reachable.
+          PATH: /usr/local/bin:/usr/bin:/bin:/home/runner/.local/bin
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -882,9 +886,10 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
-          # No ~/.local/bin: a planted bwrap/socat/srt there would
-          # defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap).
-          PATH: /usr/local/bin:/usr/bin:/bin
+          # System bins BEFORE ~/.local/bin so a planted bwrap/socat/srt
+          # cannot defeat AppArmor SCRUB (profile only matches /usr/bin/bwrap),
+          # while pip user scripts (printcheck/stylelift) remain reachable.
+          PATH: /usr/local/bin:/usr/bin:/bin:/home/runner/.local/bin
         uses: anthropics/claude-code-action@374f254f5efaf968abfe15d399fd90972e8138b9  # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
