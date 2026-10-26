@@ -264,6 +264,18 @@ def test_actions_bot_ship_artifacts_need_the_key():
     assert run_claims([died], idx, owner_login=OWNER_LOGIN) == {34654859999: 741}
     assert [(e["kind"], e["trust"]) for e in annotate(died, idx=idx, briefs=[died])["events"]] == \
         [("brief.claimed", "window"), ("brief.withdrawn", "login")]
+    # routine-lock-cleanup's picker cooldown (#924), posted beside the notice: the same — never the
+    # window's, even inside the window of the run that claimed the issue.
+    t_cool = "2026-09-12T06:39:01Z"
+    assert serving.containing_windows(idx, ts=t_cool, roles=serving.SHIP_ROLES, author_login=bot,
+                                      owner_login=OWNER_LOGIN)
+    cooled = H.brief_record(744, [died["events"][0] | {"issue": 744},
+                                  H.event("issuecomment:9100005744", "brief.cooldown", t_cool, login=bot,
+                                          issue=744, fields={"design_name": None})], labels=dual)
+    assert run_claims([cooled], idx, owner_login=OWNER_LOGIN) == {34654859999: 744}
+    assert [(e["kind"], e["trust"], e["runtime"]["run_id"]) for e in
+            annotate(cooled, idx=idx, briefs=[cooled])["events"]] == [
+        ("brief.claimed", "window", 34654859999), ("brief.cooldown", "login", None)]
     notice_only = H.brief_record(742, [died["events"][1] | {"issue": 742}], labels=dual)
     assert run_claims([notice_only], idx, owner_login=OWNER_LOGIN) == {}
     by_owner = H.brief_record(743, [released["events"][0] | {"issue": 743, "signals": H.signals(OWNER_LOGIN)}],

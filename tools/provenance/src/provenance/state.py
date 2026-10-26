@@ -3,7 +3,7 @@
 Shape (contract ``state@1``)::
 
     {"format": "state@1",
-     "versions": {"harvester": "provenance 0.1.0", "digest": "body-digest@2",
+     "versions": {"harvester": "provenance 0.1.0", "digest": "body-digest@3",
                   "step_grammar": 1, "contract": 1},
      "cursors": {"receipts": {"<workflow>": "<ts>"}, "prs_updated": ts|null,
                  "briefs_updated": ts|null, "releases_published": ts|null},
