@@ -3,7 +3,7 @@
 
 Advisory only — this report is Reeve's sole output; nothing else was changed.
 Pulse: 2 gate-run record(s) (2 full-catalog), 3 committed previews, at 2026-08-16T06:00:00Z.
-Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.5, walltime_min_seconds=30, routine_dead_runs=3, lock_leak_hours=2.
+Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.5, walltime_min_seconds=30, routine_dead_runs=3, lock_leak_hours=2, provenance_lag_hours=3.
 
 ## Summary
 
@@ -13,6 +13,8 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 | routine-dead | 1 |
 | agent-brief-queue | 3 |
 | lock-leak | 1 |
+| provenance-foreign-tip | 1 |
+| provenance-lag | 2 |
 | score-regression | 3 |
 | budget-tightening | 2 |
 | walltime-regression | 1 |
@@ -40,6 +42,15 @@ Thresholds: low_headroom_pct=15, score_drop=3, score_floor=80, walltime_ratio=1.
 ## Ship-lock leak — an uncorroborated 🚢 SHIP-LOCK older than 2h
 
 - #281 Design brief: NUGGS desiccant tower — locked 48.5h ago, uncorroborated
+
+## Provenance tip continuity — a data ref that is not its newest checkpoint
+
+- `provenance` — foreign: tip 46464646, newest checkpoint 43434343 (46464646 is not an intent declared after checkpoint 43434343)
+
+## Provenance lag — a unit overdue by more than 3h, or the harvester no longer seeing closed PRs
+
+- overdue: pr #902 deferred until 2026-08-15T12:00:00Z — 15.0h past that + grace (1 pending unit(s) overdue)
+- stall: 1 PR(s) closed more than 33h ago are in none of frozen / pending / skipped: #700
 
 ## Score regression — a part below 80/100 or down ≥3
 

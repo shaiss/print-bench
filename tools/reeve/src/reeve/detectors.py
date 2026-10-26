@@ -20,8 +20,12 @@ The optional ``runHealth`` block (``github.gather_run_health``, issue #313)
 carries ``gatheredAt``, per-routine ``workflows`` run conclusions, the open
 ``issues`` holding an active 🚢 SHIP-LOCK claim, the ``openPRs`` /
 ``branches`` that would corroborate one, the open ``adoptionStudies`` and the
-open ``agentBriefs`` (#745). It is absent on an offline run
-(no ``--repo``), and the run-health detectors then read "not evaluated".
+open ``agentBriefs`` (#745), and the ``provenance`` block
+(``provenance.gather`` — the harvester's two data-ref tips, its verified
+continuity marks, ``state.json``'s pending/skipped, the frozen PR listing and
+one closed-PR page; ``{"armed": false}`` while the harvester is disarmed). It
+is absent on an offline run (no ``--repo``), and the run-health detectors then
+read "not evaluated".
 
 Gate-run records carry the telemetry schema (issue #93): ``meta.designs``
 (``"ALL"`` for a full-catalog run, else a scoped list), ``gate.parts`` (per
@@ -41,6 +45,10 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+# The provenance lens's PURE half (continuity port + the two detectors); its
+# GET-only gather is imported lazily by cli.py, never here.
+from . import provenance
 
 _WS_RE = re.compile(r"\s+")
 
@@ -424,7 +432,23 @@ def evaluate(snapshot: dict[str, Any], cfg: Any) -> dict[str, Any]:
         not_evaluated["lock-leak"] = reason
         not_evaluated["adoption-study"] = reason
         not_evaluated["agent-brief-queue"] = reason
+        not_evaluated["provenance-foreign-tip"] = reason
+        not_evaluated["provenance-lag"] = reason
     else:
+        # The provenance harvester's two detectors (docs/provenance.md
+        # §Registration): "not evaluated" only while it is disarmed (or the
+        # block is absent); armed, an absent ref is a finding.
+        block = run_health.get("provenance")
+        why = provenance.not_evaluated_reason(block)
+        if why is not None:
+            not_evaluated["provenance-foreign-tip"] = why
+            not_evaluated["provenance-lag"] = why
+        else:
+            findings["provenance-foreign-tip"] = provenance.foreign_tip(block)
+            findings["provenance-lag"] = provenance.lag(
+                block, run_health.get("gatheredAt") or snapshot["generatedAt"],
+                cfg.provenance_lag_hours,
+            )
         rh_now = run_health.get("gatheredAt") or snapshot["generatedAt"]
         findings["routine-dead"] = routine_dead(
             run_health.get("workflows", []), cfg.routine_dead_runs

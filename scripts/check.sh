@@ -264,6 +264,22 @@ if ! env PYTHONPATH="$PWD/tools/agent-memory/src${PYTHONPATH:+:$PYTHONPATH}" \
   fail=1
 fi
 
+# And this proves the provenance harvester's write-side guards still refuse
+# what they exist to refuse (tools/provenance, docs/provenance.md): the
+# add-only diff-tree guard (a delete, a modification outside state.json, a blob
+# truncated to 0 bytes, a guard-file change), an identical tree pushing
+# nothing, every row of the shared tip-continuity table (ok / forged /
+# rollback / deleted / unanchored / bootstrap), a rejected push refused as
+# foreign, no token or its base64 in a failing push's error, and the
+# membership- and trust-rule negatives — offline, in a throwaway repo with a
+# local bare remote. A module that cannot supply its cases is a FAIL, never a
+# skip. Pure stdlib from the checkout (the workflow's own PYTHONPATH), so it
+# runs unconditionally.
+echo "-- provenance selftest: scripts/provenance.sh --selftest"
+if ! ./scripts/provenance.sh --selftest; then
+  fail=1
+fi
+
 # And this proves the `render` camera opt still works on the installed
 # OpenSCAD build (issue #400): --render is value-taking on some builds
 # (2021.01, the 2026.08 nightly) and a bare trailing flag makes the parser

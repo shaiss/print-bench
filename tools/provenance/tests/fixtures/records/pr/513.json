@@ -1,0 +1,280 @@
+{
+ "base_ref": "feature/beta-hinge",
+ "briefs": [],
+ "closed_at": "2026-09-06T09:00:00Z",
+ "created_at": "2026-09-05T09:00:00Z",
+ "designs": {
+  "alpha-clip": {
+   "kinds": [
+    "source"
+   ],
+   "membership": "stacked-excluded"
+  },
+  "beta-hinge": {
+   "kinds": [
+    "docs",
+    "source"
+   ],
+   "membership": "member"
+  }
+ },
+ "events": [
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "R:513:d2b8d19e",
+   "fields": {
+    "parents": 1,
+    "signature_verified": false
+   },
+   "head_sha": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+   "id": "commit:9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+   "issue": null,
+   "kind": "commit.design",
+   "pr": 513,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "github-actions",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": "9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+   "signals": {
+    "app": null,
+    "commit_author_email": "claude[bot]@users.noreply.github.com",
+    "commit_author_name": "claude[bot]",
+    "committer_login": "github-actions[bot]",
+    "login": "claude[bot]",
+    "login_type": "Bot",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-05T08:05:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/pull/513/commits/9c2641696b53850e8137ab6b3dd50e5f8584fadb"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "R:513:d2b8d19e",
+   "fields": {
+    "draft": true
+   },
+   "head_sha": null,
+   "id": "pr:513:opened",
+   "issue": null,
+   "kind": "pr.opened",
+   "pr": 513,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "copilot",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "Copilot",
+    "login_type": "Bot",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-05T09:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/pull/513"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "R:513:d2b8d19e",
+   "fields": {
+    "parents": 1,
+    "signature_verified": false
+   },
+   "head_sha": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+   "id": "commit:d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+   "issue": null,
+   "kind": "commit.fix",
+   "pr": 513,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": "cursor-agent",
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "trailer",
+    "platform": "cursor",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+   "signals": {
+    "app": null,
+    "commit_author_email": "cursoragent@cursor.com",
+    "commit_author_name": "Cursor Agent",
+    "committer_login": "web-flow",
+    "login": "cursoragent",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [
+     "Cursor Agent <cursoragent@cursor.com>"
+    ],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "claimed",
+   "trust_basis": "trailer",
+   "ts": "2026-09-05T09:10:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/pull/513/commits/d2b8d19e7503aaa2c0406a17c34476c3cb371b68"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "M:513",
+   "fields": {},
+   "head_sha": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+   "id": "pr:513:closed",
+   "issue": null,
+   "kind": "pr.closed",
+   "pr": 513,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-06T09:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/pull/513"
+  }
+ ],
+ "evidence": {
+  "raw": "raw/pr/513.json.gz",
+  "raw_sha256": "faa80942e6e143211ad1cd72c0475ae8cdd681d3f28d0dec44bb711c94236625",
+  "receipts": [],
+  "revision": 1,
+  "source": "evidence"
+ },
+ "extractor": "provenance-extract 1",
+ "format": "record@1",
+ "head_ref": "stack/beta-hinge-top",
+ "incomplete": [
+  "force-pushed-heads"
+ ],
+ "kind": "pr",
+ "linked_issues": [],
+ "merge_commit_sha": null,
+ "merge_method": null,
+ "merged_at": null,
+ "noise_counts": {
+  "comment.unclassified": 2
+ },
+ "pr": 513,
+ "rounds": [
+  {
+   "commits": [
+    "9c2641696b53850e8137ab6b3dd50e5f8584fadb",
+    "d2b8d19e7503aaa2c0406a17c34476c3cb371b68"
+   ],
+   "end": "2026-09-06T09:00:00Z",
+   "head": "d2b8d19e7503aaa2c0406a17c34476c3cb371b68",
+   "heads": [
+    "d2b8d19e7503aaa2c0406a17c34476c3cb371b68"
+   ],
+   "id": "R:513:d2b8d19e",
+   "pushed_at": "2026-09-05T09:11:00Z",
+   "start": "2026-09-05T09:11:00Z"
+  }
+ ],
+ "state": "closed",
+ "threads": {
+  "resolved": 0,
+  "total": 1
+ },
+ "unknown": {
+  "markers": {},
+  "steps": {}
+ }
+}

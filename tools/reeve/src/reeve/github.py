@@ -117,10 +117,15 @@ PROVIDER_ESCALATION_MARKER = "<!-- provider-escalation:"
 # forge, so a forge death-streak was red in Actions but absent from the
 # bench-health report, and the growth board's sync lens (not itself an armed
 # routine, but a schedule whose GraphQL rate-limit failures reddened unseen
-# for days) was the live instance of exactly that hole. This tuple is the
-# single source of truth: nothing else in the package names the watched set.
+# for days) was the live instance of exactly that hole. provenance.yml (the
+# keyless who/how harvester, docs/provenance.md §Registration) joined with the
+# harvester itself: a schedule must be watched, and a disarmed schedule's runs
+# are all-skipped (conclusion `skipped`, never a hard failure), so it cannot
+# false-alarm before arming. This tuple is the single source of truth: nothing
+# else in the package names the watched set.
 ROUTINE_WORKFLOWS = ("design-run.yml", "backlog-burn.yml", "chunker.yml", "labeler.yml",
-                     "growth-twitter.yml", "wright.yml", "growth-board-sync.yml")
+                     "growth-twitter.yml", "wright.yml", "growth-board-sync.yml",
+                     "provenance.yml")
 
 # Completed runs fetched per workflow — one page, newest-first as the API
 # returns them. config.py caps `routine_dead_runs` at this value, since a

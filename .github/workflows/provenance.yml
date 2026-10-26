@@ -1,0 +1,332 @@
+name: Provenance harvest (keyless)
+
+# The keyless, deterministic who/how harvester (docs/provenance.md, the
+# design of record; tools/provenance). It reads GitHub GET-only, freezes
+# structured facts once after a settle window, and writes two data refs:
+#   provenance       — EVIDENCE: add-only, linear, fast-forward pushes only
+#   provenance-site  — DERIVED: one squashed commit, recomputed every run
+# Nothing is written to main, nothing under designs/, and the telemetry branch
+# is untouched. No LLM runs here and no model or provider key is referenced —
+# the workflow holds the GITHUB_TOKEN alone (tools/provenance/tests/
+# test_workflow.py pins it) — so it keeps recording while the AI andon cord is
+# pulled (docs/andon-cord.md: keyless jobs carry no cord leg, the andon.yml
+# precedent).
+#
+# TWO-KEY ARMING (the house convention, .github/provenance.conf): the hourly
+# schedule acts only when the conf's `enabled: true` AND the repo variable
+# PROVENANCE_ENABLED is 'true'. The gate job's job-level `if:` carries the
+# variable leg, so a DISARMED schedule's run is skipped outright — every job
+# skipped, nothing uploaded, nothing spent. A workflow_dispatch needs only the
+# conf's `enabled` (the bootstrap and the backfill run before arming, P2).
+#
+# TIP CONTINUITY is the control that holds, not the branch pins below
+# (docs/provenance.md §Tip continuity). The harvest job uploads an
+# `intent-<ref>-<sha40>` artifact BEFORE it pushes a ref, and a
+# `tip-<ref>-<sha40>` checkpoint AFTER every successful publish — a no-op run
+# included. The next run accepts a tip only if it is the newest checkpoint a
+# verified default-branch run of THIS workflow uploaded (or a commit declared
+# after it); anything else is refused (evidence) or overwritten (derived), and
+# the run goes red through the verdict step, after the checkpoints are up.
+#
+# ONE JOB, NOT TWO (docs/provenance.md §Workflow): Actions concurrency cannot
+# hold a lock across a read-only plan job and a write publish job, so the
+# harvest job both parses API payloads and holds contents: write for the two
+# unprotected data refs. Mitigations: the token reaches only the plan and
+# publish steps' env; pushes go through tools/provenance's gitstore alone with
+# an env-only credential (never argv, never .git/config); the checkout keeps
+# no credential; git runs with hooks, fsmonitor and non-https transports off;
+# no PR content is ever checked out; the payload parsing is stdlib JSON.
+# Listed in docs/actions-security.md with its residuals.
+#
+# INPUTS reach the code only through env: and are passed as CLI arguments in
+# the `--opt=value` form (a dash-leading value is a value, never an option),
+# where tools/provenance's cli.validate_inputs full-matches every free-text
+# one. No `${{ inputs.… }}` and no `${{ steps.… }}` appears inside a run:
+# block. Step outputs that become artifact NAMES are 40-hex shas the cli
+# validated before writing them.
+
+on:
+  schedule:
+    # Hourly at :29 — clear of the :11/:17/:23/:41/:43/:47/:53 sibling slots.
+    # Kept identical to `cadence:` in .github/provenance.conf
+    # (scripts/cadence-sync-check.sh pins the pair; the single quotes are the
+    # form it reads).
+    - cron: '29 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'harvest (ingests the #843 snapshot on its first run; a backfill is harvest with since) | refreeze (one PR as its next revision) | recover (break-glass: restore provenance to its newest checkpoint)'
+        type: choice
+        options: [harvest, refreeze, recover]
+        default: harvest
+      since:
+        description: 'harvest: earliest date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ), never before the conf backfill_since'
+        type: string
+        default: ''
+      until:
+        description: 'harvest: latest date (same forms)'
+        type: string
+        default: ''
+      pr:
+        description: 'harvest: only these PRs (comma list); refreeze: the PR'
+        type: string
+        default: ''
+      receipts_only:
+        description: 'harvest: run receipts only (no freeze pass)'
+        type: boolean
+        default: false
+      max_requests:
+        description: 'harvest: request cap for this dispatch (empty = self-paced, unlimited)'
+        type: string
+        default: ''
+      dry_run:
+        description: 'harvest / refreeze: plan and summarise, push nothing (recover has no dry run and refuses it)'
+        type: boolean
+        default: false
+      bootstrap:
+        description: 'harvest: create the evidence root (only when the ref is absent and no checkpoint exists)'
+        type: boolean
+        default: false
+      confirm_sha:
+        description: 'recover: the newest evidence checkpoint sha (40 hex)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Gate (armed, nothing pending)
+    # A disarmed schedule's run is skipped HERE, so the whole run is skipped:
+    # no checkout, no API call, no artifact. A dispatch always reaches the
+    # gate, which then reads the conf's `enabled`. No concurrency group on
+    # this job, on purpose: it must see a pending harvest without queuing
+    # behind it (GitHub keeps one pending run per group and a newly queued one
+    # REPLACES it — without this check the :29 schedule would silently cancel
+    # an operator's pending backfill or refreeze).
+    if: github.event_name == 'workflow_dispatch' || vars.PROVENANCE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      go: ${{ steps.gate.outputs.go }}
+    steps:
+      - name: Check out the default branch (no credentials)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/provenance/src:tools/model-registry/src
+          EVENT: ${{ github.event_name }}
+          ARMED_VAR: ${{ vars.PROVENANCE_ENABLED }}
+        run: |
+          set -euo pipefail
+          args=(--gh-output "$GITHUB_OUTPUT" --armed-var="$ARMED_VAR")
+          if [ "$EVENT" = "schedule" ]; then
+            args+=(--scheduled)
+          fi
+          python3 -m provenance gate "${args[@]}"
+
+  harvest:
+    name: Harvest (plan, declare, publish, checkpoint)
+    needs: gate
+    # Defense in depth only: a dispatcher who selects another ref runs THAT
+    # ref's YAML (docs/actions-security.md). The control that holds is tip
+    # continuity — such a run's marks are never accepted (head branch,
+    # first-parent history, workflow path and event). github.ref, not
+    # github.ref_name, so a tag named like the default branch never matches.
+    if: needs.gate.outputs.go == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency:
+      group: provenance-writer
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+      issues: read
+      statuses: read
+      deployments: read
+    steps:
+      - name: Check out the default branch (full history, no credentials)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Plan
+        id: plan
+        # Reads GitHub (GET only) with the token; performs the one token-less
+        # bulk fetch of both data refs and every PR head itself; writes
+        # .provenance/plan.json, the intents, summary.md and the outputs.
+        # Pushes nothing.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/provenance/src:tools/model-registry/src
+          EVENT: ${{ github.event_name }}
+          MODE: ${{ inputs.mode }}
+          SINCE: ${{ inputs.since }}
+          UNTIL: ${{ inputs.until }}
+          PR: ${{ inputs.pr }}
+          RECEIPTS_ONLY: ${{ inputs.receipts_only }}
+          MAX_REQUESTS: ${{ inputs.max_requests }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          CONFIRM_SHA: ${{ inputs.confirm_sha }}
+        run: |
+          set -euo pipefail
+          mode="${MODE:-harvest}"
+          if [ "$EVENT" = "schedule" ]; then
+            mode=harvest
+          fi
+          # An input the selected mode does not use is REFUSED, never silently dropped: a
+          # recover dispatched with dry_run=true would otherwise perform the force-with-lease
+          # it was asked not to (recover has no dry run — it plans exactly the one restore of
+          # the confirmed checkpoint, and Publish performs it).
+          unused() {
+            echo "::error::input $1 is not used by mode $mode; refusing the run rather than ignoring it"
+            exit 1
+          }
+          args=(--out-dir .provenance --gh-output "$GITHUB_OUTPUT")
+          case "$mode" in
+            harvest)
+              [ -z "$CONFIRM_SHA" ] || unused confirm_sha
+              args+=(--since="$SINCE" --until="$UNTIL" --pr="$PR" --max-requests="$MAX_REQUESTS")
+              if [ "$EVENT" = "schedule" ]; then args+=(--scheduled); fi
+              if [ "$RECEIPTS_ONLY" = "true" ]; then args+=(--receipts-only); fi
+              if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+              if [ "$BOOTSTRAP" = "true" ]; then args+=(--bootstrap); fi
+              ;;
+            refreeze)
+              [ -z "$SINCE" ] || unused since
+              [ -z "$UNTIL" ] || unused until
+              [ -z "$MAX_REQUESTS" ] || unused max_requests
+              [ "$RECEIPTS_ONLY" != "true" ] || unused receipts_only
+              [ "$BOOTSTRAP" != "true" ] || unused bootstrap
+              [ -z "$CONFIRM_SHA" ] || unused confirm_sha
+              args+=(--pr="$PR")
+              if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+              ;;
+            recover)
+              [ -z "$SINCE" ] || unused since
+              [ -z "$UNTIL" ] || unused until
+              [ -z "$PR" ] || unused pr
+              [ -z "$MAX_REQUESTS" ] || unused max_requests
+              [ "$RECEIPTS_ONLY" != "true" ] || unused receipts_only
+              [ "$BOOTSTRAP" != "true" ] || unused bootstrap
+              [ "$DRY_RUN" != "true" ] || unused dry_run
+              args+=(--confirm-sha="$CONFIRM_SHA")
+              ;;
+            *)
+              echo "::error::unknown mode (expected harvest, refreeze or recover)"
+              exit 1
+              ;;
+          esac
+          python3 -m provenance "$mode" "${args[@]}"
+
+      - name: Declare the evidence intent
+        if: steps.plan.outputs.evidence_changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: intent-provenance-${{ steps.plan.outputs.evidence_sha }}
+          path: .provenance/intent-provenance.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Declare the derived intent
+        if: steps.plan.outputs.site_changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: intent-provenance-site-${{ steps.plan.outputs.site_sha }}
+          path: .provenance/intent-provenance-site.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Publish
+        id: publish
+        # The ONLY step that pushes: evidence fast-forward first, then the
+        # derived ref with a lease on the planned old tip — only after the
+        # evidence push succeeded, was unnecessary, or the plan derived from
+        # the newest checkpoint. A rejection or a moved tip exits 3.
+        if: steps.plan.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/provenance/src:tools/model-registry/src
+        run: |
+          set -euo pipefail
+          python3 -m provenance publish --out-dir .provenance --gh-output "$GITHUB_OUTPUT"
+
+      - name: Checkpoint the evidence tip
+        # !cancelled(): publish may exit non-zero AFTER a verified evidence
+        # push (a derived rejection); that tip must still be checkpointed or
+        # the next run refuses it as unanchored.
+        if: ${{ !cancelled() && steps.publish.outputs.evidence_tip != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: tip-provenance-${{ steps.publish.outputs.evidence_tip }}
+          path: .provenance/tip-provenance.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Checkpoint the derived tip
+        if: ${{ !cancelled() && steps.publish.outputs.site_tip != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: tip-provenance-site-${{ steps.publish.outputs.site_tip }}
+          path: .provenance/tip-provenance-site.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Verdict
+        # After the derived overwrite and the checkpoints: a foreign,
+        # deleted or unanchored evidence tip turns the run red (exit 3) —
+        # nothing was written to the evidence ref. Publish's own foreign_tip
+        # is authoritative whenever Publish ran (a successful recover restored
+        # the evidence, whatever its plan said); the plan's is read only when
+        # Publish was skipped (a dry run).
+        if: steps.publish.outputs.foreign_tip == 'true' || (steps.publish.outcome == 'skipped' && steps.plan.outputs.foreign_tip == 'true')
+        run: |
+          echo "::error::provenance: the evidence tip failed tip continuity — no evidence was written; the derived ref was rebuilt from the newest checkpoint (docs/provenance.md, Tip continuity; recovery: dispatch recover with confirm_sha set to that checkpoint)"
+          exit 3
+
+      - name: Verdict (derive)
+        # A derive layer raised (a bug in views/bundle/episodes/serving, or a
+        # blame that does not cover a design file): the plan still published
+        # and checkpointed the evidence, but provenance-site was not rebuilt.
+        # Red after the checkpoints, so evidence capture never waits on the
+        # fix and the failure is never green.
+        if: ${{ !cancelled() && steps.plan.outputs.derive_error == 'true' }}
+        run: |
+          echo "::error::provenance: derive raised (see the Plan step); evidence was published and checkpointed, provenance-site was not rebuilt"
+          exit 1
+
+      - name: Verdict (receipts)
+        # A jobs GET or a runs listing failed after the client's retries (a
+        # persistent 5xx, a 403, a list whose total_count disagreed twice):
+        # receipts.py isolates it to that run / workflow, holds its cursor
+        # there (the next pass retries it) and the plan publishes everything
+        # else. Red after the checkpoints, so one bad run never stalls capture
+        # for every other run and never stays green.
+        if: ${{ !cancelled() && steps.plan.outputs.receipts_error == 'true' }}
+        run: |
+          echo "::error::provenance: the receipts pass could not capture some runs (see the Plan step); everything else was published and checkpointed, and the next pass retries them"
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f .provenance/summary.md ]; then
+            cat .provenance/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "provenance: no summary was written (the plan step did not get that far)" >> "$GITHUB_STEP_SUMMARY"
+          fi
