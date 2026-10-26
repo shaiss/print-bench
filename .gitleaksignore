@@ -1,6 +1,0 @@
-# Fingerprint for a historical false positive: commit-record fixture once carried
-# `"key": "<40-hex sha>"`, which gitleaks generic-api-key treats as a secret.
-# The record@1 schema no longer has a `key` field (identity is kind-specific:
-# pr/issue/sha/tag), so new commits cannot reintroduce that shape. This ignore
-# covers only the introducing commit still reachable in PR #846's range.
-d42f8c780041a973ff19a8226a0d4a44aa995974:tools/provenance/tests/fixtures/records/commit/d63588d44d5248bae73e9487528a9387c269726b.json:generic-api-key:76
