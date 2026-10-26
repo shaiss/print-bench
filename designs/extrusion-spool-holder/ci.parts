@@ -1,0 +1,4 @@
+# Printable parts to render and gate in CI. The fit coupon is gated
+# separately: gate.sh picks up extrusion-spool-holder-coupon.scad
+# automatically by filename.
+peg
