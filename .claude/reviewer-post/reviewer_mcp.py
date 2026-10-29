@@ -63,12 +63,12 @@ comment on the ONE PR the workflow selected":
   * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
     / ``<!-- PM_TRIAGE`` / ``<!-- COACH_LOCK`` / ``<!-- COACH_DONE``
     (case-insensitive) is refused,
-    not posted: ``get_marker()`` greps every comment with no author check, so
-    a Jane body carrying a Drik pass would otherwise satisfy both identities
-    from one post, and a Jane/Drik/PM body carrying ``<!-- COACH_LOCK -->``
-    would satisfy the coach completeness pin (those jobs share
-    ``github-actions[bot]``). Only the server-assembled marker from trusted
-    REVIEWER_ID may appear;
+    not posted: signoff-status and the artifact checks both require an
+    Actions-bot MCP suffix (issue #947 / reviewer-posted.sh), but a Jane
+    body carrying a Drik pass would still confuse humans reading the
+    thread, and a Jane/Drik/PM body carrying a coach lock marker would
+    look like a coach completion. Only the server-assembled marker from
+    trusted REVIEWER_ID may appear;
   * the attribution footer is HARDCODED here — every post is disclosed as a
     Claude Code review whatever the body says;
   * a per-run cap of ONE post (counted in a state file every chain link of

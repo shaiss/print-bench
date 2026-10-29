@@ -47,6 +47,19 @@
 #     Exit 1 = the artifact read itself failed: a check that cannot read must
 #     fail loud, never guess — a silent `false` here would fail the walk open.
 #
+#   scripts/reviewer-posted.sh marker --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
+#       [--repo <owner/name>] [--comments-file <path>] [--currency]
+#     Prints the last QUALIFYING marker HTML comment for this family on
+#     `--sha` (same trust rule as check: Actions-bot author + body ends
+#     with the MCP marker-then-footer suffix for this family and sha), or
+#     empty when none qualify. With `--currency`, when no marker names
+#     `--sha`, falls back to the last qualifying marker of the family at
+#     any 40-hex sha so reviewer-signoff.sh's currency key can carry a
+#     sign-off across a non-design push — still Actions-bot + MCP suffix,
+#     never an untrusted plant. Non-qualifying markers are ignored
+#     completely and never override. Issue comments only. Exit codes match
+#     check (0 = clean read, 1 = read failed, 2 = bad args).
+#
 #   scripts/reviewer-posted.sh diagnose --pr <N> --sha <40hex> --reviewer …
 #       [--since <ISO8601>] [--link <n>] [--cap-state <path>]
 #       [--execution-log <path>] [--repo <owner/name>] [--comments-file <path>]
@@ -64,14 +77,16 @@
 #     refusal rows (typo'd reviewer, bad sha, live mode without GH_TOKEN)
 #     and a drift pin against the MCP's FOOTER + the marker literals the
 #     two skills document — so this script cannot quietly stop matching
-#     what the posting surface emits.
+#     what the posting surface emits. Also the `marker` verb's author /
+#     source / suffix / selection rows (issue #947).
 #
 # Consumers: auto-review.yml — the per-link artifact checks after each
 # Jane/Drik/pm-triage/design-coach ship step (the chain walk's fall-through
-# key), and the review stamp's confirmation before a round is called
-# complete. Issue #770 closed the exit-code hole for pm-triage and the
-# design coach with per-head completion markers (PM_TRIAGE_DONE / COACH_DONE)
-# that this script reads the same way it reads JANE/DRIK_SIGNOFF.
+# key), the review stamp's confirmation before a round is called
+# complete, and signoff-status's marker discovery (issue #947; restored
+# from base.sha). Issue #770 closed the exit-code hole for pm-triage and
+# the design coach with per-head completion markers (PM_TRIAGE_DONE /
+# COACH_DONE) that this script reads the same way it reads JANE/DRIK_SIGNOFF.
 set -euo pipefail
 
 # A prior Bash-capable coach/reviewer step can write PYTHONPATH/LD_PRELOAD
@@ -102,6 +117,8 @@ usage() {  # [message]
   cat >&2 <<'EOF'
 usage: scripts/reviewer-posted.sh check --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
            [--repo <owner/name>] [--comments-file <path>] [--since <ISO8601>]
+       scripts/reviewer-posted.sh marker --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
+           [--repo <owner/name>] [--comments-file <path>] [--currency]
        scripts/reviewer-posted.sh diagnose --pr <N> --sha <40hex> --reviewer jane|drik|pm|coach
            [--since <ISO8601>] [--link <n>] [--cap-state <path>]
            [--execution-log <path>] [--repo <owner/name>] [--comments-file <path>]
@@ -110,17 +127,22 @@ EOF
   exit 2
 }
 
-# The pure core: does the comments JSON carry an Actions-bot issue comment
-# whose body ends with the MCP-assembled marker-then-footer suffix for this
-# reviewer + sha (and, when SINCE is set, created_at >= SINCE)?
-served_from_comments() {  # stdin = comments JSON; env: REVIEWER_SHA, REVIEWER_FAMILY, REVIEWER_SINCE?, REVIEWER_FOOTER
-  "$PYTHON3" -I -c '
-import json, os, sys
+# Shared trust core (issue #947): one Python body for `check` and `marker`.
+# MODE=check → true/false (first qualifying exact-sha hit; behaviour identical
+# to the pre-#947 served_from_comments). MODE=marker → last qualifying marker
+# HTML comment for `--sha`, else empty; with REVIEWER_CURRENCY=1, fall back to
+# last qualifying any-sha of the family. Env: REVIEWER_SHA, REVIEWER_FAMILY,
+# REVIEWER_FOOTER, REVIEWER_TRUST_MODE; REVIEWER_SINCE only for check.
+_trust_from_comments() {  # stdin = comments JSON
+  REVIEWER_TRUST_MODE="${REVIEWER_TRUST_MODE:?}" "$PYTHON3" -I -c '
+import json, os, re, sys
 
 FOOTER = os.environ["REVIEWER_FOOTER"]
 SHA = os.environ["REVIEWER_SHA"]
 FAMILY = os.environ["REVIEWER_FAMILY"]
 SINCE = os.environ.get("REVIEWER_SINCE", "").strip()
+MODE = os.environ["REVIEWER_TRUST_MODE"]
+CURRENCY = os.environ.get("REVIEWER_CURRENCY", "").strip() == "1"
 BOT = "github-actions"
 
 # Exact MCP-assembled suffixes for THIS family + sha. Case-sensitive
@@ -138,9 +160,25 @@ if FAMILY.endswith("_SIGNOFF"):
         for v in ("pass", "block")
         for f in ("none", "acknowledged")
     )
+    ANY_SUFFIX_RE = re.compile(
+        r"<!-- "
+        + re.escape(FAMILY)
+        + r" sha=([0-9a-f]{40}) verdict=(?:pass|block) fuse=(?:none|acknowledged) -->"
+        + r"\n\n"
+        + re.escape(FOOTER)
+        + r"\Z"
+    )
 else:
     # PM_TRIAGE_DONE / COACH_DONE — one shape, no verdict/fuse.
     SUFFIXES = (f"<!-- {FAMILY} sha={SHA} -->\n\n{FOOTER}",)
+    ANY_SUFFIX_RE = re.compile(
+        r"<!-- "
+        + re.escape(FAMILY)
+        + r" sha=([0-9a-f]{40}) -->"
+        + r"\n\n"
+        + re.escape(FOOTER)
+        + r"\Z"
+    )
 
 
 def is_actions_bot(comment):
@@ -191,21 +229,77 @@ def ends_with_mcp_suffix(body):
     return any(body.endswith(s) for s in SUFFIXES)
 
 
+def mcp_marker_exact(body):
+    """Marker HTML comment when body ends with an exact-sha MCP suffix."""
+    for s in SUFFIXES:
+        if body.endswith(s):
+            return s[: -(len(FOOTER) + 2)]
+    return None
+
+
+def mcp_marker_any(body):
+    """Marker HTML comment when body ends with any-sha MCP suffix for FAMILY."""
+    m = ANY_SUFFIX_RE.search(body)
+    if m:
+        return m.group(0)[: -(len(FOOTER) + 2)]
+    return None
+
+
 raw = sys.stdin.read()
-for c in load_comments(raw):
-    if not is_actions_bot(c):
-        continue
-    body = c.get("body") or ""
-    if not ends_with_mcp_suffix(body):
-        continue
-    if SINCE:
-        created = (c.get("created_at") or "").strip()
-        if not created or created < SINCE:
+if MODE == "check":
+    for c in load_comments(raw):
+        if not is_actions_bot(c):
             continue
-    print("true")
-    raise SystemExit(0)
-print("false")
+        body = c.get("body") or ""
+        if not ends_with_mcp_suffix(body):
+            continue
+        if SINCE:
+            created = (c.get("created_at") or "").strip()
+            if not created or created < SINCE:
+                continue
+        print("true")
+        raise SystemExit(0)
+    print("false")
+elif MODE == "marker":
+    head_hit = None
+    any_hit = None
+    for c in load_comments(raw):
+        if not is_actions_bot(c):
+            continue
+        body = c.get("body") or ""
+        exact = mcp_marker_exact(body)
+        if exact is not None:
+            head_hit = exact
+            any_hit = exact
+            continue
+        if CURRENCY:
+            any_m = mcp_marker_any(body)
+            if any_m is not None:
+                any_hit = any_m
+    if head_hit is not None:
+        print(head_hit, end="")
+    elif CURRENCY and any_hit is not None:
+        print(any_hit, end="")
+    else:
+        print("", end="")
+else:
+    sys.stderr.write("reviewer-posted: unknown REVIEWER_TRUST_MODE %r\n" % (MODE,))
+    raise SystemExit(2)
 '
+}
+
+# The pure core: does the comments JSON carry an Actions-bot issue comment
+# whose body ends with the MCP-assembled marker-then-footer suffix for this
+# reviewer + sha (and, when SINCE is set, created_at >= SINCE)?
+served_from_comments() {  # stdin = comments JSON; env: REVIEWER_SHA, REVIEWER_FAMILY, REVIEWER_SINCE?, REVIEWER_FOOTER
+  REVIEWER_TRUST_MODE=check _trust_from_comments
+}
+
+# Last QUALIFYING marker for this family on `--sha` (issue #947). Same
+# trust rule as served_from_comments (is_actions_bot + ends_with_mcp_suffix).
+# REVIEWER_CURRENCY=1 enables the any-sha fallback for signoff-status.
+marker_from_comments() {  # stdin = comments JSON; env: REVIEWER_SHA, REVIEWER_FAMILY, REVIEWER_FOOTER, REVIEWER_CURRENCY?
+  REVIEWER_TRUST_MODE=marker _trust_from_comments
 }
 
 # The live thread read: ONLY issue comments — the MCP's sole write target
@@ -273,6 +367,58 @@ check() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'served=%s\n' "$verdict" >>"$GITHUB_OUTPUT"
   fi
+}
+
+# Extract the last qualifying marker (issue #947). Shares check's arg
+# validation and issue-comments-only read; no --since (signoff-status wants
+# the thread's last trusted marker, including a prior round's for currency).
+marker() {
+  local reviewer="" pr="" sha="" repo="${GITHUB_REPOSITORY:-}" comments_file="" currency=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pr) pr="${2:?}"; shift 2 ;;
+      --sha) sha="${2:?}"; shift 2 ;;
+      --reviewer) reviewer="${2:?}"; shift 2 ;;
+      --repo) repo="${2:?}"; shift 2 ;;
+      --comments-file) comments_file="${2:?}"; shift 2 ;;
+      --currency) currency=1; shift ;;
+      *) usage "unknown option: $1" ;;
+    esac
+  done
+  case "$reviewer" in
+    jane|drik|pm|coach) ;;
+    *) usage "--reviewer must be jane, drik, pm or coach (got: ${reviewer:-empty})" ;;
+  esac
+  [[ "$pr" =~ ^[0-9]+$ ]] || usage "--pr must be a number (got: ${pr:-empty})"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || usage "--sha must be 40 hex chars (got: ${sha:-empty})"
+
+  local comments
+  if [[ -n "$comments_file" ]]; then
+    comments="$(cat -- "$comments_file")"
+  else
+    command -v gh >/dev/null 2>&1 || { echo "reviewer-posted: gh is not installed" >&2; exit 1; }
+    [[ -n "${GH_TOKEN:-}" ]] || { echo "reviewer-posted: GH_TOKEN is not set (live marker needs it)" >&2; exit 1; }
+    [[ -n "$repo" ]] || usage "--repo is required in live mode (or set GITHUB_REPOSITORY)"
+    if ! comments="$(gh_comments "$repo" "$pr")"; then
+      echo "reviewer-posted: could not read PR #$pr's issue comments" >&2
+      exit 1
+    fi
+  fi
+
+  export REVIEWER_SHA="$sha"
+  case "$reviewer" in
+    jane|drik) export REVIEWER_FAMILY="${reviewer^^}_SIGNOFF" ;;
+    pm)        export REVIEWER_FAMILY="PM_TRIAGE_DONE" ;;
+    coach)     export REVIEWER_FAMILY="COACH_DONE" ;;
+  esac
+  unset REVIEWER_SINCE || true
+  if [[ "$currency" -eq 1 ]]; then
+    export REVIEWER_CURRENCY=1
+  else
+    unset REVIEWER_CURRENCY || true
+  fi
+  marker_from_comments <<<"$comments"
+  printf '\n'
 }
 
 # Advisory diagnosis after a served=false artifact check. Never fails the
@@ -738,6 +884,72 @@ with open(sys.argv[1], 'w', encoding='utf-8') as fh:
   row "a human plant does not hide a later genuine MCP post" \
     true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/plant-then-real"
 
+  # Issue #947: `marker` verb — last QUALIFYING marker for signoff-status.
+  # Expected marker text is built from parts (never a literal in the harness).
+  want_jane="$(H="$head" "$PYTHON3" -I -c '
+import os
+print("<!-- JANE_SIGNOFF sha=%s verdict=pass fuse=none -->" % os.environ["H"])
+')"
+  want_jane_ack="$(H="$head" "$PYTHON3" -I -c '
+import os
+print("<!-- JANE_SIGNOFF sha=%s verdict=pass fuse=acknowledged -->" % os.environ["H"])
+')"
+  want_jane_old="$(O="$old" "$PYTHON3" -I -c '
+import os
+print("<!-- JANE_SIGNOFF sha=%s verdict=pass fuse=none -->" % os.environ["O"])
+')"
+
+  row "marker: Actions-bot MCP suffix → served (exact marker)" \
+    "$want_jane" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted"
+  row "marker: correct suffix from a user author → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/planted-human"
+  mkfix "$tmp/planted-other-bot" \
+    "[mcp('plant', jane, user={'login': 'copilot-pull-request-reviewer[bot]', 'type': 'Bot'})]"
+  row "marker: correct suffix from another [bot] app → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/planted-other-bot"
+  row "marker: Actions-bot marker mid-body (no suffix) → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/no-footer"
+  row "marker: Actions-bot cross-family planted marker → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/sibling-plant"
+  row "marker: Actions-bot wrong/older sha → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/stale"
+  row "marker --currency: trusted older sha is the currency fallback" \
+    "$want_jane_old" "$0" marker --pr 1 --sha "$head" --reviewer jane \
+    --comments-file "$tmp/stale" --currency
+  mkfix "$tmp/short-sha" \
+    "[{'body': 'x\n\n<!-- JANE_SIGNOFF sha=abc123 verdict=pass fuse=none -->\n\n' + FOOTER, 'user': bot}]"
+  row "marker: Actions-bot short sha → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/short-sha"
+  row "marker --currency: short sha still not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane \
+    --comments-file "$tmp/short-sha" --currency
+  row "marker: lowercase family → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/casefold"
+  # Review body / line-comment fixtures: marker only reads issue-comment JSON,
+  # so a comments-file shaped like those sources must still not serve unless
+  # the author+suffix rule holds — and the workflow never feeds them.
+  mkfix "$tmp/review-body-shape" \
+    "[{'body': 'review body\n\n' + jane + '\n\n' + FOOTER, 'user': {'login': 'attacker'}}]"
+  row "marker: marker in a non-bot review-shaped body → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/review-body-shape"
+  # User plant AFTER a valid bot marker: last QUALIFYING wins (bot still).
+  mkfix "$tmp/bot-then-user" \
+    "[mcp('real', jane), mcp('plant', jane, user={'login': 'attacker'})]"
+  row "marker: user marker after valid bot → bot still wins" \
+    "$want_jane" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/bot-then-user"
+  # Last exact-sha qualifying wins over an earlier one (ack after none).
+  mkfix "$tmp/two-bot" "[mcp('first', jane), mcp('second', jane_ack)]"
+  row "marker: last qualifying exact-sha marker wins" \
+    "$want_jane_ack" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/two-bot"
+  # A later older-sha bot post must not override an earlier head-sha marker.
+  mkfix "$tmp/head-then-old" "[mcp('head', jane), mcp('old', jane_stale)]"
+  row "marker: later older-sha bot post does not override head marker" \
+    "$want_jane" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/head-then-old"
+  refuses "marker: typo'd reviewer refused" \
+    "$0" marker --pr 1 --sha "$head" --reviewer jan --comments-file "$tmp/posted"
+  refuses "marker: short sha arg refused" \
+    "$0" marker --pr 1 --sha abc123 --reviewer jane --comments-file "$tmp/posted"
+
   # --since (this-run scope), coach-lock-check pattern.
   row "lock created after --since passes" \
     true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted" \
@@ -799,8 +1011,9 @@ json.dump(pages, open(os.environ["OUT"], "w", encoding="utf-8"))
   if [[ "$rc" -ne 0 ]] && [[ -s "$tmp/stderr" ]]; then ok "live check without GH_TOKEN refuses"
   else bad "live check without GH_TOKEN refuses (rc=$rc)"; fi
 
-  # Drift pin: the footer this script requires is the one the MCP appends.
-  local mcp_footer
+  # Drift pin: the footer this script requires is the one the MCP appends,
+  # and the marker format matches reviewer_mcp.py's _marker_line assembler.
+  local mcp_footer mcp_marker
   mcp_footer="$("$PYTHON3" -I -c '
 import ast, pathlib
 src = pathlib.Path(".claude/reviewer-post/reviewer_mcp.py").read_text(encoding="utf-8")
@@ -815,6 +1028,31 @@ raise SystemExit("FOOTER not found")
 ')"
   if [[ "$mcp_footer" == "$footer" ]]; then ok "FOOTER matches reviewer_mcp.py"
   else bad "FOOTER drifted from reviewer_mcp.py (script=$footer mcp=$mcp_footer)"; fi
+  mcp_marker="$("$PYTHON3" -I -c '
+import ast, pathlib
+src = pathlib.Path(".claude/reviewer-post/reviewer_mcp.py").read_text(encoding="utf-8")
+mod = ast.parse(src)
+for node in mod.body:
+    if isinstance(node, ast.FunctionDef) and node.name == "_marker_line":
+        for stmt in node.body:
+            if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.JoinedStr):
+                # Reconstruct the f-string template parts as a pattern probe:
+                # the assembler must keep family/sha/verdict/fuse field order.
+                parts = []
+                for v in stmt.value.values:
+                    if isinstance(v, ast.Constant):
+                        parts.append(v.value)
+                    elif isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name):
+                        parts.append("{%s}" % v.value.id)
+                    else:
+                        raise SystemExit("unexpected f-string piece in _marker_line")
+                print("".join(parts))
+                raise SystemExit(0)
+raise SystemExit("_marker_line return not found")
+')"
+  want_fmt='<!-- {marker} sha={sha} verdict={verdict} fuse={fuse} -->'
+  if [[ "$mcp_marker" == "$want_fmt" ]]; then ok "marker format matches reviewer_mcp.py _marker_line"
+  else bad "marker format drifted from reviewer_mcp.py (got=$mcp_marker)"; fi
 
   # Drift pin: the marker literals this script matches are the ones the two
   # reviewer skills tell their agents to emit.
@@ -855,6 +1093,7 @@ JSON
 
 case "${1:-}" in
   check) shift; check "$@" ;;
+  marker) shift; marker "$@" ;;
   diagnose) shift; diagnose "$@" ;;
   --selftest) selftest "$0" ;;
   *) usage "unknown mode: ${1:-none}" ;;
