@@ -95,7 +95,10 @@ trap cleanup EXIT
   done
 } >"$secrets_file"
 
+# Wipe the per-link out-dir before writing so a prior ship step cannot leave
+# planted files beside diag.json for a recursive artifact upload to pick up.
 out_dir="${RUNNER_TEMP}/backlog-burn-agent-diag/link-${link}"
+rm -rf -- "$out_dir"
 mkdir -p -- "$out_dir"
 
 # Strip credential env from the diag child: secrets reach it only via the

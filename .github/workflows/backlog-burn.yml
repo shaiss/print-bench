@@ -994,12 +994,48 @@ jobs:
       # Redacted denial + truncated assistant message only. show_full_output
       # stays false on every ship step; this artifact is the diagnosability
       # surface for "agent success, nothing pushed" deaths (#885/#886/#889).
-      - name: Upload agent denial diagnostic
+      # Stage ONLY link-*/diag.json into a fresh directory — never upload the
+      # shared RUNNER_TEMP tree recursively (a ship link with Write/Edit could
+      # plant the unsanitized execution log or other files beside diag.json).
+      - name: Stage agent denial diagnostic
+        id: diag_stage
         if: always() && steps.select.outputs.issue != ''
+        continue-on-error: true
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          BASH_ENV: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          src_root="${RUNNER_TEMP}/backlog-burn-agent-diag"
+          stage="${RUNNER_TEMP}/backlog-burn-agent-diag-upload"
+          rm -rf -- "$stage"
+          mkdir -p -- "$stage"
+          staged=0
+          for i in 1 2 3 4 5; do
+            src="${src_root}/link-${i}/diag.json"
+            if [ -f "$src" ] && [ ! -L "$src" ]; then
+              # Refuse anything that is not a regular file named diag.json
+              # under the expected link-N layout.
+              mkdir -p -- "${stage}/link-${i}"
+              # Copy bytes only; do not follow a planted symlink.
+              cp -f -- "$src" "${stage}/link-${i}/diag.json"
+              staged=$((staged + 1))
+            fi
+          done
+          echo "staged ${staged} diag.json file(s) for upload"
+          # Record whether anything landed so the upload can no-op cleanly.
+          echo "staged=${staged}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload agent denial diagnostic
+        if: always() && steps.select.outputs.issue != '' && steps.diag_stage.outputs.staged != '0'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: backlog-burn-agent-diag-${{ github.run_id }}
-          path: ${{ runner.temp }}/backlog-burn-agent-diag/
+          path: ${{ runner.temp }}/backlog-burn-agent-diag-upload/
           if-no-files-found: ignore
           retention-days: 14
 
