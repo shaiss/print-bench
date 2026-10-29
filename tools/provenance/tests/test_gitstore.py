@@ -600,9 +600,10 @@ def test_scrub_applies_exact_then_patterns():
 
 
 def test_scrub_exact_runtime_env_shaped_values_before_truncate():
-    """Capture feeds ZAI_KEY / ANTHROPIC_API_KEY / GITHUB_TOKEN via SECRETS_FILE.
+    """scrub() still accepts an exact-secret list (API surface).
 
-    Tests use fake values only — never real credentials, never print them.
+    Capture no longer rematerializes live env values into SECRETS_FILE;
+    pattern scrub covers well-known shapes. Tests use fake values only.
     """
     fake_zai = "f" * 32 + "." + "FakeZaiKey000001"
     fake_anthropic = "sk-ant-fake-test-value-not-real-0001"

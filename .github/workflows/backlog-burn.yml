@@ -221,6 +221,28 @@ jobs:
           echo "capture_sha256=${capture_sha256}" >> "$GITHUB_OUTPUT"
           prov_archive_sha256="$(git --no-replace-objects archive HEAD tools/provenance/src | sha256sum | awk '{print $1}')"
           echo "prov_archive_sha256=${prov_archive_sha256}" >> "$GITHUB_OUTPUT"
+          # Pre-agent PID snapshot for post-agent reapers. Capture/bundle kill
+          # every PID not in this set (except the reaper, its ancestors, and
+          # its process group). No comm/name exemptions — those are spoofable.
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty — cannot write PID snapshot" >&2
+            exit 1
+          fi
+          pid_snap="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          umask 077
+          : >"$pid_snap"
+          shopt -s nullglob
+          for d in /proc/[0-9]*; do
+            pid="${d#/proc/}"
+            case "$pid" in
+              *[!0-9]*) continue ;;
+            esac
+            printf '%s\n' "$pid"
+          done >"$pid_snap"
+          shopt -u nullglob
+          chmod 644 -- "$pid_snap"
+          pid_snap_sha256="$(sha256sum "$pid_snap" | awk '{print $1}')"
+          echo "pid_snap_sha256=${pid_snap_sha256}" >> "$GITHUB_OUTPUT"
 
       - name: Prove lock-cleanup restore leaves a regular file
         # #923: fail loudly BEFORE any agent work if the settle job's
@@ -671,9 +693,11 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens under these names. Exact scrub
-          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
+          # cannot leave provider/job tokens under these names. Pattern-based
+          # scrub covers well-known shapes; never rematerialize live secrets
+          # into SCRUB_* / SECRETS_FILE (unset does not clear /proc/<pid>/environ).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -684,13 +708,6 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
-          # credential names stay blanked above so a GITHUB_ENV plant cannot
-          # re-fill them; these SCRUB_* slots are written to the secrets file
-          # then unset before the capture helper runs.
-          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
-          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -707,53 +724,53 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          # Reap detached ship-link children before secrets or diag touch disk.
-          # Same class the Bundle step reaps — do it here so capture does not
-          # reopen a post-scrub window those orphans can harvest.
+          # Reap every process that appeared after the pre-agent PID snapshot.
+          # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
+          # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
+          # its own process group (helpers during TERM→KILL).
+          if [ -z "${PID_SNAP_SHA256:-}" ]; then
+            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+            exit 1
+          fi
+          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
+            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
+            exit 1
+          fi
+          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+            echo "::error::pre-agent PID snapshot digest mismatch" >&2
+            exit 1
+          fi
+          reap_ppid_of() {
+            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
+          }
           reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
+            local walk pgid
             [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
-            case "$comm" in
-              # Always exclude Actions Runner.*/Agent.* host processes — even
-              # when reparented to init. Spoofed /proc/self/comm alone is not
-              # enough to kill; agent-tree evidence (in_tree / mentions) is
-              # required for any other ppid=1 PID below.
-              Runner.*|Agent.*) return 1 ;;
-              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
-            esac
-            # Only reap init-orphans from this burn's agent tree — never every
-            # ppid=1 process on the runner (that would include real Runner.*).
-            if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
+            # Spare self and ancestors (the Actions runner chain).
+            walk="$self_pid"
+            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+              [ "$walk" = "$pid" ] && return 1
+              walk="$(reap_ppid_of "$walk")"
+            done
+            # Spare our process group (reaper helpers).
+            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
               return 1
             fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
+            # Spare anything alive before the agent started.
+            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
+              return 1
             fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
+            return 0
           }
           reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local d pid v pgid my_pgid
             local -a victims=()
             my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
             shopt -s nullglob
@@ -762,13 +779,7 @@ jobs:
               case "$pid" in
                 *[!0-9]*) continue ;;
               esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
                 victims+=("$pid")
               fi
             done
@@ -804,26 +815,11 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
-          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
-          # covers them). Never log or echo scrub values.
-          umask 077
-          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          : >"$secrets"
-          chmod 600 -- "$secrets"
-          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
-            val="${!scrub_var-}"
-            if [ -n "$val" ]; then
-              printf '%s\n' "$val" >>"$secrets"
-            fi
-          done
-          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
+          # Pattern-based scrub only — never write live secrets to a RUNNER_TEMP
+          # file or rematerialize them into the step environ for exact redact.
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
-            # Only rm paths that are still set — clearing secrets="" used to
-            # hand GNU rm an empty operand and fail the step under set -e.
             [ -n "${blob:-}" ] && rm -f -- "$blob" || true
-            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
             [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
           }
           trap cleanup_capture EXIT
@@ -831,17 +827,13 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
-              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
               "$blob" 1; then
             echo "::error::capture helper failed for link 1" >&2
             exit 1
           fi
-          # Drop the secrets file before sealing outputs — shrink the window.
-          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
-          rm -f -- "$secrets"
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -893,9 +885,11 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens under these names. Exact scrub
-          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
+          # cannot leave provider/job tokens under these names. Pattern-based
+          # scrub covers well-known shapes; never rematerialize live secrets
+          # into SCRUB_* / SECRETS_FILE (unset does not clear /proc/<pid>/environ).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -906,13 +900,6 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
-          # credential names stay blanked above so a GITHUB_ENV plant cannot
-          # re-fill them; these SCRUB_* slots are written to the secrets file
-          # then unset before the capture helper runs.
-          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
-          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -929,53 +916,53 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          # Reap detached ship-link children before secrets or diag touch disk.
-          # Same class the Bundle step reaps — do it here so capture does not
-          # reopen a post-scrub window those orphans can harvest.
+          # Reap every process that appeared after the pre-agent PID snapshot.
+          # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
+          # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
+          # its own process group (helpers during TERM→KILL).
+          if [ -z "${PID_SNAP_SHA256:-}" ]; then
+            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+            exit 1
+          fi
+          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
+            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
+            exit 1
+          fi
+          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+            echo "::error::pre-agent PID snapshot digest mismatch" >&2
+            exit 1
+          fi
+          reap_ppid_of() {
+            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
+          }
           reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
+            local walk pgid
             [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
-            case "$comm" in
-              # Always exclude Actions Runner.*/Agent.* host processes — even
-              # when reparented to init. Spoofed /proc/self/comm alone is not
-              # enough to kill; agent-tree evidence (in_tree / mentions) is
-              # required for any other ppid=1 PID below.
-              Runner.*|Agent.*) return 1 ;;
-              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
-            esac
-            # Only reap init-orphans from this burn's agent tree — never every
-            # ppid=1 process on the runner (that would include real Runner.*).
-            if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
+            # Spare self and ancestors (the Actions runner chain).
+            walk="$self_pid"
+            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+              [ "$walk" = "$pid" ] && return 1
+              walk="$(reap_ppid_of "$walk")"
+            done
+            # Spare our process group (reaper helpers).
+            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
               return 1
             fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
+            # Spare anything alive before the agent started.
+            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
+              return 1
             fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
+            return 0
           }
           reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local d pid v pgid my_pgid
             local -a victims=()
             my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
             shopt -s nullglob
@@ -984,13 +971,7 @@ jobs:
               case "$pid" in
                 *[!0-9]*) continue ;;
               esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
                 victims+=("$pid")
               fi
             done
@@ -1026,26 +1007,11 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
-          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
-          # covers them). Never log or echo scrub values.
-          umask 077
-          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          : >"$secrets"
-          chmod 600 -- "$secrets"
-          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
-            val="${!scrub_var-}"
-            if [ -n "$val" ]; then
-              printf '%s\n' "$val" >>"$secrets"
-            fi
-          done
-          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
+          # Pattern-based scrub only — never write live secrets to a RUNNER_TEMP
+          # file or rematerialize them into the step environ for exact redact.
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
-            # Only rm paths that are still set — clearing secrets="" used to
-            # hand GNU rm an empty operand and fail the step under set -e.
             [ -n "${blob:-}" ] && rm -f -- "$blob" || true
-            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
             [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
           }
           trap cleanup_capture EXIT
@@ -1053,17 +1019,13 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
-              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
               "$blob" 2; then
             echo "::error::capture helper failed for link 2" >&2
             exit 1
           fi
-          # Drop the secrets file before sealing outputs — shrink the window.
-          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
-          rm -f -- "$secrets"
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1113,9 +1075,11 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens under these names. Exact scrub
-          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
+          # cannot leave provider/job tokens under these names. Pattern-based
+          # scrub covers well-known shapes; never rematerialize live secrets
+          # into SCRUB_* / SECRETS_FILE (unset does not clear /proc/<pid>/environ).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -1126,13 +1090,6 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
-          # credential names stay blanked above so a GITHUB_ENV plant cannot
-          # re-fill them; these SCRUB_* slots are written to the secrets file
-          # then unset before the capture helper runs.
-          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
-          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1149,53 +1106,53 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          # Reap detached ship-link children before secrets or diag touch disk.
-          # Same class the Bundle step reaps — do it here so capture does not
-          # reopen a post-scrub window those orphans can harvest.
+          # Reap every process that appeared after the pre-agent PID snapshot.
+          # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
+          # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
+          # its own process group (helpers during TERM→KILL).
+          if [ -z "${PID_SNAP_SHA256:-}" ]; then
+            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+            exit 1
+          fi
+          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
+            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
+            exit 1
+          fi
+          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+            echo "::error::pre-agent PID snapshot digest mismatch" >&2
+            exit 1
+          fi
+          reap_ppid_of() {
+            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
+          }
           reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
+            local walk pgid
             [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
-            case "$comm" in
-              # Always exclude Actions Runner.*/Agent.* host processes — even
-              # when reparented to init. Spoofed /proc/self/comm alone is not
-              # enough to kill; agent-tree evidence (in_tree / mentions) is
-              # required for any other ppid=1 PID below.
-              Runner.*|Agent.*) return 1 ;;
-              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
-            esac
-            # Only reap init-orphans from this burn's agent tree — never every
-            # ppid=1 process on the runner (that would include real Runner.*).
-            if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
+            # Spare self and ancestors (the Actions runner chain).
+            walk="$self_pid"
+            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+              [ "$walk" = "$pid" ] && return 1
+              walk="$(reap_ppid_of "$walk")"
+            done
+            # Spare our process group (reaper helpers).
+            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
               return 1
             fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
+            # Spare anything alive before the agent started.
+            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
+              return 1
             fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
+            return 0
           }
           reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local d pid v pgid my_pgid
             local -a victims=()
             my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
             shopt -s nullglob
@@ -1204,13 +1161,7 @@ jobs:
               case "$pid" in
                 *[!0-9]*) continue ;;
               esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
                 victims+=("$pid")
               fi
             done
@@ -1246,26 +1197,11 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
-          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
-          # covers them). Never log or echo scrub values.
-          umask 077
-          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          : >"$secrets"
-          chmod 600 -- "$secrets"
-          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
-            val="${!scrub_var-}"
-            if [ -n "$val" ]; then
-              printf '%s\n' "$val" >>"$secrets"
-            fi
-          done
-          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
+          # Pattern-based scrub only — never write live secrets to a RUNNER_TEMP
+          # file or rematerialize them into the step environ for exact redact.
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
-            # Only rm paths that are still set — clearing secrets="" used to
-            # hand GNU rm an empty operand and fail the step under set -e.
             [ -n "${blob:-}" ] && rm -f -- "$blob" || true
-            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
             [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
           }
           trap cleanup_capture EXIT
@@ -1273,17 +1209,13 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
-              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
               "$blob" 3; then
             echo "::error::capture helper failed for link 3" >&2
             exit 1
           fi
-          # Drop the secrets file before sealing outputs — shrink the window.
-          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
-          rm -f -- "$secrets"
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1341,9 +1273,11 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens under these names. Exact scrub
-          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
+          # cannot leave provider/job tokens under these names. Pattern-based
+          # scrub covers well-known shapes; never rematerialize live secrets
+          # into SCRUB_* / SECRETS_FILE (unset does not clear /proc/<pid>/environ).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -1354,13 +1288,6 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
-          # credential names stay blanked above so a GITHUB_ENV plant cannot
-          # re-fill them; these SCRUB_* slots are written to the secrets file
-          # then unset before the capture helper runs.
-          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
-          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1377,53 +1304,53 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          # Reap detached ship-link children before secrets or diag touch disk.
-          # Same class the Bundle step reaps — do it here so capture does not
-          # reopen a post-scrub window those orphans can harvest.
+          # Reap every process that appeared after the pre-agent PID snapshot.
+          # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
+          # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
+          # its own process group (helpers during TERM→KILL).
+          if [ -z "${PID_SNAP_SHA256:-}" ]; then
+            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+            exit 1
+          fi
+          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
+            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
+            exit 1
+          fi
+          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+            echo "::error::pre-agent PID snapshot digest mismatch" >&2
+            exit 1
+          fi
+          reap_ppid_of() {
+            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
+          }
           reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
+            local walk pgid
             [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
-            case "$comm" in
-              # Always exclude Actions Runner.*/Agent.* host processes — even
-              # when reparented to init. Spoofed /proc/self/comm alone is not
-              # enough to kill; agent-tree evidence (in_tree / mentions) is
-              # required for any other ppid=1 PID below.
-              Runner.*|Agent.*) return 1 ;;
-              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
-            esac
-            # Only reap init-orphans from this burn's agent tree — never every
-            # ppid=1 process on the runner (that would include real Runner.*).
-            if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
+            # Spare self and ancestors (the Actions runner chain).
+            walk="$self_pid"
+            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+              [ "$walk" = "$pid" ] && return 1
+              walk="$(reap_ppid_of "$walk")"
+            done
+            # Spare our process group (reaper helpers).
+            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
               return 1
             fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
+            # Spare anything alive before the agent started.
+            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
+              return 1
             fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
+            return 0
           }
           reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local d pid v pgid my_pgid
             local -a victims=()
             my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
             shopt -s nullglob
@@ -1432,13 +1359,7 @@ jobs:
               case "$pid" in
                 *[!0-9]*) continue ;;
               esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
                 victims+=("$pid")
               fi
             done
@@ -1474,26 +1395,11 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
-          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
-          # covers them). Never log or echo scrub values.
-          umask 077
-          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          : >"$secrets"
-          chmod 600 -- "$secrets"
-          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
-            val="${!scrub_var-}"
-            if [ -n "$val" ]; then
-              printf '%s\n' "$val" >>"$secrets"
-            fi
-          done
-          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
+          # Pattern-based scrub only — never write live secrets to a RUNNER_TEMP
+          # file or rematerialize them into the step environ for exact redact.
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
-            # Only rm paths that are still set — clearing secrets="" used to
-            # hand GNU rm an empty operand and fail the step under set -e.
             [ -n "${blob:-}" ] && rm -f -- "$blob" || true
-            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
             [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
           }
           trap cleanup_capture EXIT
@@ -1501,17 +1407,13 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
-              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
               "$blob" 4; then
             echo "::error::capture helper failed for link 4" >&2
             exit 1
           fi
-          # Drop the secrets file before sealing outputs — shrink the window.
-          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
-          rm -f -- "$secrets"
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1560,9 +1462,11 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens under these names. Exact scrub
-          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
+          # cannot leave provider/job tokens under these names. Pattern-based
+          # scrub covers well-known shapes; never rematerialize live secrets
+          # into SCRUB_* / SECRETS_FILE (unset does not clear /proc/<pid>/environ).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -1573,13 +1477,6 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
-          # credential names stay blanked above so a GITHUB_ENV plant cannot
-          # re-fill them; these SCRUB_* slots are written to the secrets file
-          # then unset before the capture helper runs.
-          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
-          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1596,53 +1493,53 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          # Reap detached ship-link children before secrets or diag touch disk.
-          # Same class the Bundle step reaps — do it here so capture does not
-          # reopen a post-scrub window those orphans can harvest.
+          # Reap every process that appeared after the pre-agent PID snapshot.
+          # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
+          # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
+          # its own process group (helpers during TERM→KILL).
+          if [ -z "${PID_SNAP_SHA256:-}" ]; then
+            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+            exit 1
+          fi
+          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
+            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
+            exit 1
+          fi
+          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+            echo "::error::pre-agent PID snapshot digest mismatch" >&2
+            exit 1
+          fi
+          reap_ppid_of() {
+            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
+          }
           reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
+            local walk pgid
             [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
-            case "$comm" in
-              # Always exclude Actions Runner.*/Agent.* host processes — even
-              # when reparented to init. Spoofed /proc/self/comm alone is not
-              # enough to kill; agent-tree evidence (in_tree / mentions) is
-              # required for any other ppid=1 PID below.
-              Runner.*|Agent.*) return 1 ;;
-              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
-            esac
-            # Only reap init-orphans from this burn's agent tree — never every
-            # ppid=1 process on the runner (that would include real Runner.*).
-            if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
+            # Spare self and ancestors (the Actions runner chain).
+            walk="$self_pid"
+            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+              [ "$walk" = "$pid" ] && return 1
+              walk="$(reap_ppid_of "$walk")"
+            done
+            # Spare our process group (reaper helpers).
+            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
               return 1
             fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
+            # Spare anything alive before the agent started.
+            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
+              return 1
             fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
+            return 0
           }
           reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local d pid v pgid my_pgid
             local -a victims=()
             my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
             shopt -s nullglob
@@ -1651,13 +1548,7 @@ jobs:
               case "$pid" in
                 *[!0-9]*) continue ;;
               esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
                 victims+=("$pid")
               fi
             done
@@ -1693,26 +1584,11 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
-          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
-          # covers them). Never log or echo scrub values.
-          umask 077
-          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          : >"$secrets"
-          chmod 600 -- "$secrets"
-          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
-            val="${!scrub_var-}"
-            if [ -n "$val" ]; then
-              printf '%s\n' "$val" >>"$secrets"
-            fi
-          done
-          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
+          # Pattern-based scrub only — never write live secrets to a RUNNER_TEMP
+          # file or rematerialize them into the step environ for exact redact.
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
-            # Only rm paths that are still set — clearing secrets="" used to
-            # hand GNU rm an empty operand and fail the step under set -e.
             [ -n "${blob:-}" ] && rm -f -- "$blob" || true
-            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
             [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
           }
           trap cleanup_capture EXIT
@@ -1720,17 +1596,13 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
-              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
               "$blob" 5; then
             echo "::error::capture helper failed for link 5" >&2
             exit 1
           fi
-          # Drop the secrets file before sealing outputs — shrink the window.
-          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
-          rm -f -- "$secrets"
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1785,6 +1657,7 @@ jobs:
           ISSUE: ${{ steps.select.outputs.issue }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DELIVER_SHA256: ${{ steps.start_ref.outputs.deliver_sha256 }}
+          PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
           # The restored script lives in RUNNER_TEMP. It must operate on the
           # checkout, never on dirname($0)/.. (that is the runner work dir).
           DELIVER_WORKTREE: ${{ github.workspace }}
@@ -1828,51 +1701,54 @@ jobs:
         run: |
           set -euo pipefail
           unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
-          # A detached child of the agent is reparented to init (ppid 1).
-          # setsid leaves a session leader whose parent may still not be
-          # init, and systemd-run parents the child under a transient
-          # run-*.scope. Kill those before the bundle is judged, and again
-          # after write_bundle returns, so a survivor cannot create the
-          # bundle file once this step has decided it is absent. Runner
-          # and systemd themselves are excluded by comm.
+          # Reap every process that appeared after the pre-agent PID snapshot.
+          # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
+          # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
+          # its own process group. Includes ppid=1 daemons and cwd in /, /tmp,
+          # /dev/shm when those PIDs were started after the snapshot.
+          if [ -z "${PID_SNAP_SHA256:-}" ]; then
+            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+            exit 1
+          fi
+          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
+            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
+            exit 1
+          fi
+          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+            echo "::error::pre-agent PID snapshot digest mismatch" >&2
+            exit 1
+          fi
+          reap_ppid_of() {
+            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
+          }
           reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
+            local walk pgid
             [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
-            case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn.bundle*|*model_registry*) mentions=1 ;;
-            esac
-            # Bundle reaper stays burn-scoped (in_tree / bundle mention / setsid
-            # in tree / run-*.scope). Capture steps use a broader ppid=1 reap;
-            # this predicate must not kill an unrelated init-child that only
-            # mentions design-run.bundle (design-run-deliver.sh --selftest).
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
+            # Spare self and ancestors (the Actions runner chain).
+            walk="$self_pid"
+            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+              [ "$walk" = "$pid" ] && return 1
+              walk="$(reap_ppid_of "$walk")"
+            done
+            # Spare our process group (reaper helpers).
+            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
+              return 1
             fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
+            # Spare anything alive before the agent started.
+            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
+              return 1
             fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
+            return 0
           }
           reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local d pid v pgid my_pgid
             local -a victims=()
             my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
             shopt -s nullglob
@@ -1881,13 +1757,7 @@ jobs:
               case "$pid" in
                 *[!0-9]*) continue ;;
               esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
                 victims+=("$pid")
               fi
             done

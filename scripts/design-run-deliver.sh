@@ -4574,13 +4574,30 @@ EOF
     exit 1
   }
   # Five Capture denied-tools steps + the Bundle step each define the
-  # predicate. Capture always excludes Runner.*/Agent.* and only reaps
-  # init-orphans with agent-tree evidence; Bundle stays burn-scoped.
+  # snapshot-based reaper (no comm/name exemptions).
   burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
   [ "$burn_reap_n" -eq 6 ] || {
-    echo "selftest: expected the reaper predicate in the burn bundle step, found ${burn_reap_n}" >&2
+    echo "selftest: expected the reaper predicate in 5 capture + bundle steps, found ${burn_reap_n}" >&2
     exit 1
   }
+  grep -q 'pid_snap_sha256=' "$burn" || {
+    echo "selftest: burn start_ref does not snapshot pre-agent PIDs" >&2
+    exit 1
+  }
+  grep -q 'backlog-burn-pre-agent-pids' "$burn" || {
+    echo "selftest: burn is missing the pre-agent PID snapshot path" >&2
+    exit 1
+  }
+  # No name-based exemptions remain (comm matching is agent-spoofable).
+  if grep -E 'case "\$comm"|^\s+Runner\.\*\|Agent' "$burn" >/dev/null; then
+    echo "selftest: burn reaper still has comm/name-based exemptions" >&2
+    exit 1
+  fi
+  # Exact-value scrub removed: unset does not clear /proc/<pid>/environ.
+  if grep -E 'SCRUB_ZAI_KEY|SCRUB_ANTHROPIC_API_KEY|SCRUB_GITHUB_TOKEN|backlog-burn-diag-secrets' "$burn" >/dev/null; then
+    echo "selftest: burn still rematerializes exact-value scrub secrets" >&2
+    exit 1
+  fi
   # Capture steps blank LD_AUDIT the same way Bundle/settle do.
   burn_capture_ld="$(grep -c 'Capture denied tools' "$burn" || true)"
   [ "$burn_capture_ld" -eq 5 ] || {
@@ -4597,21 +4614,29 @@ EOF
     echo "selftest: expected LD_AUDIT blanked in all 5 Capture steps, found ${burn_ld_audit_n}" >&2
     exit 1
   }
-  grep -q 'SCRUB_ZAI_KEY:' "$burn" && grep -q 'SCRUB_ANTHROPIC_API_KEY:' "$burn" \
-    && grep -q 'SCRUB_GITHUB_TOKEN:' "$burn" || {
-    echo "selftest: burn Capture steps missing SCRUB_* exact-scrub env slots" >&2
-    exit 1
-  }
-  # Extract the FIRST definition (Capture step) — must keep Runner.*/Agent.*
-  # even at ppid=1, and must not kill unrelated init orphans.
+  # Snapshot-based predicate: extract FIRST definition (Capture) + helpers.
+  # Signature: reap_should_kill pid snap_file self_pid my_pgid
   burn_capture_reap="$(awk '
-    /reap_should_kill\(\) \{/ { c++; p=0; if (c==1) p=1 }
+    /reap_ppid_of\(\) \{/ { c++; p=0; if (c==1) p=1 }
+    p && /^          reap_agent_orphans\(\)/ { exit }
     p { print }
-    p && /^          \}$/ { exit }
   ' "$burn")"
+  snap_dir="$(mktemp -d)"
+  snap_file="${snap_dir}/pids"
+  printf '%s\n' 40 41 1 >"$snap_file"
   (
     eval "$burn_capture_reap"
-    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
+    # Stub ps so pgid checks are deterministic (pid 99 = reaper pgid).
+    ps() {
+      if [ "$1" = "-o" ] && [ "$2" = "pgid=" ]; then
+        case "$4" in
+          99|98) echo " 99" ;;
+          *) echo " 7" ;;
+        esac
+        return 0
+      fi
+      command ps "$@"
+    }
     expect_kill() {
       if ! reap_should_kill "$@"; then
         echo "selftest: capture reap_should_kill kept a process it must kill: $*" >&2
@@ -4624,39 +4649,52 @@ EOF
         exit 1
       fi
     }
-    # Real runner host processes — always keep, even when ppid=1.
-    expect_keep 50 1 Runner.Worker /work/x runner 9 "" 99 1
-    expect_keep 51 1 Agent.Listener /work/x agent 9 "" 99 1
-    # Unrelated init orphan (no agent-tree evidence) — keep.
-    expect_keep 52 1 sleep / sleep 9 "" 99 1
-    # Agent-tree init orphans — kill.
-    expect_kill 53 1 sleep /work/x sleep 9 "" 99 1
-    expect_kill 54 1 sleep / "backlog-burn-diag capture" 9 "" 99 1
-    expect_kill 55 1 sleep / "claude-execution-output.json" 9 "" 99 1
+    # Pre-snapshot PID spared regardless of name/cwd.
+    expect_keep 40 "$snap_file" 99 99
+    # Post-snapshot process renamed to Runner.Worker — still reaped (no name match).
+    expect_kill 50 "$snap_file" 99 99
+    # Self and ancestors spared.
+    expect_keep 99 "$snap_file" 99 99
+    # Same process group spared (reaper helpers).
+    expect_keep 98 "$snap_file" 99 99
   )
-  # Extract the LAST definition (Bundle step) for the burn-scoped contract.
+  rm -rf -- "$snap_dir"
+  # Bundle step uses the same snapshot predicate (last definition).
   burn_reap_a="$(awk -v want="$burn_reap_n" '
-    /reap_should_kill\(\) \{/ { c++; p=0; if (c==want) p=1 }
+    /reap_ppid_of\(\) \{/ { c++; p=0; if (c==want) p=1 }
+    p && /^          reap_agent_orphans\(\)/ { exit }
     p { print }
-    p && /^          \}$/ { exit }
   ' "$burn")"
+  snap_dir="$(mktemp -d)"
+  snap_file="${snap_dir}/pids"
+  printf '%s\n' 40 >"$snap_file"
   (
     eval "$burn_reap_a"
-    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
-    if reap_should_kill 55 1 sleep / "backlog-burn.bundle" 3 "" 99 1; then :; else
-      echo "selftest: burn reap_should_kill kept a process mentioning the burn bundle" >&2
+    ps() {
+      if [ "$1" = "-o" ] && [ "$2" = "pgid=" ]; then
+        case "$4" in
+          99|98) echo " 99" ;;
+          *) echo " 7" ;;
+        esac
+        return 0
+      fi
+      command ps "$@"
+    }
+    if ! reap_should_kill 50 "$snap_file" 99 99; then
+      echo "selftest: burn bundle reap_should_kill kept a post-snapshot process" >&2
       exit 1
     fi
-    if reap_should_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1; then
-      echo "selftest: burn reap_should_kill killed a process outside the burn" >&2
+    if reap_should_kill 40 "$snap_file" 99 99; then
+      echo "selftest: burn bundle reap_should_kill killed a pre-snapshot process" >&2
       exit 1
     fi
-    # Bundle also always excludes Runner.* at ppid=1.
-    if reap_should_kill 50 1 Runner.Worker /work/x runner 9 "" 99 1; then
-      echo "selftest: burn bundle reap_should_kill killed Runner.Worker" >&2
+    # Renamed Runner.Worker started after snapshot must still be reaped.
+    if ! reap_should_kill 51 "$snap_file" 99 99; then
+      echo "selftest: burn bundle reap_should_kill kept a renamed Runner.Worker" >&2
       exit 1
     fi
   )
+  rm -rf -- "$snap_dir"
   grep -q '  triage:' "$burn" || {
     echo "selftest: burn provider-triage is not a separate job" >&2
     exit 1

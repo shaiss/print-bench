@@ -66,8 +66,9 @@ fi
 out_dir="${out_dir:-/tmp/backlog-burn-agent-diag}"
 mkdir -p -- "$out_dir"
 
-# Collect secret values for exact redact(). Prefer --secrets-file (written
-# by the trusted capture bootstrap); fall back to env for local dry-runs.
+# Collect secret values for optional exact redact(). Capture no longer
+# passes --secrets-file (exact rematerialization is unsafe); fall back to
+# env for local dry-runs. Empty list ⇒ pattern-based scrub only.
 secrets_file="$(mktemp)"
 cleanup() { rm -f -- "$secrets_file"; }
 trap cleanup EXIT
