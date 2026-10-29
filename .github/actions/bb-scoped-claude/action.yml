@@ -31,6 +31,11 @@ inputs:
     description: "anthropics/claude-code-action git SHA"
     required: false
     default: "374f254f5efaf968abfe15d399fd90972e8138b9"
+  # sha256 of https://github.com/anthropics/claude-code-action/archive/<action_ref>.tar.gz
+  action_sha256:
+    description: "Expected sha256 of the action_ref source tarball"
+    required: false
+    default: "5e86abef0592b6a9aa1a3c139d7133b223fd8574bffeb54186448ad025bc4ffb"
 
 runs:
   using: composite
@@ -42,6 +47,7 @@ runs:
       shell: bash
       env:
         ACTION_REF: ${{ inputs.action_ref }}
+        ACTION_SHA256: ${{ inputs.action_sha256 }}
         RUNNER_TEMP: ${{ runner.temp }}
       run: |
         set -euo pipefail
@@ -53,10 +59,14 @@ runs:
           curl -fsSL \
             "https://github.com/anthropics/claude-code-action/archive/${ACTION_REF}.tar.gz" \
             -o "${archive}"
+          # Fail closed on tarball digest mismatch before extract.
+          printf '%s  %s\n' "${ACTION_SHA256}" "${archive}" | sha256sum -c -
           tar -xzf "${archive}" -C "${dest}" --strip-components=1
           rm -f "${archive}"
         fi
         test -f "${dest}/src/entrypoints/run.ts"
+        # Tarball at this ref ships bun.lock (frozen-lockfile install below).
+        test -f "${dest}/bun.lock"
         echo "BB_CCA_PATH=${dest}" >> "$GITHUB_ENV"
 
     - name: Install action dependencies
@@ -64,7 +74,7 @@ runs:
       run: |
         set -euo pipefail
         cd "${BB_CCA_PATH}"
-        bun install --production
+        bun install --frozen-lockfile --production
 
     - name: Run agent inside systemd scope
       shell: bash
@@ -146,12 +156,16 @@ runs:
           exit $?
         fi
 
+        # ubuntu-latest ships systemd >= 254 with --expand-environment; pin
+        # it off so argv `$VAR` text cannot be rewritten (secrets still travel
+        # only via inherited env, never --setenv/-E).
         # sudo --preserve-env: inherit the step env (including secrets) without
         # listing values on the command line or as unit properties.
         # --uid/--gid: agent runs as the runner user, never root.
         # No systemd-run -E/--setenv (secrets would appear in systemctl show).
         sudo --preserve-env \
           systemd-run --scope \
+          --expand-environment=no \
           --uid="$(id -u)" \
           --gid="$(id -g)" \
           --unit="${UNIT}" \
