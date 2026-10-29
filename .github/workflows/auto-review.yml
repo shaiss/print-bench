@@ -3762,7 +3762,8 @@ jobs:
             rc=$?
             set -e
             if [[ "$rc" -eq 2 ]]; then
-              echo "::notice::base reviewer-posted.sh predates #947 marker verb — treating $who marker as absent"
+              # stderr only — stdout is captured as the marker string.
+              echo "::notice::base reviewer-posted.sh predates #947 marker verb — treating $who marker as absent" >&2
               out=""
             elif [[ "$rc" -ne 0 ]]; then
               cat "$err" >&2
