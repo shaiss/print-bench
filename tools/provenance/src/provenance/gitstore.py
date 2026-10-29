@@ -418,10 +418,11 @@ _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     # OpenRouter / Anthropic API keys.
     (r"sk-or-[A-Za-z0-9_\-]{20,}", "***"),
     (r"sk-ant-[A-Za-z0-9_\-]{20,}", "***"),
-    # Z.AI / Anthropic-compatible opaque API keys (no stable prefix when used
-    # as ANTHROPIC_AUTH_TOKEN). 48+ url-safe chars — above git SHA (40) so
-    # commit hashes are not redacted.
-    (r"(?<![A-Za-z0-9_\-])[A-Za-z0-9_\-]{48,}(?![A-Za-z0-9_\-])", "***"),
+    # Documented Z.AI API keys (32 hex + '.' + 16 alnum), including when
+    # echoed as ANTHROPIC_AUTH_TOKEN=… from a ship-link env dump. Do NOT use
+    # a blanket 48+ url-safe class — that redacts SHA-256 digests (64 hex).
+    (r"(?i)(?:ANTHROPIC_AUTH_TOKEN|ZAI_KEY)\s*[=:]\s*[0-9a-f]{32}\.[A-Za-z0-9]{16}", "***"),
+    (r"(?<![A-Za-z0-9.])[0-9a-f]{32}\.[A-Za-z0-9]{16}(?![A-Za-z0-9.])", "***"),
     # AWS secret access key sitting near an access-key id (40 chars of
     # base64-ish, within ~80 chars of AKIA/ASIA — catch both orders).
     # These MUST run before the standalone AKIA/ASIA patterns or the id

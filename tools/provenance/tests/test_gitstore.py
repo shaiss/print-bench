@@ -552,10 +552,19 @@ _PATTERN_FIXTURES = [
         "jwt",
     ),
     ("ghs_server.token-with.dots-and-dashes_ABCDEF", "ghs-dotted"),
-    # Z.AI-like opaque Anthropic-compatible key (no prefix, 48+ url-safe).
-    ("ZaiOpaqueKey_" + ("z" * 48), "zai-opaque"),
+    # Documented Z.AI key shape: 32 hex + '.' + 16 alnum.
+    ("a" * 32 + "." + "B" * 16, "zai-dotted"),
+    ("ANTHROPIC_AUTH_TOKEN=" + "c" * 32 + "." + "D" * 16, "zai-auth-env"),
 ]
 
+
+
+def test_redact_patterns_keeps_sha256_and_git_sha():
+    """The Z.AI dotted pattern must not swallow hex digests (Bugbot)."""
+    sha256 = "a" * 64
+    git_sha = "b" * 40
+    out = gitstore.redact_patterns(f"pin {sha256} commit {git_sha}")
+    assert sha256 in out and git_sha in out
 
 
 @pytest.mark.parametrize("secret,label", _PATTERN_FIXTURES)
