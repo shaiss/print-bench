@@ -671,6 +671,19 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Blank credential slots so a GITHUB_ENV plant or runner default
+          # cannot leave provider/job tokens in /proc/$$/environ for this step.
+          # Do not map secrets.* here — that is the decrypt window.
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          ANTHROPIC_API_KEY: ""
+          ANTHROPIC_AUTH_TOKEN: ""
+          ZAI_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          REGEN_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -697,7 +710,15 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
+              # Only trust them when they are NOT init-orphans — a real
+              # Runner.Worker is not reparented to init.
+              Runner.*|Agent.*)
+                if [ "$ppid" != "1" ]; then
+                  return 1
+                fi
+                ;;
+              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
             case "$cwd" in
@@ -707,8 +728,8 @@ jobs:
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
             # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
-            # above; anything else reparented to init is fair game for reap.
+            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
+            # ppid=1. System daemons already excluded above when not orphans.
             if [ "$ppid" = "1" ]; then
               return 0
             fi
@@ -776,28 +797,15 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
-          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
-          # land in /proc/$$/environ at PID start — before the reaper can run —
-          # and re-open the post-scrub window for a leftover ship child.
-          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
-          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
-          # that were already present during ship (then unset from this shell).
+          # Do NOT decrypt provider/job tokens into this step (env blanks
+          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
+          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
+          # never copy ACTIONS_* (JWT pattern covers them; copying would
+          # re-materialize runner tokens onto disk for a leftover ship child).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          {
-            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
-              val="${!key-}"
-              if [ -n "$val" ]; then
-                printf '%s\n' "$val"
-              fi
-            done
-          } >"$secrets"
+          : >"$secrets"
           chmod 600 -- "$secrets"
-          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -872,6 +880,19 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Blank credential slots so a GITHUB_ENV plant or runner default
+          # cannot leave provider/job tokens in /proc/$$/environ for this step.
+          # Do not map secrets.* here — that is the decrypt window.
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          ANTHROPIC_API_KEY: ""
+          ANTHROPIC_AUTH_TOKEN: ""
+          ZAI_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          REGEN_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -898,7 +919,15 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
+              # Only trust them when they are NOT init-orphans — a real
+              # Runner.Worker is not reparented to init.
+              Runner.*|Agent.*)
+                if [ "$ppid" != "1" ]; then
+                  return 1
+                fi
+                ;;
+              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
             case "$cwd" in
@@ -908,8 +937,8 @@ jobs:
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
             # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
-            # above; anything else reparented to init is fair game for reap.
+            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
+            # ppid=1. System daemons already excluded above when not orphans.
             if [ "$ppid" = "1" ]; then
               return 0
             fi
@@ -977,28 +1006,15 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
-          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
-          # land in /proc/$$/environ at PID start — before the reaper can run —
-          # and re-open the post-scrub window for a leftover ship child.
-          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
-          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
-          # that were already present during ship (then unset from this shell).
+          # Do NOT decrypt provider/job tokens into this step (env blanks
+          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
+          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
+          # never copy ACTIONS_* (JWT pattern covers them; copying would
+          # re-materialize runner tokens onto disk for a leftover ship child).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          {
-            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
-              val="${!key-}"
-              if [ -n "$val" ]; then
-                printf '%s\n' "$val"
-              fi
-            done
-          } >"$secrets"
+          : >"$secrets"
           chmod 600 -- "$secrets"
-          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1071,6 +1087,19 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Blank credential slots so a GITHUB_ENV plant or runner default
+          # cannot leave provider/job tokens in /proc/$$/environ for this step.
+          # Do not map secrets.* here — that is the decrypt window.
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          ANTHROPIC_API_KEY: ""
+          ANTHROPIC_AUTH_TOKEN: ""
+          ZAI_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          REGEN_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1097,7 +1126,15 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
+              # Only trust them when they are NOT init-orphans — a real
+              # Runner.Worker is not reparented to init.
+              Runner.*|Agent.*)
+                if [ "$ppid" != "1" ]; then
+                  return 1
+                fi
+                ;;
+              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
             case "$cwd" in
@@ -1107,8 +1144,8 @@ jobs:
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
             # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
-            # above; anything else reparented to init is fair game for reap.
+            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
+            # ppid=1. System daemons already excluded above when not orphans.
             if [ "$ppid" = "1" ]; then
               return 0
             fi
@@ -1176,28 +1213,15 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
-          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
-          # land in /proc/$$/environ at PID start — before the reaper can run —
-          # and re-open the post-scrub window for a leftover ship child.
-          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
-          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
-          # that were already present during ship (then unset from this shell).
+          # Do NOT decrypt provider/job tokens into this step (env blanks
+          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
+          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
+          # never copy ACTIONS_* (JWT pattern covers them; copying would
+          # re-materialize runner tokens onto disk for a leftover ship child).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          {
-            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
-              val="${!key-}"
-              if [ -n "$val" ]; then
-                printf '%s\n' "$val"
-              fi
-            done
-          } >"$secrets"
+          : >"$secrets"
           chmod 600 -- "$secrets"
-          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1278,6 +1302,19 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Blank credential slots so a GITHUB_ENV plant or runner default
+          # cannot leave provider/job tokens in /proc/$$/environ for this step.
+          # Do not map secrets.* here — that is the decrypt window.
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          ANTHROPIC_API_KEY: ""
+          ANTHROPIC_AUTH_TOKEN: ""
+          ZAI_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          REGEN_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1304,7 +1341,15 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
+              # Only trust them when they are NOT init-orphans — a real
+              # Runner.Worker is not reparented to init.
+              Runner.*|Agent.*)
+                if [ "$ppid" != "1" ]; then
+                  return 1
+                fi
+                ;;
+              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
             case "$cwd" in
@@ -1314,8 +1359,8 @@ jobs:
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
             # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
-            # above; anything else reparented to init is fair game for reap.
+            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
+            # ppid=1. System daemons already excluded above when not orphans.
             if [ "$ppid" = "1" ]; then
               return 0
             fi
@@ -1383,28 +1428,15 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
-          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
-          # land in /proc/$$/environ at PID start — before the reaper can run —
-          # and re-open the post-scrub window for a leftover ship child.
-          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
-          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
-          # that were already present during ship (then unset from this shell).
+          # Do NOT decrypt provider/job tokens into this step (env blanks
+          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
+          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
+          # never copy ACTIONS_* (JWT pattern covers them; copying would
+          # re-materialize runner tokens onto disk for a leftover ship child).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          {
-            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
-              val="${!key-}"
-              if [ -n "$val" ]; then
-                printf '%s\n' "$val"
-              fi
-            done
-          } >"$secrets"
+          : >"$secrets"
           chmod 600 -- "$secrets"
-          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1476,6 +1508,19 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Blank credential slots so a GITHUB_ENV plant or runner default
+          # cannot leave provider/job tokens in /proc/$$/environ for this step.
+          # Do not map secrets.* here — that is the decrypt window.
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          ANTHROPIC_API_KEY: ""
+          ANTHROPIC_AUTH_TOKEN: ""
+          ZAI_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          REGEN_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1502,7 +1547,15 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
+              # Only trust them when they are NOT init-orphans — a real
+              # Runner.Worker is not reparented to init.
+              Runner.*|Agent.*)
+                if [ "$ppid" != "1" ]; then
+                  return 1
+                fi
+                ;;
+              systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
             case "$cwd" in
@@ -1512,8 +1565,8 @@ jobs:
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
             # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
-            # above; anything else reparented to init is fair game for reap.
+            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
+            # ppid=1. System daemons already excluded above when not orphans.
             if [ "$ppid" = "1" ]; then
               return 0
             fi
@@ -1581,28 +1634,15 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
-          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
-          # land in /proc/$$/environ at PID start — before the reaper can run —
-          # and re-open the post-scrub window for a leftover ship child.
-          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
-          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
-          # that were already present during ship (then unset from this shell).
+          # Do NOT decrypt provider/job tokens into this step (env blanks
+          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
+          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
+          # never copy ACTIONS_* (JWT pattern covers them; copying would
+          # re-materialize runner tokens onto disk for a leftover ship child).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          {
-            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
-              val="${!key-}"
-              if [ -n "$val" ]; then
-                printf '%s\n' "$val"
-              fi
-            done
-          } >"$secrets"
+          : >"$secrets"
           chmod 600 -- "$secrets"
-          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to

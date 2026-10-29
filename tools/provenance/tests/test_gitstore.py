@@ -552,7 +552,10 @@ _PATTERN_FIXTURES = [
         "jwt",
     ),
     ("ghs_server.token-with.dots-and-dashes_ABCDEF", "ghs-dotted"),
+    # Z.AI-like opaque Anthropic-compatible key (no prefix, 48+ url-safe).
+    ("ZaiOpaqueKey_" + ("z" * 48), "zai-opaque"),
 ]
+
 
 
 @pytest.mark.parametrize("secret,label", _PATTERN_FIXTURES)
