@@ -2081,7 +2081,8 @@ jobs:
   # Fresh runner: materialize sealed diag.json from burn job outputs and
   # upload. No ship orphan shares this filesystem, so the verify→upload
   # race on the agent runner cannot apply. Schema-check before upload;
-  # only link-N/diag.json paths are published.
+  # only link-N/diag.json paths are published. Best-effort like the old
+  # in-job capture path — a diag glitch must not fail a successful ship.
   upload-diag:
     name: Upload agent denial diagnostic
     needs: burn
@@ -2096,6 +2097,7 @@ jobs:
         || needs.burn.outputs.diag_present_4 == '1'
         || needs.burn.outputs.diag_present_5 == '1'
       )
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -2103,6 +2105,7 @@ jobs:
     steps:
       - name: Materialize sealed diag.json
         id: materialize
+        continue-on-error: true
         env:
           PRESENT_1: ${{ needs.burn.outputs.diag_present_1 }}
           DIAG_1: ${{ needs.burn.outputs.diag_1 }}
@@ -2157,7 +2160,11 @@ jobs:
           echo "materialized ${staged} sealed diag.json file(s) on fresh runner"
 
       - name: Upload agent denial diagnostic
-        if: steps.materialize.outputs.staged != '' && steps.materialize.outputs.staged != '0'
+        if: >-
+          steps.materialize.outcome == 'success'
+          && steps.materialize.outputs.staged != ''
+          && steps.materialize.outputs.staged != '0'
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: backlog-burn-agent-diag-${{ github.run_id }}
