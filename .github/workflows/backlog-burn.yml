@@ -653,10 +653,6 @@ jobs:
         if: always() && steps.ship_zai_1.outcome != 'skipped'
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
@@ -677,6 +673,78 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
+          # Reap detached ship-link children before secrets or diag touch disk.
+          # Same class the Bundle step reaps — do it here so capture does not
+          # reopen a post-scrub window those orphans can harvest.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -692,13 +760,28 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets file prepared here; helper + diag child never inherit tokens.
+          # Secrets for exact scrub: write via Actions expressions into a
+          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
+          # not re-expose provider keys the ship subprocess scrub removed).
+          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
+            _tok='${{ github.token }}'
+            [ -n "$_tok" ] && printf '%s\n' "$_tok"
+            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
+            [ -n "$_ant" ] && printf '%s\n' "$_ant"
+            _zai='${{ secrets.ZAI_KEY }}'
+            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            _oai='${{ secrets.OPENAI_API_KEY }}'
+            [ -n "$_oai" ] && printf '%s\n' "$_oai"
+            _or='${{ secrets.OPENROUTER_API_KEY }}'
+            [ -n "$_or" ] && printf '%s\n' "$_or"
+            _regen='${{ secrets.REGEN_TOKEN }}'
+            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
-              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
             do
               val="${!key-}"
               if [ -n "$val" ]; then
@@ -706,6 +789,11 @@ jobs:
               fi
             done
           } >"$secrets"
+          chmod 600 -- "$secrets"
+          unset _tok _ant _zai _oai _or _regen || true
+          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
@@ -720,6 +808,9 @@ jobs:
             echo "::error::capture helper failed for link 1" >&2
             exit 1
           fi
+          # Drop the secrets file before sealing outputs — shrink the window.
+          rm -f -- "$secrets"
+          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -731,6 +822,7 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_1"
           } >> "$GITHUB_OUTPUT"
+
 
       # The GLM tail (#327): links 2 and 3 of the registry's `backlog-burn`
       # chain, reached only when every earlier link did not succeed — the
@@ -765,10 +857,6 @@ jobs:
         if: always() && steps.ship_zai_2.outcome != 'skipped'
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
@@ -789,6 +877,78 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
+          # Reap detached ship-link children before secrets or diag touch disk.
+          # Same class the Bundle step reaps — do it here so capture does not
+          # reopen a post-scrub window those orphans can harvest.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -804,13 +964,28 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets file prepared here; helper + diag child never inherit tokens.
+          # Secrets for exact scrub: write via Actions expressions into a
+          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
+          # not re-expose provider keys the ship subprocess scrub removed).
+          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
+            _tok='${{ github.token }}'
+            [ -n "$_tok" ] && printf '%s\n' "$_tok"
+            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
+            [ -n "$_ant" ] && printf '%s\n' "$_ant"
+            _zai='${{ secrets.ZAI_KEY }}'
+            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            _oai='${{ secrets.OPENAI_API_KEY }}'
+            [ -n "$_oai" ] && printf '%s\n' "$_oai"
+            _or='${{ secrets.OPENROUTER_API_KEY }}'
+            [ -n "$_or" ] && printf '%s\n' "$_or"
+            _regen='${{ secrets.REGEN_TOKEN }}'
+            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
-              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
             do
               val="${!key-}"
               if [ -n "$val" ]; then
@@ -818,6 +993,11 @@ jobs:
               fi
             done
           } >"$secrets"
+          chmod 600 -- "$secrets"
+          unset _tok _ant _zai _oai _or _regen || true
+          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
@@ -832,6 +1012,9 @@ jobs:
             echo "::error::capture helper failed for link 2" >&2
             exit 1
           fi
+          # Drop the secrets file before sealing outputs — shrink the window.
+          rm -f -- "$secrets"
+          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -843,6 +1026,7 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_2"
           } >> "$GITHUB_OUTPUT"
+
 
       - name: Ship via Z.AI (GLM, chain link 3)
         id: ship_zai_3
@@ -875,10 +1059,6 @@ jobs:
         if: always() && steps.ship_zai_3.outcome != 'skipped'
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
@@ -899,6 +1079,78 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
+          # Reap detached ship-link children before secrets or diag touch disk.
+          # Same class the Bundle step reaps — do it here so capture does not
+          # reopen a post-scrub window those orphans can harvest.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -914,13 +1166,28 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets file prepared here; helper + diag child never inherit tokens.
+          # Secrets for exact scrub: write via Actions expressions into a
+          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
+          # not re-expose provider keys the ship subprocess scrub removed).
+          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
+            _tok='${{ github.token }}'
+            [ -n "$_tok" ] && printf '%s\n' "$_tok"
+            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
+            [ -n "$_ant" ] && printf '%s\n' "$_ant"
+            _zai='${{ secrets.ZAI_KEY }}'
+            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            _oai='${{ secrets.OPENAI_API_KEY }}'
+            [ -n "$_oai" ] && printf '%s\n' "$_oai"
+            _or='${{ secrets.OPENROUTER_API_KEY }}'
+            [ -n "$_or" ] && printf '%s\n' "$_or"
+            _regen='${{ secrets.REGEN_TOKEN }}'
+            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
-              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
             do
               val="${!key-}"
               if [ -n "$val" ]; then
@@ -928,6 +1195,11 @@ jobs:
               fi
             done
           } >"$secrets"
+          chmod 600 -- "$secrets"
+          unset _tok _ant _zai _oai _or _regen || true
+          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
@@ -942,6 +1214,9 @@ jobs:
             echo "::error::capture helper failed for link 3" >&2
             exit 1
           fi
+          # Drop the secrets file before sealing outputs — shrink the window.
+          rm -f -- "$secrets"
+          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -953,6 +1228,7 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_3"
           } >> "$GITHUB_OUTPUT"
+
 
       # The cross-provider tail (issue #544): links 4 and 5 of the registry's
       # `backlog-burn` chain on Anthropic's native endpoint, reached only when
@@ -993,10 +1269,6 @@ jobs:
         if: always() && steps.ship_anthropic_4.outcome != 'skipped'
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
@@ -1017,6 +1289,78 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
+          # Reap detached ship-link children before secrets or diag touch disk.
+          # Same class the Bundle step reaps — do it here so capture does not
+          # reopen a post-scrub window those orphans can harvest.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -1032,13 +1376,28 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets file prepared here; helper + diag child never inherit tokens.
+          # Secrets for exact scrub: write via Actions expressions into a
+          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
+          # not re-expose provider keys the ship subprocess scrub removed).
+          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
+            _tok='${{ github.token }}'
+            [ -n "$_tok" ] && printf '%s\n' "$_tok"
+            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
+            [ -n "$_ant" ] && printf '%s\n' "$_ant"
+            _zai='${{ secrets.ZAI_KEY }}'
+            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            _oai='${{ secrets.OPENAI_API_KEY }}'
+            [ -n "$_oai" ] && printf '%s\n' "$_oai"
+            _or='${{ secrets.OPENROUTER_API_KEY }}'
+            [ -n "$_or" ] && printf '%s\n' "$_or"
+            _regen='${{ secrets.REGEN_TOKEN }}'
+            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
-              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
             do
               val="${!key-}"
               if [ -n "$val" ]; then
@@ -1046,6 +1405,11 @@ jobs:
               fi
             done
           } >"$secrets"
+          chmod 600 -- "$secrets"
+          unset _tok _ant _zai _oai _or _regen || true
+          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
@@ -1060,6 +1424,9 @@ jobs:
             echo "::error::capture helper failed for link 4" >&2
             exit 1
           fi
+          # Drop the secrets file before sealing outputs — shrink the window.
+          rm -f -- "$secrets"
+          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1071,6 +1438,7 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_4"
           } >> "$GITHUB_OUTPUT"
+
 
       - name: Ship via Anthropic (Claude, chain link 5)
         id: ship_anthropic_5
@@ -1102,10 +1470,6 @@ jobs:
         if: always() && steps.ship_anthropic_5.outcome != 'skipped'
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
@@ -1126,6 +1490,78 @@ jobs:
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
+          # Reap detached ship-link children before secrets or diag touch disk.
+          # Same class the Bundle step reaps — do it here so capture does not
+          # reopen a post-scrub window those orphans can harvest.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -1141,13 +1577,28 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets file prepared here; helper + diag child never inherit tokens.
+          # Secrets for exact scrub: write via Actions expressions into a
+          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
+          # not re-expose provider keys the ship subprocess scrub removed).
+          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
+            _tok='${{ github.token }}'
+            [ -n "$_tok" ] && printf '%s\n' "$_tok"
+            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
+            [ -n "$_ant" ] && printf '%s\n' "$_ant"
+            _zai='${{ secrets.ZAI_KEY }}'
+            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            _oai='${{ secrets.OPENAI_API_KEY }}'
+            [ -n "$_oai" ] && printf '%s\n' "$_oai"
+            _or='${{ secrets.OPENROUTER_API_KEY }}'
+            [ -n "$_or" ] && printf '%s\n' "$_or"
+            _regen='${{ secrets.REGEN_TOKEN }}'
+            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
-              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
             do
               val="${!key-}"
               if [ -n "$val" ]; then
@@ -1155,6 +1606,11 @@ jobs:
               fi
             done
           } >"$secrets"
+          chmod 600 -- "$secrets"
+          unset _tok _ant _zai _oai _or _regen || true
+          unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+            ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
@@ -1169,6 +1625,9 @@ jobs:
             echo "::error::capture helper failed for link 5" >&2
             exit 1
           fi
+          # Drop the secrets file before sealing outputs — shrink the window.
+          rm -f -- "$secrets"
+          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1180,6 +1639,7 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_5"
           } >> "$GITHUB_OUTPUT"
+
 
       # Redacted denial + truncated assistant message only. show_full_output
       # stays false on every ship step; this artifact is the diagnosability
@@ -1211,10 +1671,83 @@ jobs:
         run: |
           set -euo pipefail
           echo "staged=0" >> "$GITHUB_OUTPUT"
-          stage="${RUNNER_TEMP}/backlog-burn-agent-diag-upload"
-          rm -rf -- "$stage"
-          mkdir -p -- "$stage"
+          echo "stage_dir=" >> "$GITHUB_OUTPUT"
+          echo "digest_manifest=" >> "$GITHUB_OUTPUT"
+          # Reap before materializing — a leftover ship child must not race
+          # the well-known-path replacement that used to live here.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          reap_agent_orphans
+          # Random stage dir — never the predictable backlog-burn-agent-diag-upload/.
+          stage="$(mktemp -d "${RUNNER_TEMP}/backlog-burn-agent-diag-upload.XXXXXX")"
           staged=0
+          manifest=""
           for i in 1 2 3 4 5; do
             present_var="PRESENT_${i}"
             diag_var="DIAG_${i}"
@@ -1224,28 +1757,206 @@ jobs:
               continue
             fi
             mkdir -p -- "${stage}/link-${i}"
-            # Write sealed step-output bytes only; re-check schema before upload.
+            # Write sealed step-output bytes only; schema-check before upload.
             printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
             python3 -I -c "import json,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_truncated'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536, 'diag too large'; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED, 'bad keys'; assert isinstance(obj['denied_tools'], list); f=obj['final_assistant_message_truncated']; assert isinstance(f, str) and len(f)<=500" \
               "${stage}/link-${i}/diag.json"
+            dig="$(sha256sum "${stage}/link-${i}/diag.json" | awk '{print $1}')"
+            if [ -n "$manifest" ]; then
+              manifest="${manifest},"
+            fi
+            manifest="${manifest}${i}:${dig}"
             staged=$((staged + 1))
           done
+          # Refuse anything that is not link-N/diag.json (no extra plantable files).
+          while IFS= read -r -d '' f; do
+            case "$f" in
+              "${stage}/link-"[1-5]/diag.json") ;;
+              *)
+                echo "::error::refusing unexpected path in diag stage tree: $f" >&2
+                exit 1
+                ;;
+            esac
+          done < <(find "$stage" -type f -print0)
+          if find "$stage" -type l | grep -q .; then
+            echo "::error::refusing symlinks in diag stage tree" >&2
+            exit 1
+          fi
+          chmod -R a-w -- "$stage" || true
           echo "staged ${staged} diag.json file(s) from sealed step outputs"
+          echo "stage_dir=${stage}" >> "$GITHUB_OUTPUT"
+          echo "digest_manifest=${manifest}" >> "$GITHUB_OUTPUT"
           echo "staged=${staged}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload agent denial diagnostic
-        # Require stage success AND a positive count — a missing/empty
-        # staged output must not upload a possibly agent-planted tree.
+      - name: Verify staged diag digests
+        id: diag_verify
         if: >-
           always()
           && steps.select.outputs.issue != ''
           && steps.diag_stage.outcome == 'success'
           && steps.diag_stage.outputs.staged != ''
           && steps.diag_stage.outputs.staged != '0'
+        continue-on-error: true
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          BASH_ENV: ""
+          STAGE_DIR: ${{ steps.diag_stage.outputs.stage_dir }}
+          DIGEST_MANIFEST: ${{ steps.diag_stage.outputs.digest_manifest }}
+          PRESENT_1: ${{ steps.diag_1.outputs.present }}
+          DIAG_1: ${{ steps.diag_1.outputs.diag }}
+          PRESENT_2: ${{ steps.diag_2.outputs.present }}
+          DIAG_2: ${{ steps.diag_2.outputs.diag }}
+          PRESENT_3: ${{ steps.diag_3.outputs.present }}
+          DIAG_3: ${{ steps.diag_3.outputs.diag }}
+          PRESENT_4: ${{ steps.diag_4.outputs.present }}
+          DIAG_4: ${{ steps.diag_4.outputs.diag }}
+          PRESENT_5: ${{ steps.diag_5.outputs.present }}
+          DIAG_5: ${{ steps.diag_5.outputs.diag }}
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          echo "ok=0" >> "$GITHUB_OUTPUT"
+          echo "stage_dir=" >> "$GITHUB_OUTPUT"
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          reap_agent_orphans
+          # Always rematerialize from sealed step outputs into a fresh mktemp —
+          # never trust the prior stage tree bytes across the step boundary.
+          stage="$(mktemp -d "${RUNNER_TEMP}/backlog-burn-agent-diag-upload.XXXXXX")"
+          declare -A want=()
+          if [ -n "${DIGEST_MANIFEST:-}" ]; then
+            IFS=',' read -r -a parts <<< "$DIGEST_MANIFEST"
+            for p in "${parts[@]}"; do
+              idx="${p%%:*}"
+              dig="${p#*:}"
+              want["$idx"]="$dig"
+            done
+          fi
+          for i in 1 2 3 4 5; do
+            present_var="PRESENT_${i}"
+            diag_var="DIAG_${i}"
+            present="${!present_var-}"
+            diag="${!diag_var-}"
+            if [ "$present" != "1" ] || [ -z "$diag" ]; then
+              continue
+            fi
+            mkdir -p -- "${stage}/link-${i}"
+            printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
+            python3 -I -c "import json,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_truncated'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED; assert isinstance(obj['denied_tools'], list); f=obj['final_assistant_message_truncated']; assert isinstance(f, str) and len(f)<=500" \
+              "${stage}/link-${i}/diag.json"
+            dig="$(sha256sum "${stage}/link-${i}/diag.json" | awk '{print $1}')"
+            if [ -n "${want[$i]-}" ] && [ "${want[$i]}" != "$dig" ]; then
+              echo "::error::sealed diag digest drift for link ${i}" >&2
+              exit 1
+            fi
+          done
+          while IFS= read -r -d '' f; do
+            case "$f" in
+              "${stage}/link-"[1-5]/diag.json") ;;
+              *)
+                echo "::error::refusing unexpected path in verified diag tree: $f" >&2
+                exit 1
+                ;;
+            esac
+          done < <(find "$stage" -type f -print0)
+          if find "$stage" -type l | grep -q .; then
+            echo "::error::refusing symlinks in verified diag tree" >&2
+            exit 1
+          fi
+          chmod -R a-w -- "$stage" || true
+          echo "stage_dir=${stage}" >> "$GITHUB_OUTPUT"
+          echo "ok=1" >> "$GITHUB_OUTPUT"
+
+      - name: Upload agent denial diagnostic
+        # Require verify success — upload only explicit link-N/diag.json paths
+        # from the rematerialized mktemp tree (never a recursive well-known dir).
+        if: >-
+          always()
+          && steps.select.outputs.issue != ''
+          && steps.diag_stage.outcome == 'success'
+          && steps.diag_stage.outputs.staged != ''
+          && steps.diag_stage.outputs.staged != '0'
+          && steps.diag_verify.outcome == 'success'
+          && steps.diag_verify.outputs.ok == '1'
+          && steps.diag_verify.outputs.stage_dir != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: backlog-burn-agent-diag-${{ github.run_id }}
-          path: ${{ runner.temp }}/backlog-burn-agent-diag-upload/
+          path: |
+            ${{ steps.diag_verify.outputs.stage_dir }}/link-1/diag.json
+            ${{ steps.diag_verify.outputs.stage_dir }}/link-2/diag.json
+            ${{ steps.diag_verify.outputs.stage_dir }}/link-3/diag.json
+            ${{ steps.diag_verify.outputs.stage_dir }}/link-4/diag.json
+            ${{ steps.diag_verify.outputs.stage_dir }}/link-5/diag.json
           if-no-files-found: ignore
           retention-days: 14
 
