@@ -61,11 +61,13 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # the two tools must stay independently installable (the groomer's precedent).
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
-# Exact logins that may author a lock (Cipher, #864). Mirrored from
+# Exact logins that may author a lock (Cipher #864 + #872). Mirrored from
 # backlog_burn.select.SHIP_LOCK_AUTHOR_LOGINS — settle (GITHUB_TOKEN) and
 # attended PAT (shaiss). cursor[bot] is excluded: shared Cursor App login
 # (Bugbot / Security / Approval / cloud agents). Attended runs post as
-# shaiss or not at all. No generic "[bot]" match.
+# shaiss or not at all. No generic "[bot]" match. Authenticity also
+# requires the first non-blank line to start with SHIP_LOCK_MARKER and
+# the HTML marker to be present — see _is_authentic_ship_lock.
 SHIP_LOCK_AUTHOR_LOGINS = frozenset({
     "github-actions[bot]",
     "shaiss",
@@ -140,6 +142,30 @@ def _first_line(text: str) -> str:
         if stripped:
             return stripped
     return ""
+
+
+def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
+    """True when ``comment`` is an authentic SHIP-LOCK (Cipher #864 + #872).
+
+    One rule, mirrored in ``backlog_burn.select`` and
+    ``scripts/routine-lock-cleanup.sh``:
+
+    1. the first non-blank line starts with the SHIP-LOCK lead,
+    2. the HTML authenticity marker is present in the body, and
+    3. the author login is in ``SHIP_LOCK_AUTHOR_LOGINS``.
+
+    A WITHDRAWN first line still counts as authentic here (so a release can
+    clear a claim); the gatherer then drops held locks whose first line
+    contains WITHDRAWN. A backtick-quoted marker mid-body (#872) is never
+    a lock, because the first line does not start with the lead.
+    """
+    body = comment.get("body") or ""
+    if not _first_line(body).startswith(SHIP_LOCK_MARKER):
+        return False
+    if SHIP_LOCK_HTML_MARKER not in body:
+        return False
+    login = ((comment.get("user") or {}).get("login") or "").lower()
+    return login in {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}
 
 
 def _get(url: str, token: str) -> tuple[Any, str]:
@@ -263,14 +289,9 @@ def gather_run_health(
             f"{API_ROOT}/repos/{repo}/issues/{item['number']}/comments?per_page=100",
             token,
         )
-        _lock_logins = {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}
         lock_comments = [
             c for c in comments
-            if SHIP_LOCK_HTML_MARKER in (c.get("body") or "")
-            and (
-                ((c.get("user") or {}).get("login") or "").lower()
-                in _lock_logins
-            )
+            if _is_authentic_ship_lock(c)
         ]
         if not lock_comments:
             continue
@@ -292,6 +313,7 @@ def gather_run_health(
         {
             "number": pr["number"],
             "headRefName": (pr.get("head") or {}).get("ref", ""),
+            "title": pr.get("title") or "",
             "body": pr.get("body") or "",
         }
         for pr in _paged(f"{API_ROOT}/repos/{repo}/pulls?state=open&per_page=100", token)

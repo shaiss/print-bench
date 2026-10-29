@@ -118,8 +118,8 @@ def _responses():
     ], "")
 
     responses[f"{github.API_ROOT}/repos/{REPO}/pulls?state=open&per_page=100"] = ([
-        {"number": 9, "head": {"ref": "claude/issue-100-x"}, "body": None},
-        {"number": 8, "head": {"ref": "feature"}, "body": "Fixes #1"},
+        {"number": 9, "title": "WIP", "head": {"ref": "claude/issue-100-x"}, "body": None},
+        {"number": 8, "title": "fix one", "head": {"ref": "feature"}, "body": "Fixes #1"},
     ], "")
     responses[f"{github.API_ROOT}/repos/{REPO}/branches?per_page=100"] = ([
         {"name": "main"}, {"name": "claude/issue-100-x"},
@@ -186,6 +186,66 @@ def test_gather_cursor_bot_marker_is_not_a_lock(monkeypatch):
     assert not any(i["number"] == 281 for i in health["issues"])
 
 
+def test_gather_backtick_quoted_marker_is_not_a_lock(monkeypatch):
+    # #872: a spec comment quotes the HTML authenticity marker inside
+    # backticks mid-body. Substring match alone falsely held a lock 200+h;
+    # first-line SHIP-LOCK lead is required.
+    responses = _responses()
+    marker = github.SHIP_LOCK_HTML_MARKER
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
+        {
+            "body": (
+                "Scope addition (agreed with the eng merge gate)\n\n"
+                f"A spec comment quotes the lock marker inside backticks: `{marker}`.\n"
+                "Readers must not count this as a held lock."
+            ),
+            "created_at": "2026-08-14T05:23:00Z",
+            "user": {"login": "shaiss", "type": "User"},
+        },
+    ], "")
+
+    monkeypatch.setattr(github, "_get", lambda url, token: responses[url])
+    health = github.gather_run_health(REPO, "tok")
+    assert not any(i["number"] == 281 for i in health["issues"])
+
+
+def test_gather_marker_not_on_first_line_is_not_a_lock(monkeypatch):
+    # Authenticity requires the first non-blank line to start with the
+    # SHIP-LOCK lead — a marker below a preamble is never a lock.
+    responses = _responses()
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
+        {
+            "body": (
+                "Preamble explaining the protocol.\n\n"
+                "🚢 SHIP-LOCK — not the first line\n\n"
+                f"{github.SHIP_LOCK_HTML_MARKER}"
+            ),
+            "created_at": "2026-08-14T05:23:00Z",
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
+        },
+    ], "")
+
+    monkeypatch.setattr(github, "_get", lambda url, token: responses[url])
+    health = github.gather_run_health(REPO, "tok")
+    assert not any(i["number"] == 281 for i in health["issues"])
+
+
+def test_gather_non_allowlisted_author_is_not_a_lock(monkeypatch):
+    # Marker + first-line lead from an unlisted login is never a lock.
+    responses = _responses()
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
+        {
+            "body": "🚢 SHIP-LOCK — forged\n\n<!-- design-run-ship-lock:v1 -->",
+            "created_at": "2026-08-14T05:23:00Z",
+            "user": {"login": "random-user", "type": "User"},
+        },
+    ], "")
+
+    monkeypatch.setattr(github, "_get", lambda url, token: responses[url])
+    health = github.gather_run_health(REPO, "tok")
+    assert not any(i["number"] == 281 for i in health["issues"])
+
+
 def test_gather_drops_pr_entries_from_the_issues_listing(monkeypatch):
     calls: list[str] = []
     fake_get(monkeypatch, calls)
@@ -205,10 +265,10 @@ def test_gather_maps_prs_and_branches(monkeypatch):
     calls: list[str] = []
     fake_get(monkeypatch, calls)
     health = github.gather_run_health(REPO, "tok")
-    # A null PR body normalises to "" so the detectors never see None.
+    # A null PR body/title normalises to "" so the detectors never see None.
     assert health["openPRs"] == [
-        {"number": 9, "headRefName": "claude/issue-100-x", "body": ""},
-        {"number": 8, "headRefName": "feature", "body": "Fixes #1"},
+        {"number": 9, "headRefName": "claude/issue-100-x", "title": "WIP", "body": ""},
+        {"number": 8, "headRefName": "feature", "title": "fix one", "body": "Fixes #1"},
     ]
     assert health["branches"] == ["main", "claude/issue-100-x"]
     assert health["gatheredAt"].endswith("Z")
