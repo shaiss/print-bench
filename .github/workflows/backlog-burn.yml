@@ -671,13 +671,6 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
-          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
-          # Passed via env — NOT interpolated into the on-disk run script — so a
-          # leftover ship child cannot read key material from the step script
-          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
-          _BB_DIAG_TOK: ${{ github.token }}
-          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
-          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -713,16 +706,11 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
-            # non-system setsid session leader (cwd /tmp or / used to evade
-            # the in_tree check and still read mode-600 secrets as same UID).
+            # Detached-to-init orphans — including classic double-fork daemons
+            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
+            # above; anything else reparented to init is fair game for reap.
             if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
-              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-                return 0
-              fi
+              return 0
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -788,21 +776,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact scrub secrets: copy from short-lived step env (not script
-          # literals) into a mode-600 mktemp, then unset from this shell so
-          # /proc/$$/environ does not keep them for the rest of the step.
-          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
-          # OPENROUTER — not ship inputs on this runner.
+          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
+          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
+          # land in /proc/$$/environ at PID start — before the reaper can run —
+          # and re-open the post-scrub window for a leftover ship child.
+          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
+          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
+          # that were already present during ship (then unset from this shell).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
-            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
-            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
-            for key in \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
-            do
+            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -810,10 +794,10 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -827,7 +811,6 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -889,13 +872,6 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
-          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
-          # Passed via env — NOT interpolated into the on-disk run script — so a
-          # leftover ship child cannot read key material from the step script
-          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
-          _BB_DIAG_TOK: ${{ github.token }}
-          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
-          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -931,16 +907,11 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
-            # non-system setsid session leader (cwd /tmp or / used to evade
-            # the in_tree check and still read mode-600 secrets as same UID).
+            # Detached-to-init orphans — including classic double-fork daemons
+            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
+            # above; anything else reparented to init is fair game for reap.
             if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
-              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-                return 0
-              fi
+              return 0
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1006,21 +977,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact scrub secrets: copy from short-lived step env (not script
-          # literals) into a mode-600 mktemp, then unset from this shell so
-          # /proc/$$/environ does not keep them for the rest of the step.
-          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
-          # OPENROUTER — not ship inputs on this runner.
+          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
+          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
+          # land in /proc/$$/environ at PID start — before the reaper can run —
+          # and re-open the post-scrub window for a leftover ship child.
+          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
+          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
+          # that were already present during ship (then unset from this shell).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
-            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
-            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
-            for key in \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
-            do
+            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -1028,10 +995,10 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1045,7 +1012,6 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1105,13 +1071,6 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
-          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
-          # Passed via env — NOT interpolated into the on-disk run script — so a
-          # leftover ship child cannot read key material from the step script
-          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
-          _BB_DIAG_TOK: ${{ github.token }}
-          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
-          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1147,16 +1106,11 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
-            # non-system setsid session leader (cwd /tmp or / used to evade
-            # the in_tree check and still read mode-600 secrets as same UID).
+            # Detached-to-init orphans — including classic double-fork daemons
+            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
+            # above; anything else reparented to init is fair game for reap.
             if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
-              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-                return 0
-              fi
+              return 0
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1222,21 +1176,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact scrub secrets: copy from short-lived step env (not script
-          # literals) into a mode-600 mktemp, then unset from this shell so
-          # /proc/$$/environ does not keep them for the rest of the step.
-          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
-          # OPENROUTER — not ship inputs on this runner.
+          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
+          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
+          # land in /proc/$$/environ at PID start — before the reaper can run —
+          # and re-open the post-scrub window for a leftover ship child.
+          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
+          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
+          # that were already present during ship (then unset from this shell).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
-            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
-            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
-            for key in \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
-            do
+            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -1244,10 +1194,10 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1261,7 +1211,6 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1329,13 +1278,6 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
-          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
-          # Passed via env — NOT interpolated into the on-disk run script — so a
-          # leftover ship child cannot read key material from the step script
-          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
-          _BB_DIAG_TOK: ${{ github.token }}
-          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
-          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1371,16 +1313,11 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
-            # non-system setsid session leader (cwd /tmp or / used to evade
-            # the in_tree check and still read mode-600 secrets as same UID).
+            # Detached-to-init orphans — including classic double-fork daemons
+            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
+            # above; anything else reparented to init is fair game for reap.
             if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
-              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-                return 0
-              fi
+              return 0
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1446,21 +1383,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact scrub secrets: copy from short-lived step env (not script
-          # literals) into a mode-600 mktemp, then unset from this shell so
-          # /proc/$$/environ does not keep them for the rest of the step.
-          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
-          # OPENROUTER — not ship inputs on this runner.
+          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
+          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
+          # land in /proc/$$/environ at PID start — before the reaper can run —
+          # and re-open the post-scrub window for a leftover ship child.
+          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
+          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
+          # that were already present during ship (then unset from this shell).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
-            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
-            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
-            for key in \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
-            do
+            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -1468,10 +1401,10 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1485,7 +1418,6 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1544,13 +1476,6 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
-          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
-          # Passed via env — NOT interpolated into the on-disk run script — so a
-          # leftover ship child cannot read key material from the step script
-          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
-          _BB_DIAG_TOK: ${{ github.token }}
-          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
-          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1586,16 +1511,11 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
-            # non-system setsid session leader (cwd /tmp or / used to evade
-            # the in_tree check and still read mode-600 secrets as same UID).
+            # Detached-to-init orphans — including classic double-fork daemons
+            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
+            # above; anything else reparented to init is fair game for reap.
             if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
-              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-                return 0
-              fi
+              return 0
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1661,21 +1581,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Exact scrub secrets: copy from short-lived step env (not script
-          # literals) into a mode-600 mktemp, then unset from this shell so
-          # /proc/$$/environ does not keep them for the rest of the step.
-          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
-          # OPENROUTER — not ship inputs on this runner.
+          # Do NOT decrypt github.token / ANTHROPIC_API_KEY / ZAI_KEY (or
+          # REGEN/OPENAI/OPENROUTER) into this step. Exact values in step env
+          # land in /proc/$$/environ at PID start — before the reaper can run —
+          # and re-open the post-scrub window for a leftover ship child.
+          # provenance.gitstore.scrub pattern-covers ghs_/ghp_/sk-ant_/sk-or_/
+          # AWS/Bearer/URL-creds; SECRETS_FILE only mirrors runner ACTIONS_*
+          # that were already present during ship (then unset from this shell).
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
-            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
-            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
-            for key in \
-              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
-            do
+            for key in ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -1683,10 +1599,10 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
+            ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1700,7 +1616,6 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1832,16 +1747,11 @@ jobs:
             case "$cmd" in
               *backlog-burn.bundle*|*model_registry*) mentions=1 ;;
             esac
-            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
-            # non-system setsid session leader (cwd /tmp or / used to evade
-            # the in_tree check and still read mode-600 secrets as same UID).
+            # Detached-to-init orphans — including classic double-fork daemons
+            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
+            # above; anything else reparented to init is fair game for reap.
             if [ "$ppid" = "1" ]; then
-              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                return 0
-              fi
-              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-                return 0
-              fi
+              return 0
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
