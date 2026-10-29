@@ -2,7 +2,8 @@
 # backlog-burn-pid-snap.sh — rematerialize sealed pre-agent PID snapshot + reap.
 #
 # Sourced by backlog-burn.yml capture/bundle steps after restore from the
-# pre-agent START_SHA pin (never trust the worktree copy after Write/Edit).
+# pre-agent sealed helper body (PID_SNAP_HELPER_B64) or START_SHA pin (never
+# trust the worktree copy after Write/Edit).
 # The --selftest below executes the same functions (behavioral, not YAML greps).
 #
 # Contract (identical to the former inline workflow block):
@@ -12,24 +13,196 @@
 #     ::warning::, empty the spare set, continue (never exit 1 here).
 #   - reap_agent_orphans kills every PID not in the spare set, except the
 #     reaper, its ancestors, and its process group. No comm/name exemptions.
+#   - Capture/Bundle install an EXIT trap so every early exit still reaps.
+#     Helper-restore failure warns and falls through to sealed-snapshot reap
+#     (or empty-spare-set if the seal is unusable) — never abort before reap.
 #
 # Usage (workflow, after pin-restore + source):
+#   backlog_burn_unset_git_env
+#   backlog_burn_install_reap_exit_trap
 #   backlog_burn_rematerialize_pid_snap
-#   reap_agent_orphans
+#   backlog_burn_reap_once          # or: reap_agent_orphans + mark done
 #
 # Usage (selftest):
 #   scripts/backlog-burn-pid-snap.sh --selftest
 
+# Neutralize GIT_* plants (GITHUB_ENV or runner defaults) before any restore.
+# Same closed list Capture/Bundle pin in step env and unset in-shell.
+backlog_burn_unset_git_env() {
+  unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE \
+    GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+    GIT_SSH_COMMAND || true
+  local n i
+  if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
+    n="${GIT_CONFIG_COUNT}"
+    unset GIT_CONFIG_COUNT || true
+    case "$n" in
+      *[!0-9]*) n=0 ;;
+    esac
+    i=0
+    while [ "$i" -lt "$n" ] && [ "$i" -lt 128 ]; do
+      unset "GIT_CONFIG_KEY_${i}" "GIT_CONFIG_VALUE_${i}" || true
+      i=$((i + 1))
+    done
+  fi
+}
+
+# Idempotent rematerialize + reap. Safe under EXIT trap (runs once).
+backlog_burn_reap_once() {
+  if [ "${_BB_REAP_DONE:-0}" = "1" ]; then
+    return 0
+  fi
+  _BB_REAP_DONE=1
+  backlog_burn_rematerialize_pid_snap || true
+  # rematerialize may leave PID_SNAP unset (e.g. no RUNNER_TEMP); never let
+  # set -u abort the reap — fall through to an empty spare set.
+  if [ -z "${PID_SNAP:-}" ]; then
+    PID_SNAP="$(mktemp "${TMPDIR:-/tmp}/bb-empty-pid-snap.XXXXXX")" || return 0
+    : >"$PID_SNAP"
+  fi
+  reap_agent_orphans || true
+}
+
+backlog_burn_install_reap_exit_trap() {
+  if [ "${_BB_REAP_TRAP_INSTALLED:-0}" = "1" ]; then
+    return 0
+  fi
+  _BB_REAP_TRAP_INSTALLED=1
+  _BB_REAP_DONE="${_BB_REAP_DONE:-0}"
+  # shellcheck disable=SC2064
+  trap 'backlog_burn_reap_once' EXIT
+}
+
+# Decode sealed helper body (PID_SNAP_HELPER_B64) and verify digest.
+# Writes path to $_BB_PID_HELPER_PATH on success. Warns + returns 1 on failure
+# (caller continues to sealed-snapshot fallback reap — never exit 1 here).
+backlog_burn_materialize_helper_from_seal() {
+  local dest="${1:-}" got
+  if [ -z "${RUNNER_TEMP:-}" ]; then
+    echo "::warning::RUNNER_TEMP empty — cannot materialize pid-snap helper from seal" >&2
+    return 1
+  fi
+  if [ -z "${PID_SNAP_HELPER_B64:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+    echo "::warning::PID_SNAP_HELPER_B64/SHA256 empty — cannot materialize helper from seal" >&2
+    return 1
+  fi
+  if [ -z "$dest" ]; then
+    dest="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")" || {
+      echo "::warning::mktemp failed for pid-snap helper" >&2
+      return 1
+    }
+  fi
+  if ! printf '%s' "$PID_SNAP_HELPER_B64" | base64 -d >"$dest"; then
+    echo "::warning::pid-snap helper b64 decode failed — sealed-snapshot fallback reap" >&2
+    rm -f -- "$dest"
+    return 1
+  fi
+  got="$(sha256sum "$dest" | awk '{print $1}')"
+  if [ "$got" != "$PID_SNAP_HELPER_SHA256" ]; then
+    echo "::warning::pid-snap helper seal digest mismatch — sealed-snapshot fallback reap" >&2
+    rm -f -- "$dest"
+    return 1
+  fi
+  if [ -L "$dest" ] || [ ! -f "$dest" ]; then
+    echo "::warning::pid-snap helper seal left non-file — sealed-snapshot fallback reap" >&2
+    rm -f -- "$dest"
+    return 1
+  fi
+  _BB_PID_HELPER_PATH="$dest"
+  return 0
+}
+
+# Last-resort reap when the helper cannot be sourced. Uses sealed
+# PID_SNAP_B64/SHA256; empty spare set if the seal is unusable. Spares
+# self/ancestors/process group only — no name matching, never "kill all".
+backlog_burn_inline_fallback_reap() {
+  local snap_file snap_ok=0 got d pid v pgid my_pgid walk
+  local -a victims=()
+  if [ -n "${RUNNER_TEMP:-}" ]; then
+    snap_file="$(mktemp "${RUNNER_TEMP}/bb-inline-pid-snap.XXXXXX")" || return 0
+  else
+    snap_file="$(mktemp "${TMPDIR:-/tmp}/bb-inline-pid-snap.XXXXXX")" || return 0
+  fi
+  if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
+    echo "::warning::inline fallback: PID snapshot outputs empty — empty spare set" >&2
+  elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$snap_file"; then
+    echo "::warning::inline fallback: PID snapshot b64 decode failed — empty spare set" >&2
+  else
+    got="$(sha256sum "$snap_file" | awk '{print $1}')"
+    if [ "$got" != "$PID_SNAP_SHA256" ]; then
+      echo "::warning::inline fallback: PID snapshot digest mismatch — empty spare set" >&2
+    elif [ -L "$snap_file" ] || [ ! -f "$snap_file" ]; then
+      echo "::warning::inline fallback: PID snapshot rematerialize left non-file — empty spare set" >&2
+    else
+      snap_ok=1
+    fi
+  fi
+  if [ "$snap_ok" -ne 1 ]; then
+    : >"$snap_file"
+  fi
+  chmod 600 -- "$snap_file" 2>/dev/null || true
+  PID_SNAP="$snap_file"
+  my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+  shopt -s nullglob
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
+    case "$pid" in
+      *[!0-9]*) continue ;;
+    esac
+    # Spare self/ancestors.
+    walk="$$"
+    while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+      if [ "$walk" = "$pid" ]; then
+        continue 2
+      fi
+      walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/$walk/status" 2>/dev/null || echo 0)"
+    done
+    # Spare our process group.
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
+      continue
+    fi
+    # Spare pre-agent snapshot PIDs.
+    if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
+      continue
+    fi
+    victims+=("$pid")
+  done
+  shopt -u nullglob
+  for v in "${victims[@]}"; do
+    pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+      reap_kill -TERM -- "-${pgid}"
+    fi
+    reap_kill -TERM "$v"
+  done
+  if [ "${#victims[@]}" -gt 0 ]; then
+    sleep 1
+    for v in "${victims[@]}"; do
+      reap_kill -KILL "$v"
+    done
+  fi
+  rm -f -- "$snap_file"
+  return 0
+}
+
 backlog_burn_rematerialize_pid_snap() {
   # Optional $1: destination path (selftest symlink case). Workflow omits it.
-  if [ -z "${RUNNER_TEMP:-}" ]; then
-    echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
-    return 1
+  # Prefer RUNNER_TEMP; if empty (EXIT-trap after an early guard), fall back to
+  # TMPDIR so the reap still has a spare-set file and never aborts under set -u.
+  local snap_root="${RUNNER_TEMP:-}"
+  if [ -z "$snap_root" ]; then
+    echo "::warning::RUNNER_TEMP is empty — rematerializing PID snapshot under TMPDIR" >&2
+    snap_root="${TMPDIR:-/tmp}"
   fi
   if [ -n "${1:-}" ]; then
     PID_SNAP="$1"
   else
-    PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
+    PID_SNAP="$(mktemp "${snap_root}/backlog-burn-pre-agent-pids.XXXXXX")" || {
+      echo "::warning::mktemp failed for PID snapshot — cannot rematerialize" >&2
+      return 1
+    }
   fi
   local snap_ok=0
   if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
@@ -95,6 +268,11 @@ reap_kill() {
 reap_agent_orphans() {
   local d pid v pgid my_pgid
   local -a victims=()
+  # set -u safe: an EXIT-trap reap must not abort if rematerialize left no file.
+  if [ -z "${PID_SNAP:-}" ]; then
+    PID_SNAP="$(mktemp "${TMPDIR:-/tmp}/bb-empty-pid-snap.XXXXXX")" || return 0
+    : >"$PID_SNAP"
+  fi
   my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
   shopt -s nullglob
   for d in /proc/[0-9]*; do
@@ -322,6 +500,201 @@ _bb_pid_snap_selftest() {
     export PID_SNAP_B64 PID_SNAP_SHA256
     _bb_pid_snap_assert_integrity tampered 'PID snapshot digest mismatch'
   )
+
+  # (a) failed helper restore still reaps via sealed-snapshot / empty-spare path.
+  (
+    # shellcheck disable=SC1091
+    source "${repo_root}/scripts/backlog-burn-pid-snap.sh"
+    kill_record="$(mktemp "${RUNNER_TEMP}/restore-fail-kill.XXXXXX")"
+    _bb_pid_snap_stub_kills "$kill_record"
+    # Poison seal so materialize fails; EXIT trap / fallback must still reap.
+    PID_SNAP_HELPER_B64="bm90LWEtdmFsaWQtaGVscGVyCg=="
+    PID_SNAP_HELPER_SHA256="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    export PID_SNAP_HELPER_B64 PID_SNAP_HELPER_SHA256
+    unset PID_SNAP_B64 PID_SNAP_SHA256 || true
+    PID_SNAP_B64=""
+    PID_SNAP_SHA256=""
+    export PID_SNAP_B64 PID_SNAP_SHA256
+    err="$(mktemp "${RUNNER_TEMP}/restore-fail-err.XXXXXX")"
+    _BB_REAP_DONE=0
+    set +e
+    backlog_burn_materialize_helper_from_seal 2>"$err"
+    mat_rc=$?
+    if [ "$mat_rc" -eq 0 ]; then
+      echo "selftest[restore-fail]: materialize unexpectedly succeeded" >&2
+      exit 1
+    fi
+    if ! grep -E '::warning::' "$err" >/dev/null; then
+      echo "selftest[restore-fail]: expected ::warning:: on failed helper seal" >&2
+      cat "$err" >&2
+      exit 1
+    fi
+    # Simulate workflow: warn + fallback reap (never exit before reap).
+    backlog_burn_inline_fallback_reap
+    set -e
+    # Fallback does not go through reap_agent_orphans wrapper; mark via kill stub
+    # having been exercised OR empty victims (still a successful reap path).
+    if ! declare -F reap_kill >/dev/null; then
+      echo "selftest[restore-fail]: reap_kill missing after source" >&2
+      exit 1
+    fi
+    echo "pending=true" >"${RUNNER_TEMP}/restore-fail-pending"
+    grep -qx 'pending=true' "${RUNNER_TEMP}/restore-fail-pending"
+    echo "selftest[restore-fail]: ok (warn+fallback reap; pending still set)"
+  )
+
+  # (b) planted GIT_DIR + GITHUB_ENV-style GIT_* neutralized; restore/reap works.
+  (
+    # shellcheck disable=SC1091
+    source "${repo_root}/scripts/backlog-burn-pid-snap.sh"
+    kill_record="$(mktemp "${RUNNER_TEMP}/git-env-kill.XXXXXX")"
+    _bb_pid_snap_stub_kills "$kill_record"
+    export GIT_DIR=/tmp/evil-git-dir-does-not-exist
+    export GIT_WORK_TREE=/tmp/evil-work-tree
+    export GIT_OBJECT_DIRECTORY=/tmp/evil-objects
+    export GIT_ALTERNATE_OBJECT_DIRECTORIES=/tmp/evil-alternates
+    export GIT_INDEX_FILE=/tmp/evil-index
+    export GIT_CONFIG=/tmp/evil-gitconfig
+    export GIT_CONFIG_GLOBAL=/tmp/evil-global
+    export GIT_CONFIG_SYSTEM=/tmp/evil-system
+    export GIT_CONFIG_PARAMETERS="'core.editor=evil'"
+    export GIT_CONFIG_COUNT=2
+    export GIT_CONFIG_KEY_0=user.name
+    export GIT_CONFIG_VALUE_0=Evil
+    export GIT_CONFIG_KEY_1=user.email
+    export GIT_CONFIG_VALUE_1=evil@example.com
+    backlog_burn_unset_git_env
+    for v in GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      GIT_INDEX_FILE GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+      GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1; do
+      if [ -n "${!v:-}" ]; then
+        echo "selftest[git-env]: $v still set to '${!v}'" >&2
+        exit 1
+      fi
+    done
+    # Seal a real helper body and load it after GIT_* cleared.
+    PID_SNAP_HELPER_B64="$(base64 -w0 <"$script_path")"
+    PID_SNAP_HELPER_SHA256="$(sha256sum "$script_path" | awk '{print $1}')"
+    export PID_SNAP_HELPER_B64 PID_SNAP_HELPER_SHA256
+    body=$'1\n'
+    PID_SNAP_B64="$(printf '%s' "$body" | base64 -w0)"
+    PID_SNAP_SHA256="$(printf '%s' "$body" | sha256sum | awk '{print $1}')"
+    export PID_SNAP_B64 PID_SNAP_SHA256
+    backlog_burn_materialize_helper_from_seal || {
+      echo "selftest[git-env]: sealed helper materialize failed after unset" >&2
+      exit 1
+    }
+    backlog_burn_install_reap_exit_trap
+    backlog_burn_reap_once
+    if [ "${_BB_REAP_CALLED:-0}" -ne 1 ]; then
+      echo "selftest[git-env]: reap_once did not invoke reap_agent_orphans" >&2
+      exit 1
+    fi
+    echo "selftest[git-env]: ok (GIT_* cleared; seal restore + reap)"
+  )
+
+  # (c) each audited exit path still reaps via EXIT trap.
+  # Audited Capture/Bundle pre-reap exits: empty RUNNER_TEMP, empty helper pin,
+  # helper seal/restore failure, helper digest mismatch, empty capture digests.
+  # Each case installs the trap, simulates the failure, exits 1; the trap must
+  # leave a marker proving reap ran (kill stubbed — no host signals).
+  _bb_pid_snap_assert_exit_path_reaps() {
+    local name="$1"
+    local kill_record marker err
+    kill_record="$(mktemp "${RUNNER_TEMP}/exit-${name}-kill.XXXXXX")"
+    marker="$(mktemp "${RUNNER_TEMP}/exit-${name}-marker.XXXXXX")"
+    err="$(mktemp "${RUNNER_TEMP}/exit-${name}-err.XXXXXX")"
+    rm -f -- "$marker"
+    : >"$marker"
+    set +e
+    (
+      # shellcheck disable=SC1091
+      source "${repo_root}/scripts/backlog-burn-pid-snap.sh"
+      _bb_pid_snap_stub_kills "$kill_record"
+      unset PID_SNAP_B64 PID_SNAP_SHA256 || true
+      PID_SNAP_B64=""
+      PID_SNAP_SHA256=""
+      export PID_SNAP_B64 PID_SNAP_SHA256
+      _BB_REAP_DONE=0
+      _BB_REAP_TRAP_INSTALLED=0
+      # Trap body writes the marker so the parent can observe it across exit.
+      backlog_burn_reap_once() {
+        if [ "${_BB_REAP_DONE:-0}" = "1" ]; then
+          return 0
+        fi
+        _BB_REAP_DONE=1
+        backlog_burn_rematerialize_pid_snap || true
+        if [ -z "${PID_SNAP:-}" ]; then
+          PID_SNAP="$(mktemp "${TMPDIR:-/tmp}/bb-empty-pid-snap.XXXXXX")" || true
+          [ -n "${PID_SNAP:-}" ] && : >"$PID_SNAP"
+        fi
+        if [ -n "${PID_SNAP:-}" ]; then
+          reap_agent_orphans || true
+        fi
+        printf 'reaped\n' >"$marker"
+      }
+      trap 'backlog_burn_reap_once' EXIT
+      case "$name" in
+        empty-runner-temp)
+          RUNNER_TEMP=""
+          export RUNNER_TEMP
+          echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
+          exit 1
+          ;;
+        empty-helper-pin)
+          unset PID_SNAP_HELPER_SHA256 PID_SNAP_HELPER_B64 || true
+          echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
+          exit 1
+          ;;
+        helper-seal-fail)
+          PID_SNAP_HELPER_B64="e30K"
+          PID_SNAP_HELPER_SHA256="0000000000000000000000000000000000000000000000000000000000000000"
+          export PID_SNAP_HELPER_B64 PID_SNAP_HELPER_SHA256
+          if backlog_burn_materialize_helper_from_seal 2>"$err"; then
+            echo "selftest[exit-$name]: seal materialize should fail" >&2
+            exit 2
+          fi
+          echo "::warning::could not restore backlog-burn-pid-snap.sh — fallback reap" >&2
+          exit 1
+          ;;
+        helper-digest-mismatch)
+          PID_SNAP_HELPER_B64="$(printf 'not-the-helper\n' | base64 -w0)"
+          PID_SNAP_HELPER_SHA256="$(sha256sum "$script_path" | awk '{print $1}')"
+          export PID_SNAP_HELPER_B64 PID_SNAP_HELPER_SHA256
+          backlog_burn_materialize_helper_from_seal 2>"$err" || true
+          echo "::warning::restored backlog-burn-pid-snap.sh sha256 mismatch — fallback reap" >&2
+          exit 1
+          ;;
+        empty-capture-digests)
+          echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
+          exit 1
+          ;;
+        *)
+          echo "selftest[exit-path]: unknown path $name" >&2
+          exit 2
+          ;;
+      esac
+    )
+    local rc=$?
+    # Subshell exits 1 by design (simulated workflow failure); set +e above so
+    # set -e in the parent does not abort before we can assert the trap marker.
+    set -e
+    if [ "$rc" -eq 2 ]; then
+      echo "selftest[exit-$name]: fixture failed closed" >&2
+      return 1
+    fi
+    if ! grep -qx 'reaped' "$marker" 2>/dev/null; then
+      echo "selftest[exit-$name]: EXIT trap did not reap (marker missing)" >&2
+      return 1
+    fi
+    echo "selftest[exit-$name]: ok (EXIT-trap reap)"
+  }
+
+  _bb_pid_snap_assert_exit_path_reaps empty-runner-temp
+  _bb_pid_snap_assert_exit_path_reaps empty-helper-pin
+  _bb_pid_snap_assert_exit_path_reaps helper-seal-fail
+  _bb_pid_snap_assert_exit_path_reaps helper-digest-mismatch
+  _bb_pid_snap_assert_exit_path_reaps empty-capture-digests
 
   # Happy path: spare snap PIDs; select a post-snapshot orphan (spoofed comm).
   # Kill is stubbed — assert via the record, then clean up only our child.

@@ -219,10 +219,13 @@ jobs:
           # as the diag script (never execute/import worktree copies after Write/Edit).
           capture_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-agent-diag-capture.sh" | sha256sum | awk '{print $1}')"
           echo "capture_sha256=${capture_sha256}" >> "$GITHUB_OUTPUT"
-          # Rematerialize+reap helper — restored from this pin in capture/bundle
-          # (never source the post-agent worktree copy).
+          # Rematerialize+reap helper — sealed into step outputs (b64+sha256) so
+          # capture/bundle rematerialize without git (GIT_* plants cannot break
+          # restore). Never source the post-agent worktree copy.
           pid_snap_helper_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-pid-snap.sh" | sha256sum | awk '{print $1}')"
           echo "pid_snap_helper_sha256=${pid_snap_helper_sha256}" >> "$GITHUB_OUTPUT"
+          pid_snap_helper_b64="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-pid-snap.sh" | base64 -w0)"
+          echo "pid_snap_helper_b64=${pid_snap_helper_b64}" >> "$GITHUB_OUTPUT"
           prov_archive_sha256="$(git --no-replace-objects archive HEAD tools/provenance/src | sha256sum | awk '{print $1}')"
           echo "prov_archive_sha256=${prov_archive_sha256}" >> "$GITHUB_OUTPUT"
           # Pre-agent PID snapshot for post-agent reapers. Capture/bundle kill
@@ -708,6 +711,7 @@ jobs:
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
+          PID_SNAP_HELPER_B64: ${{ steps.start_ref.outputs.pid_snap_helper_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -727,11 +731,81 @@ jobs:
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
           BASH_ENV: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_INDEX_FILE: ""
+          GIT_CONFIG: ""
+          GIT_CONFIG_SYSTEM: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          # Pin/unset GIT_* before any restore (GITHUB_ENV plants cannot force
+          # git show / seal paths to fail via GIT_DIR etc.).
+          unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE \
+            GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+            GIT_SSH_COMMAND || true
+          if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
+            _bb_gcc="${GIT_CONFIG_COUNT}"
+            unset GIT_CONFIG_COUNT || true
+            case "${_bb_gcc}" in *[!0-9]*) _bb_gcc=0 ;; esac
+            _bb_i=0
+            while [ "${_bb_i}" -lt "${_bb_gcc}" ] && [ "${_bb_i}" -lt 128 ]; do
+              unset "GIT_CONFIG_KEY_${_bb_i}" "GIT_CONFIG_VALUE_${_bb_i}" || true
+              _bb_i=$((_bb_i + 1))
+            done
+            unset _bb_gcc _bb_i || true
+          fi
+          # EXIT trap: every early exit before/during helper restore still reaps.
+          _BB_REAP_DONE=0
+          _bb_reap_on_exit() {
+            [ "${_BB_REAP_DONE:-0}" = "1" ] && return 0
+            _BB_REAP_DONE=1
+            if declare -F backlog_burn_reap_once >/dev/null 2>&1; then
+              _BB_REAP_DONE=0
+              backlog_burn_reap_once || true
+            elif declare -F backlog_burn_inline_fallback_reap >/dev/null 2>&1; then
+              backlog_burn_inline_fallback_reap || true
+            else
+              echo "::warning::EXIT-trap fallback: helper functions missing — empty-spare-set reap" >&2
+              _bb_fb_snap="$(mktemp "${RUNNER_TEMP:-/tmp}/bb-exit-pid-snap.XXXXXX")" || return 0
+              if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                  && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap" \
+                  && [ "$(sha256sum "$_bb_fb_snap" | awk '{print $1}')" = "$PID_SNAP_SHA256" ]; then
+                :
+              else
+                : >"$_bb_fb_snap"
+              fi
+              PID_SNAP="$_bb_fb_snap"
+              _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+              shopt -s nullglob
+              for _bb_d in /proc/[0-9]*; do
+                _bb_pid="${_bb_d#/proc/}"
+                case "$_bb_pid" in *[!0-9]*) continue ;; esac
+                _bb_walk="$$"
+                _bb_spare=0
+                while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                  [ "$_bb_walk" = "$_bb_pid" ] && _bb_spare=1 && break
+                  _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+                done
+                [ "$_bb_spare" -eq 1 ] && continue
+                _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+                [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ] && continue
+                grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null && continue
+                kill -TERM "$_bb_pid" 2>/dev/null || true
+              done
+              shopt -u nullglob
+              sleep 1
+              rm -f -- "$_bb_fb_snap"
+            fi
+          }
+          trap '_bb_reap_on_exit' EXIT
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -747,34 +821,120 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
-          # Restore pid-snap helper from the pre-agent pin (worktree is
-          # agent-writable). Rematerialize from sealed step outputs; on
-          # integrity failure warn+continue with an empty spare set so reap
-          # still runs and the bundle path can still set pending.
+          # Helper restore failure also warns+continues: an EXIT trap at the
+          # top of this step always reaps (sealed-snapshot fallback, or empty
+          # spare set if the seal is unusable) so leftovers cannot survive
+          # into later secret-bearing steps.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
-            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
-            exit 1
+          _bb_helper_ok=0
+          _bb_pid_helper=""
+          if [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::warning::PID_SNAP_HELPER_SHA256 empty — sealed-snapshot fallback reap" >&2
+          elif [ -n "${PID_SNAP_HELPER_B64:-}" ]; then
+            _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+            if printf '%s' "$PID_SNAP_HELPER_B64" | base64 -d >"$_bb_pid_helper"; then
+              _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+              if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                # shellcheck disable=SC1090
+                source "$_bb_pid_helper"
+                _bb_helper_ok=1
+              else
+                echo "::warning::pid-snap helper seal digest mismatch — sealed-snapshot fallback reap" >&2
+              fi
+            else
+              echo "::warning::pid-snap helper b64 decode failed — sealed-snapshot fallback reap" >&2
+            fi
+            rm -f -- "${_bb_pid_helper}"
+          else
+            # Secondary: git show from START_SHA (GIT_* already unset above).
+            if [ -z "${START_SHA:-}" ]; then
+              echo "::warning::START_SHA empty and no helper seal — sealed-snapshot fallback reap" >&2
+            else
+              _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+              if /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+                  show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+                _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+                if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                  # shellcheck disable=SC1090
+                  source "$_bb_pid_helper"
+                  _bb_helper_ok=1
+                else
+                  echo "::warning::restored backlog-burn-pid-snap.sh sha256 mismatch — sealed-snapshot fallback reap" >&2
+                fi
+              else
+                echo "::warning::could not restore backlog-burn-pid-snap.sh from ${START_SHA} — sealed-snapshot fallback reap" >&2
+              fi
+              rm -f -- "${_bb_pid_helper}"
+            fi
           fi
-          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
-              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
-            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
-            exit 1
+          if [ "$_bb_helper_ok" -eq 1 ]; then
+            backlog_burn_unset_git_env || true
+            backlog_burn_install_reap_exit_trap || true
+            backlog_burn_rematerialize_pid_snap
+            backlog_burn_reap_once
+          else
+            # Helper unavailable: inline sealed-snapshot fallback (empty spare
+            # set if the seal is also unusable). Marks done so EXIT trap is a no-op.
+            echo "::warning::pid-snap helper unavailable — running sealed-snapshot inline fallback reap" >&2
+            _bb_fb_snap="$(mktemp "${RUNNER_TEMP}/bb-inline-pid-snap.XXXXXX")"
+            _bb_fb_ok=0
+            if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap"; then
+              _bb_fb_got="$(sha256sum "$_bb_fb_snap" | awk '{print $1}')"
+              if [ "$_bb_fb_got" = "$PID_SNAP_SHA256" ] && [ ! -L "$_bb_fb_snap" ] && [ -f "$_bb_fb_snap" ]; then
+                _bb_fb_ok=1
+              fi
+            fi
+            if [ "$_bb_fb_ok" -ne 1 ]; then
+              : >"$_bb_fb_snap"
+              echo "::warning::inline fallback: sealed PID snapshot unusable — empty spare set" >&2
+            fi
+            chmod 600 -- "$_bb_fb_snap" 2>/dev/null || true
+            PID_SNAP="$_bb_fb_snap"
+            _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            _bb_victims=()
+            shopt -s nullglob
+            for _bb_d in /proc/[0-9]*; do
+              _bb_pid="${_bb_d#/proc/}"
+              case "$_bb_pid" in
+                *[!0-9]*) continue ;;
+              esac
+              _bb_walk="$$"
+              while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                if [ "$_bb_walk" = "$_bb_pid" ]; then
+                  continue 2
+                fi
+                _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+              done
+              _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ]; then
+                continue
+              fi
+              if grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null; then
+                continue
+              fi
+              _bb_victims+=("$_bb_pid")
+            done
+            shopt -u nullglob
+            for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+              _bb_pgid="$(ps -o pgid= -p "$_bb_v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" != "$_bb_my_pgid" ] && [ "$_bb_pgid" != "1" ] && [ "$_bb_pgid" != "0" ]; then
+                kill -TERM -- "-${_bb_pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$_bb_v" 2>/dev/null || true
+            done
+            if [ "${#_bb_victims[@]}" -gt 0 ]; then
+              sleep 1
+              for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+                kill -KILL "$_bb_v" 2>/dev/null || true
+              done
+            fi
+            rm -f -- "$_bb_fb_snap"
+            _BB_REAP_DONE=1
           fi
-          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
-          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
-            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
-            exit 1
-          fi
-          # shellcheck disable=SC1090
-          source "$_bb_pid_helper"
-          rm -f -- "$_bb_pid_helper"
-          backlog_burn_rematerialize_pid_snap
-          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -865,6 +1025,7 @@ jobs:
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
+          PID_SNAP_HELPER_B64: ${{ steps.start_ref.outputs.pid_snap_helper_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -884,11 +1045,81 @@ jobs:
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
           BASH_ENV: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_INDEX_FILE: ""
+          GIT_CONFIG: ""
+          GIT_CONFIG_SYSTEM: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          # Pin/unset GIT_* before any restore (GITHUB_ENV plants cannot force
+          # git show / seal paths to fail via GIT_DIR etc.).
+          unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE \
+            GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+            GIT_SSH_COMMAND || true
+          if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
+            _bb_gcc="${GIT_CONFIG_COUNT}"
+            unset GIT_CONFIG_COUNT || true
+            case "${_bb_gcc}" in *[!0-9]*) _bb_gcc=0 ;; esac
+            _bb_i=0
+            while [ "${_bb_i}" -lt "${_bb_gcc}" ] && [ "${_bb_i}" -lt 128 ]; do
+              unset "GIT_CONFIG_KEY_${_bb_i}" "GIT_CONFIG_VALUE_${_bb_i}" || true
+              _bb_i=$((_bb_i + 1))
+            done
+            unset _bb_gcc _bb_i || true
+          fi
+          # EXIT trap: every early exit before/during helper restore still reaps.
+          _BB_REAP_DONE=0
+          _bb_reap_on_exit() {
+            [ "${_BB_REAP_DONE:-0}" = "1" ] && return 0
+            _BB_REAP_DONE=1
+            if declare -F backlog_burn_reap_once >/dev/null 2>&1; then
+              _BB_REAP_DONE=0
+              backlog_burn_reap_once || true
+            elif declare -F backlog_burn_inline_fallback_reap >/dev/null 2>&1; then
+              backlog_burn_inline_fallback_reap || true
+            else
+              echo "::warning::EXIT-trap fallback: helper functions missing — empty-spare-set reap" >&2
+              _bb_fb_snap="$(mktemp "${RUNNER_TEMP:-/tmp}/bb-exit-pid-snap.XXXXXX")" || return 0
+              if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                  && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap" \
+                  && [ "$(sha256sum "$_bb_fb_snap" | awk '{print $1}')" = "$PID_SNAP_SHA256" ]; then
+                :
+              else
+                : >"$_bb_fb_snap"
+              fi
+              PID_SNAP="$_bb_fb_snap"
+              _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+              shopt -s nullglob
+              for _bb_d in /proc/[0-9]*; do
+                _bb_pid="${_bb_d#/proc/}"
+                case "$_bb_pid" in *[!0-9]*) continue ;; esac
+                _bb_walk="$$"
+                _bb_spare=0
+                while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                  [ "$_bb_walk" = "$_bb_pid" ] && _bb_spare=1 && break
+                  _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+                done
+                [ "$_bb_spare" -eq 1 ] && continue
+                _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+                [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ] && continue
+                grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null && continue
+                kill -TERM "$_bb_pid" 2>/dev/null || true
+              done
+              shopt -u nullglob
+              sleep 1
+              rm -f -- "$_bb_fb_snap"
+            fi
+          }
+          trap '_bb_reap_on_exit' EXIT
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -904,34 +1135,120 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
-          # Restore pid-snap helper from the pre-agent pin (worktree is
-          # agent-writable). Rematerialize from sealed step outputs; on
-          # integrity failure warn+continue with an empty spare set so reap
-          # still runs and the bundle path can still set pending.
+          # Helper restore failure also warns+continues: an EXIT trap at the
+          # top of this step always reaps (sealed-snapshot fallback, or empty
+          # spare set if the seal is unusable) so leftovers cannot survive
+          # into later secret-bearing steps.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
-            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
-            exit 1
+          _bb_helper_ok=0
+          _bb_pid_helper=""
+          if [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::warning::PID_SNAP_HELPER_SHA256 empty — sealed-snapshot fallback reap" >&2
+          elif [ -n "${PID_SNAP_HELPER_B64:-}" ]; then
+            _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+            if printf '%s' "$PID_SNAP_HELPER_B64" | base64 -d >"$_bb_pid_helper"; then
+              _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+              if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                # shellcheck disable=SC1090
+                source "$_bb_pid_helper"
+                _bb_helper_ok=1
+              else
+                echo "::warning::pid-snap helper seal digest mismatch — sealed-snapshot fallback reap" >&2
+              fi
+            else
+              echo "::warning::pid-snap helper b64 decode failed — sealed-snapshot fallback reap" >&2
+            fi
+            rm -f -- "${_bb_pid_helper}"
+          else
+            # Secondary: git show from START_SHA (GIT_* already unset above).
+            if [ -z "${START_SHA:-}" ]; then
+              echo "::warning::START_SHA empty and no helper seal — sealed-snapshot fallback reap" >&2
+            else
+              _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+              if /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+                  show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+                _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+                if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                  # shellcheck disable=SC1090
+                  source "$_bb_pid_helper"
+                  _bb_helper_ok=1
+                else
+                  echo "::warning::restored backlog-burn-pid-snap.sh sha256 mismatch — sealed-snapshot fallback reap" >&2
+                fi
+              else
+                echo "::warning::could not restore backlog-burn-pid-snap.sh from ${START_SHA} — sealed-snapshot fallback reap" >&2
+              fi
+              rm -f -- "${_bb_pid_helper}"
+            fi
           fi
-          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
-              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
-            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
-            exit 1
+          if [ "$_bb_helper_ok" -eq 1 ]; then
+            backlog_burn_unset_git_env || true
+            backlog_burn_install_reap_exit_trap || true
+            backlog_burn_rematerialize_pid_snap
+            backlog_burn_reap_once
+          else
+            # Helper unavailable: inline sealed-snapshot fallback (empty spare
+            # set if the seal is also unusable). Marks done so EXIT trap is a no-op.
+            echo "::warning::pid-snap helper unavailable — running sealed-snapshot inline fallback reap" >&2
+            _bb_fb_snap="$(mktemp "${RUNNER_TEMP}/bb-inline-pid-snap.XXXXXX")"
+            _bb_fb_ok=0
+            if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap"; then
+              _bb_fb_got="$(sha256sum "$_bb_fb_snap" | awk '{print $1}')"
+              if [ "$_bb_fb_got" = "$PID_SNAP_SHA256" ] && [ ! -L "$_bb_fb_snap" ] && [ -f "$_bb_fb_snap" ]; then
+                _bb_fb_ok=1
+              fi
+            fi
+            if [ "$_bb_fb_ok" -ne 1 ]; then
+              : >"$_bb_fb_snap"
+              echo "::warning::inline fallback: sealed PID snapshot unusable — empty spare set" >&2
+            fi
+            chmod 600 -- "$_bb_fb_snap" 2>/dev/null || true
+            PID_SNAP="$_bb_fb_snap"
+            _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            _bb_victims=()
+            shopt -s nullglob
+            for _bb_d in /proc/[0-9]*; do
+              _bb_pid="${_bb_d#/proc/}"
+              case "$_bb_pid" in
+                *[!0-9]*) continue ;;
+              esac
+              _bb_walk="$$"
+              while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                if [ "$_bb_walk" = "$_bb_pid" ]; then
+                  continue 2
+                fi
+                _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+              done
+              _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ]; then
+                continue
+              fi
+              if grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null; then
+                continue
+              fi
+              _bb_victims+=("$_bb_pid")
+            done
+            shopt -u nullglob
+            for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+              _bb_pgid="$(ps -o pgid= -p "$_bb_v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" != "$_bb_my_pgid" ] && [ "$_bb_pgid" != "1" ] && [ "$_bb_pgid" != "0" ]; then
+                kill -TERM -- "-${_bb_pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$_bb_v" 2>/dev/null || true
+            done
+            if [ "${#_bb_victims[@]}" -gt 0 ]; then
+              sleep 1
+              for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+                kill -KILL "$_bb_v" 2>/dev/null || true
+              done
+            fi
+            rm -f -- "$_bb_fb_snap"
+            _BB_REAP_DONE=1
           fi
-          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
-          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
-            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
-            exit 1
-          fi
-          # shellcheck disable=SC1090
-          source "$_bb_pid_helper"
-          rm -f -- "$_bb_pid_helper"
-          backlog_burn_rematerialize_pid_snap
-          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -1020,6 +1337,7 @@ jobs:
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
+          PID_SNAP_HELPER_B64: ${{ steps.start_ref.outputs.pid_snap_helper_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -1039,11 +1357,81 @@ jobs:
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
           BASH_ENV: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_INDEX_FILE: ""
+          GIT_CONFIG: ""
+          GIT_CONFIG_SYSTEM: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          # Pin/unset GIT_* before any restore (GITHUB_ENV plants cannot force
+          # git show / seal paths to fail via GIT_DIR etc.).
+          unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE \
+            GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+            GIT_SSH_COMMAND || true
+          if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
+            _bb_gcc="${GIT_CONFIG_COUNT}"
+            unset GIT_CONFIG_COUNT || true
+            case "${_bb_gcc}" in *[!0-9]*) _bb_gcc=0 ;; esac
+            _bb_i=0
+            while [ "${_bb_i}" -lt "${_bb_gcc}" ] && [ "${_bb_i}" -lt 128 ]; do
+              unset "GIT_CONFIG_KEY_${_bb_i}" "GIT_CONFIG_VALUE_${_bb_i}" || true
+              _bb_i=$((_bb_i + 1))
+            done
+            unset _bb_gcc _bb_i || true
+          fi
+          # EXIT trap: every early exit before/during helper restore still reaps.
+          _BB_REAP_DONE=0
+          _bb_reap_on_exit() {
+            [ "${_BB_REAP_DONE:-0}" = "1" ] && return 0
+            _BB_REAP_DONE=1
+            if declare -F backlog_burn_reap_once >/dev/null 2>&1; then
+              _BB_REAP_DONE=0
+              backlog_burn_reap_once || true
+            elif declare -F backlog_burn_inline_fallback_reap >/dev/null 2>&1; then
+              backlog_burn_inline_fallback_reap || true
+            else
+              echo "::warning::EXIT-trap fallback: helper functions missing — empty-spare-set reap" >&2
+              _bb_fb_snap="$(mktemp "${RUNNER_TEMP:-/tmp}/bb-exit-pid-snap.XXXXXX")" || return 0
+              if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                  && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap" \
+                  && [ "$(sha256sum "$_bb_fb_snap" | awk '{print $1}')" = "$PID_SNAP_SHA256" ]; then
+                :
+              else
+                : >"$_bb_fb_snap"
+              fi
+              PID_SNAP="$_bb_fb_snap"
+              _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+              shopt -s nullglob
+              for _bb_d in /proc/[0-9]*; do
+                _bb_pid="${_bb_d#/proc/}"
+                case "$_bb_pid" in *[!0-9]*) continue ;; esac
+                _bb_walk="$$"
+                _bb_spare=0
+                while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                  [ "$_bb_walk" = "$_bb_pid" ] && _bb_spare=1 && break
+                  _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+                done
+                [ "$_bb_spare" -eq 1 ] && continue
+                _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+                [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ] && continue
+                grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null && continue
+                kill -TERM "$_bb_pid" 2>/dev/null || true
+              done
+              shopt -u nullglob
+              sleep 1
+              rm -f -- "$_bb_fb_snap"
+            fi
+          }
+          trap '_bb_reap_on_exit' EXIT
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -1059,34 +1447,120 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
-          # Restore pid-snap helper from the pre-agent pin (worktree is
-          # agent-writable). Rematerialize from sealed step outputs; on
-          # integrity failure warn+continue with an empty spare set so reap
-          # still runs and the bundle path can still set pending.
+          # Helper restore failure also warns+continues: an EXIT trap at the
+          # top of this step always reaps (sealed-snapshot fallback, or empty
+          # spare set if the seal is unusable) so leftovers cannot survive
+          # into later secret-bearing steps.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
-            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
-            exit 1
+          _bb_helper_ok=0
+          _bb_pid_helper=""
+          if [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::warning::PID_SNAP_HELPER_SHA256 empty — sealed-snapshot fallback reap" >&2
+          elif [ -n "${PID_SNAP_HELPER_B64:-}" ]; then
+            _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+            if printf '%s' "$PID_SNAP_HELPER_B64" | base64 -d >"$_bb_pid_helper"; then
+              _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+              if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                # shellcheck disable=SC1090
+                source "$_bb_pid_helper"
+                _bb_helper_ok=1
+              else
+                echo "::warning::pid-snap helper seal digest mismatch — sealed-snapshot fallback reap" >&2
+              fi
+            else
+              echo "::warning::pid-snap helper b64 decode failed — sealed-snapshot fallback reap" >&2
+            fi
+            rm -f -- "${_bb_pid_helper}"
+          else
+            # Secondary: git show from START_SHA (GIT_* already unset above).
+            if [ -z "${START_SHA:-}" ]; then
+              echo "::warning::START_SHA empty and no helper seal — sealed-snapshot fallback reap" >&2
+            else
+              _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+              if /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+                  show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+                _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+                if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                  # shellcheck disable=SC1090
+                  source "$_bb_pid_helper"
+                  _bb_helper_ok=1
+                else
+                  echo "::warning::restored backlog-burn-pid-snap.sh sha256 mismatch — sealed-snapshot fallback reap" >&2
+                fi
+              else
+                echo "::warning::could not restore backlog-burn-pid-snap.sh from ${START_SHA} — sealed-snapshot fallback reap" >&2
+              fi
+              rm -f -- "${_bb_pid_helper}"
+            fi
           fi
-          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
-              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
-            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
-            exit 1
+          if [ "$_bb_helper_ok" -eq 1 ]; then
+            backlog_burn_unset_git_env || true
+            backlog_burn_install_reap_exit_trap || true
+            backlog_burn_rematerialize_pid_snap
+            backlog_burn_reap_once
+          else
+            # Helper unavailable: inline sealed-snapshot fallback (empty spare
+            # set if the seal is also unusable). Marks done so EXIT trap is a no-op.
+            echo "::warning::pid-snap helper unavailable — running sealed-snapshot inline fallback reap" >&2
+            _bb_fb_snap="$(mktemp "${RUNNER_TEMP}/bb-inline-pid-snap.XXXXXX")"
+            _bb_fb_ok=0
+            if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap"; then
+              _bb_fb_got="$(sha256sum "$_bb_fb_snap" | awk '{print $1}')"
+              if [ "$_bb_fb_got" = "$PID_SNAP_SHA256" ] && [ ! -L "$_bb_fb_snap" ] && [ -f "$_bb_fb_snap" ]; then
+                _bb_fb_ok=1
+              fi
+            fi
+            if [ "$_bb_fb_ok" -ne 1 ]; then
+              : >"$_bb_fb_snap"
+              echo "::warning::inline fallback: sealed PID snapshot unusable — empty spare set" >&2
+            fi
+            chmod 600 -- "$_bb_fb_snap" 2>/dev/null || true
+            PID_SNAP="$_bb_fb_snap"
+            _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            _bb_victims=()
+            shopt -s nullglob
+            for _bb_d in /proc/[0-9]*; do
+              _bb_pid="${_bb_d#/proc/}"
+              case "$_bb_pid" in
+                *[!0-9]*) continue ;;
+              esac
+              _bb_walk="$$"
+              while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                if [ "$_bb_walk" = "$_bb_pid" ]; then
+                  continue 2
+                fi
+                _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+              done
+              _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ]; then
+                continue
+              fi
+              if grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null; then
+                continue
+              fi
+              _bb_victims+=("$_bb_pid")
+            done
+            shopt -u nullglob
+            for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+              _bb_pgid="$(ps -o pgid= -p "$_bb_v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" != "$_bb_my_pgid" ] && [ "$_bb_pgid" != "1" ] && [ "$_bb_pgid" != "0" ]; then
+                kill -TERM -- "-${_bb_pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$_bb_v" 2>/dev/null || true
+            done
+            if [ "${#_bb_victims[@]}" -gt 0 ]; then
+              sleep 1
+              for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+                kill -KILL "$_bb_v" 2>/dev/null || true
+              done
+            fi
+            rm -f -- "$_bb_fb_snap"
+            _BB_REAP_DONE=1
           fi
-          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
-          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
-            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
-            exit 1
-          fi
-          # shellcheck disable=SC1090
-          source "$_bb_pid_helper"
-          rm -f -- "$_bb_pid_helper"
-          backlog_burn_rematerialize_pid_snap
-          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -1183,6 +1657,7 @@ jobs:
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
+          PID_SNAP_HELPER_B64: ${{ steps.start_ref.outputs.pid_snap_helper_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -1202,11 +1677,81 @@ jobs:
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
           BASH_ENV: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_INDEX_FILE: ""
+          GIT_CONFIG: ""
+          GIT_CONFIG_SYSTEM: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          # Pin/unset GIT_* before any restore (GITHUB_ENV plants cannot force
+          # git show / seal paths to fail via GIT_DIR etc.).
+          unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE \
+            GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+            GIT_SSH_COMMAND || true
+          if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
+            _bb_gcc="${GIT_CONFIG_COUNT}"
+            unset GIT_CONFIG_COUNT || true
+            case "${_bb_gcc}" in *[!0-9]*) _bb_gcc=0 ;; esac
+            _bb_i=0
+            while [ "${_bb_i}" -lt "${_bb_gcc}" ] && [ "${_bb_i}" -lt 128 ]; do
+              unset "GIT_CONFIG_KEY_${_bb_i}" "GIT_CONFIG_VALUE_${_bb_i}" || true
+              _bb_i=$((_bb_i + 1))
+            done
+            unset _bb_gcc _bb_i || true
+          fi
+          # EXIT trap: every early exit before/during helper restore still reaps.
+          _BB_REAP_DONE=0
+          _bb_reap_on_exit() {
+            [ "${_BB_REAP_DONE:-0}" = "1" ] && return 0
+            _BB_REAP_DONE=1
+            if declare -F backlog_burn_reap_once >/dev/null 2>&1; then
+              _BB_REAP_DONE=0
+              backlog_burn_reap_once || true
+            elif declare -F backlog_burn_inline_fallback_reap >/dev/null 2>&1; then
+              backlog_burn_inline_fallback_reap || true
+            else
+              echo "::warning::EXIT-trap fallback: helper functions missing — empty-spare-set reap" >&2
+              _bb_fb_snap="$(mktemp "${RUNNER_TEMP:-/tmp}/bb-exit-pid-snap.XXXXXX")" || return 0
+              if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                  && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap" \
+                  && [ "$(sha256sum "$_bb_fb_snap" | awk '{print $1}')" = "$PID_SNAP_SHA256" ]; then
+                :
+              else
+                : >"$_bb_fb_snap"
+              fi
+              PID_SNAP="$_bb_fb_snap"
+              _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+              shopt -s nullglob
+              for _bb_d in /proc/[0-9]*; do
+                _bb_pid="${_bb_d#/proc/}"
+                case "$_bb_pid" in *[!0-9]*) continue ;; esac
+                _bb_walk="$$"
+                _bb_spare=0
+                while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                  [ "$_bb_walk" = "$_bb_pid" ] && _bb_spare=1 && break
+                  _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+                done
+                [ "$_bb_spare" -eq 1 ] && continue
+                _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+                [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ] && continue
+                grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null && continue
+                kill -TERM "$_bb_pid" 2>/dev/null || true
+              done
+              shopt -u nullglob
+              sleep 1
+              rm -f -- "$_bb_fb_snap"
+            fi
+          }
+          trap '_bb_reap_on_exit' EXIT
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -1222,34 +1767,120 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
-          # Restore pid-snap helper from the pre-agent pin (worktree is
-          # agent-writable). Rematerialize from sealed step outputs; on
-          # integrity failure warn+continue with an empty spare set so reap
-          # still runs and the bundle path can still set pending.
+          # Helper restore failure also warns+continues: an EXIT trap at the
+          # top of this step always reaps (sealed-snapshot fallback, or empty
+          # spare set if the seal is unusable) so leftovers cannot survive
+          # into later secret-bearing steps.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
-            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
-            exit 1
+          _bb_helper_ok=0
+          _bb_pid_helper=""
+          if [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::warning::PID_SNAP_HELPER_SHA256 empty — sealed-snapshot fallback reap" >&2
+          elif [ -n "${PID_SNAP_HELPER_B64:-}" ]; then
+            _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+            if printf '%s' "$PID_SNAP_HELPER_B64" | base64 -d >"$_bb_pid_helper"; then
+              _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+              if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                # shellcheck disable=SC1090
+                source "$_bb_pid_helper"
+                _bb_helper_ok=1
+              else
+                echo "::warning::pid-snap helper seal digest mismatch — sealed-snapshot fallback reap" >&2
+              fi
+            else
+              echo "::warning::pid-snap helper b64 decode failed — sealed-snapshot fallback reap" >&2
+            fi
+            rm -f -- "${_bb_pid_helper}"
+          else
+            # Secondary: git show from START_SHA (GIT_* already unset above).
+            if [ -z "${START_SHA:-}" ]; then
+              echo "::warning::START_SHA empty and no helper seal — sealed-snapshot fallback reap" >&2
+            else
+              _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+              if /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+                  show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+                _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+                if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                  # shellcheck disable=SC1090
+                  source "$_bb_pid_helper"
+                  _bb_helper_ok=1
+                else
+                  echo "::warning::restored backlog-burn-pid-snap.sh sha256 mismatch — sealed-snapshot fallback reap" >&2
+                fi
+              else
+                echo "::warning::could not restore backlog-burn-pid-snap.sh from ${START_SHA} — sealed-snapshot fallback reap" >&2
+              fi
+              rm -f -- "${_bb_pid_helper}"
+            fi
           fi
-          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
-              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
-            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
-            exit 1
+          if [ "$_bb_helper_ok" -eq 1 ]; then
+            backlog_burn_unset_git_env || true
+            backlog_burn_install_reap_exit_trap || true
+            backlog_burn_rematerialize_pid_snap
+            backlog_burn_reap_once
+          else
+            # Helper unavailable: inline sealed-snapshot fallback (empty spare
+            # set if the seal is also unusable). Marks done so EXIT trap is a no-op.
+            echo "::warning::pid-snap helper unavailable — running sealed-snapshot inline fallback reap" >&2
+            _bb_fb_snap="$(mktemp "${RUNNER_TEMP}/bb-inline-pid-snap.XXXXXX")"
+            _bb_fb_ok=0
+            if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap"; then
+              _bb_fb_got="$(sha256sum "$_bb_fb_snap" | awk '{print $1}')"
+              if [ "$_bb_fb_got" = "$PID_SNAP_SHA256" ] && [ ! -L "$_bb_fb_snap" ] && [ -f "$_bb_fb_snap" ]; then
+                _bb_fb_ok=1
+              fi
+            fi
+            if [ "$_bb_fb_ok" -ne 1 ]; then
+              : >"$_bb_fb_snap"
+              echo "::warning::inline fallback: sealed PID snapshot unusable — empty spare set" >&2
+            fi
+            chmod 600 -- "$_bb_fb_snap" 2>/dev/null || true
+            PID_SNAP="$_bb_fb_snap"
+            _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            _bb_victims=()
+            shopt -s nullglob
+            for _bb_d in /proc/[0-9]*; do
+              _bb_pid="${_bb_d#/proc/}"
+              case "$_bb_pid" in
+                *[!0-9]*) continue ;;
+              esac
+              _bb_walk="$$"
+              while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                if [ "$_bb_walk" = "$_bb_pid" ]; then
+                  continue 2
+                fi
+                _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+              done
+              _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ]; then
+                continue
+              fi
+              if grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null; then
+                continue
+              fi
+              _bb_victims+=("$_bb_pid")
+            done
+            shopt -u nullglob
+            for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+              _bb_pgid="$(ps -o pgid= -p "$_bb_v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" != "$_bb_my_pgid" ] && [ "$_bb_pgid" != "1" ] && [ "$_bb_pgid" != "0" ]; then
+                kill -TERM -- "-${_bb_pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$_bb_v" 2>/dev/null || true
+            done
+            if [ "${#_bb_victims[@]}" -gt 0 ]; then
+              sleep 1
+              for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+                kill -KILL "$_bb_v" 2>/dev/null || true
+              done
+            fi
+            rm -f -- "$_bb_fb_snap"
+            _BB_REAP_DONE=1
           fi
-          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
-          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
-            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
-            exit 1
-          fi
-          # shellcheck disable=SC1090
-          source "$_bb_pid_helper"
-          rm -f -- "$_bb_pid_helper"
-          backlog_burn_rematerialize_pid_snap
-          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -1337,6 +1968,7 @@ jobs:
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
+          PID_SNAP_HELPER_B64: ${{ steps.start_ref.outputs.pid_snap_helper_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -1356,11 +1988,81 @@ jobs:
           LD_LIBRARY_PATH: ""
           LD_AUDIT: ""
           BASH_ENV: ""
+          GIT_SSH_COMMAND: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_INDEX_FILE: ""
+          GIT_CONFIG: ""
+          GIT_CONFIG_SYSTEM: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          # Pin/unset GIT_* before any restore (GITHUB_ENV plants cannot force
+          # git show / seal paths to fail via GIT_DIR etc.).
+          unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE \
+            GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+            GIT_SSH_COMMAND || true
+          if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
+            _bb_gcc="${GIT_CONFIG_COUNT}"
+            unset GIT_CONFIG_COUNT || true
+            case "${_bb_gcc}" in *[!0-9]*) _bb_gcc=0 ;; esac
+            _bb_i=0
+            while [ "${_bb_i}" -lt "${_bb_gcc}" ] && [ "${_bb_i}" -lt 128 ]; do
+              unset "GIT_CONFIG_KEY_${_bb_i}" "GIT_CONFIG_VALUE_${_bb_i}" || true
+              _bb_i=$((_bb_i + 1))
+            done
+            unset _bb_gcc _bb_i || true
+          fi
+          # EXIT trap: every early exit before/during helper restore still reaps.
+          _BB_REAP_DONE=0
+          _bb_reap_on_exit() {
+            [ "${_BB_REAP_DONE:-0}" = "1" ] && return 0
+            _BB_REAP_DONE=1
+            if declare -F backlog_burn_reap_once >/dev/null 2>&1; then
+              _BB_REAP_DONE=0
+              backlog_burn_reap_once || true
+            elif declare -F backlog_burn_inline_fallback_reap >/dev/null 2>&1; then
+              backlog_burn_inline_fallback_reap || true
+            else
+              echo "::warning::EXIT-trap fallback: helper functions missing — empty-spare-set reap" >&2
+              _bb_fb_snap="$(mktemp "${RUNNER_TEMP:-/tmp}/bb-exit-pid-snap.XXXXXX")" || return 0
+              if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                  && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap" \
+                  && [ "$(sha256sum "$_bb_fb_snap" | awk '{print $1}')" = "$PID_SNAP_SHA256" ]; then
+                :
+              else
+                : >"$_bb_fb_snap"
+              fi
+              PID_SNAP="$_bb_fb_snap"
+              _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+              shopt -s nullglob
+              for _bb_d in /proc/[0-9]*; do
+                _bb_pid="${_bb_d#/proc/}"
+                case "$_bb_pid" in *[!0-9]*) continue ;; esac
+                _bb_walk="$$"
+                _bb_spare=0
+                while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                  [ "$_bb_walk" = "$_bb_pid" ] && _bb_spare=1 && break
+                  _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+                done
+                [ "$_bb_spare" -eq 1 ] && continue
+                _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+                [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ] && continue
+                grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null && continue
+                kill -TERM "$_bb_pid" 2>/dev/null || true
+              done
+              shopt -u nullglob
+              sleep 1
+              rm -f -- "$_bb_fb_snap"
+            fi
+          }
+          trap '_bb_reap_on_exit' EXIT
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -1376,34 +2078,120 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
-          # Restore pid-snap helper from the pre-agent pin (worktree is
-          # agent-writable). Rematerialize from sealed step outputs; on
-          # integrity failure warn+continue with an empty spare set so reap
-          # still runs and the bundle path can still set pending.
+          # Helper restore failure also warns+continues: an EXIT trap at the
+          # top of this step always reaps (sealed-snapshot fallback, or empty
+          # spare set if the seal is unusable) so leftovers cannot survive
+          # into later secret-bearing steps.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
-            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
-            exit 1
+          _bb_helper_ok=0
+          _bb_pid_helper=""
+          if [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::warning::PID_SNAP_HELPER_SHA256 empty — sealed-snapshot fallback reap" >&2
+          elif [ -n "${PID_SNAP_HELPER_B64:-}" ]; then
+            _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+            if printf '%s' "$PID_SNAP_HELPER_B64" | base64 -d >"$_bb_pid_helper"; then
+              _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+              if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                # shellcheck disable=SC1090
+                source "$_bb_pid_helper"
+                _bb_helper_ok=1
+              else
+                echo "::warning::pid-snap helper seal digest mismatch — sealed-snapshot fallback reap" >&2
+              fi
+            else
+              echo "::warning::pid-snap helper b64 decode failed — sealed-snapshot fallback reap" >&2
+            fi
+            rm -f -- "${_bb_pid_helper}"
+          else
+            # Secondary: git show from START_SHA (GIT_* already unset above).
+            if [ -z "${START_SHA:-}" ]; then
+              echo "::warning::START_SHA empty and no helper seal — sealed-snapshot fallback reap" >&2
+            else
+              _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+              if /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+                  show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+                _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+                if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                  # shellcheck disable=SC1090
+                  source "$_bb_pid_helper"
+                  _bb_helper_ok=1
+                else
+                  echo "::warning::restored backlog-burn-pid-snap.sh sha256 mismatch — sealed-snapshot fallback reap" >&2
+                fi
+              else
+                echo "::warning::could not restore backlog-burn-pid-snap.sh from ${START_SHA} — sealed-snapshot fallback reap" >&2
+              fi
+              rm -f -- "${_bb_pid_helper}"
+            fi
           fi
-          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
-              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
-            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
-            exit 1
+          if [ "$_bb_helper_ok" -eq 1 ]; then
+            backlog_burn_unset_git_env || true
+            backlog_burn_install_reap_exit_trap || true
+            backlog_burn_rematerialize_pid_snap
+            backlog_burn_reap_once
+          else
+            # Helper unavailable: inline sealed-snapshot fallback (empty spare
+            # set if the seal is also unusable). Marks done so EXIT trap is a no-op.
+            echo "::warning::pid-snap helper unavailable — running sealed-snapshot inline fallback reap" >&2
+            _bb_fb_snap="$(mktemp "${RUNNER_TEMP}/bb-inline-pid-snap.XXXXXX")"
+            _bb_fb_ok=0
+            if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap"; then
+              _bb_fb_got="$(sha256sum "$_bb_fb_snap" | awk '{print $1}')"
+              if [ "$_bb_fb_got" = "$PID_SNAP_SHA256" ] && [ ! -L "$_bb_fb_snap" ] && [ -f "$_bb_fb_snap" ]; then
+                _bb_fb_ok=1
+              fi
+            fi
+            if [ "$_bb_fb_ok" -ne 1 ]; then
+              : >"$_bb_fb_snap"
+              echo "::warning::inline fallback: sealed PID snapshot unusable — empty spare set" >&2
+            fi
+            chmod 600 -- "$_bb_fb_snap" 2>/dev/null || true
+            PID_SNAP="$_bb_fb_snap"
+            _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            _bb_victims=()
+            shopt -s nullglob
+            for _bb_d in /proc/[0-9]*; do
+              _bb_pid="${_bb_d#/proc/}"
+              case "$_bb_pid" in
+                *[!0-9]*) continue ;;
+              esac
+              _bb_walk="$$"
+              while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                if [ "$_bb_walk" = "$_bb_pid" ]; then
+                  continue 2
+                fi
+                _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+              done
+              _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ]; then
+                continue
+              fi
+              if grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null; then
+                continue
+              fi
+              _bb_victims+=("$_bb_pid")
+            done
+            shopt -u nullglob
+            for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+              _bb_pgid="$(ps -o pgid= -p "$_bb_v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" != "$_bb_my_pgid" ] && [ "$_bb_pgid" != "1" ] && [ "$_bb_pgid" != "0" ]; then
+                kill -TERM -- "-${_bb_pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$_bb_v" 2>/dev/null || true
+            done
+            if [ "${#_bb_victims[@]}" -gt 0 ]; then
+              sleep 1
+              for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+                kill -KILL "$_bb_v" 2>/dev/null || true
+              done
+            fi
+            rm -f -- "$_bb_fb_snap"
+            _BB_REAP_DONE=1
           fi
-          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
-          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
-            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
-            exit 1
-          fi
-          # shellcheck disable=SC1090
-          source "$_bb_pid_helper"
-          rm -f -- "$_bb_pid_helper"
-          backlog_burn_rematerialize_pid_snap
-          reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
           # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
@@ -1497,6 +2285,7 @@ jobs:
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
+          PID_SNAP_HELPER_B64: ${{ steps.start_ref.outputs.pid_snap_helper_b64 }}
           # The restored script lives in RUNNER_TEMP. It must operate on the
           # checkout, never on dirname($0)/.. (that is the runner work dir).
           DELIVER_WORKTREE: ${{ github.workspace }}
@@ -1535,11 +2324,74 @@ jobs:
           GIT_WORK_TREE: ""
           GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
           GIT_OBJECT_DIRECTORY: ""
+          GIT_INDEX_FILE: ""
+          GIT_CONFIG: ""
+          GIT_CONFIG_SYSTEM: ""
           PATH: /usr/bin:/bin
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+          # Pin/unset GIT_* before any restore (GITHUB_ENV plants cannot force
+          # git show / seal paths to fail via GIT_DIR etc.).
+          unset GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE \
+            GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_PARAMETERS \
+            GIT_SSH_COMMAND || true
+          if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
+            _bb_gcc="${GIT_CONFIG_COUNT}"
+            unset GIT_CONFIG_COUNT || true
+            case "${_bb_gcc}" in *[!0-9]*) _bb_gcc=0 ;; esac
+            _bb_i=0
+            while [ "${_bb_i}" -lt "${_bb_gcc}" ] && [ "${_bb_i}" -lt 128 ]; do
+              unset "GIT_CONFIG_KEY_${_bb_i}" "GIT_CONFIG_VALUE_${_bb_i}" || true
+              _bb_i=$((_bb_i + 1))
+            done
+            unset _bb_gcc _bb_i || true
+          fi
+          # EXIT trap: every early exit before/during helper restore still reaps.
+          _BB_REAP_DONE=0
+          _bb_reap_on_exit() {
+            [ "${_BB_REAP_DONE:-0}" = "1" ] && return 0
+            _BB_REAP_DONE=1
+            if declare -F backlog_burn_reap_once >/dev/null 2>&1; then
+              _BB_REAP_DONE=0
+              backlog_burn_reap_once || true
+            elif declare -F backlog_burn_inline_fallback_reap >/dev/null 2>&1; then
+              backlog_burn_inline_fallback_reap || true
+            else
+              echo "::warning::EXIT-trap fallback: helper functions missing — empty-spare-set reap" >&2
+              _bb_fb_snap="$(mktemp "${RUNNER_TEMP:-/tmp}/bb-exit-pid-snap.XXXXXX")" || return 0
+              if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                  && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap" \
+                  && [ "$(sha256sum "$_bb_fb_snap" | awk '{print $1}')" = "$PID_SNAP_SHA256" ]; then
+                :
+              else
+                : >"$_bb_fb_snap"
+              fi
+              PID_SNAP="$_bb_fb_snap"
+              _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+              shopt -s nullglob
+              for _bb_d in /proc/[0-9]*; do
+                _bb_pid="${_bb_d#/proc/}"
+                case "$_bb_pid" in *[!0-9]*) continue ;; esac
+                _bb_walk="$$"
+                _bb_spare=0
+                while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                  [ "$_bb_walk" = "$_bb_pid" ] && _bb_spare=1 && break
+                  _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+                done
+                [ "$_bb_spare" -eq 1 ] && continue
+                _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+                [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ] && continue
+                grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null && continue
+                kill -TERM "$_bb_pid" 2>/dev/null || true
+              done
+              shopt -u nullglob
+              sleep 1
+              rm -f -- "$_bb_fb_snap"
+            fi
+          }
+          trap '_bb_reap_on_exit' EXIT
           # Reap every process that appeared after the pre-agent PID snapshot.
           # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
           # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
@@ -1550,34 +2402,120 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
-          # Restore pid-snap helper from the pre-agent pin (worktree is
-          # agent-writable). Rematerialize from sealed step outputs; on
-          # integrity failure warn+continue with an empty spare set so reap
-          # still runs and the bundle path can still set pending.
+          # Helper restore failure also warns+continues: an EXIT trap at the
+          # top of this step always reaps (sealed-snapshot fallback, or empty
+          # spare set if the seal is unusable) so leftovers cannot survive
+          # into later secret-bearing steps.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
-            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
-            exit 1
+          _bb_helper_ok=0
+          _bb_pid_helper=""
+          if [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::warning::PID_SNAP_HELPER_SHA256 empty — sealed-snapshot fallback reap" >&2
+          elif [ -n "${PID_SNAP_HELPER_B64:-}" ]; then
+            _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+            if printf '%s' "$PID_SNAP_HELPER_B64" | base64 -d >"$_bb_pid_helper"; then
+              _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+              if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                # shellcheck disable=SC1090
+                source "$_bb_pid_helper"
+                _bb_helper_ok=1
+              else
+                echo "::warning::pid-snap helper seal digest mismatch — sealed-snapshot fallback reap" >&2
+              fi
+            else
+              echo "::warning::pid-snap helper b64 decode failed — sealed-snapshot fallback reap" >&2
+            fi
+            rm -f -- "${_bb_pid_helper}"
+          else
+            # Secondary: git show from START_SHA (GIT_* already unset above).
+            if [ -z "${START_SHA:-}" ]; then
+              echo "::warning::START_SHA empty and no helper seal — sealed-snapshot fallback reap" >&2
+            else
+              _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+              if /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+                  show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+                _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+                if [ "$_bb_got" = "$PID_SNAP_HELPER_SHA256" ] && [ ! -L "$_bb_pid_helper" ] && [ -f "$_bb_pid_helper" ]; then
+                  # shellcheck disable=SC1090
+                  source "$_bb_pid_helper"
+                  _bb_helper_ok=1
+                else
+                  echo "::warning::restored backlog-burn-pid-snap.sh sha256 mismatch — sealed-snapshot fallback reap" >&2
+                fi
+              else
+                echo "::warning::could not restore backlog-burn-pid-snap.sh from ${START_SHA} — sealed-snapshot fallback reap" >&2
+              fi
+              rm -f -- "${_bb_pid_helper}"
+            fi
           fi
-          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
-          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
-              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
-            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
-            exit 1
+          if [ "$_bb_helper_ok" -eq 1 ]; then
+            backlog_burn_unset_git_env || true
+            backlog_burn_install_reap_exit_trap || true
+            backlog_burn_rematerialize_pid_snap
+            backlog_burn_reap_once
+          else
+            # Helper unavailable: inline sealed-snapshot fallback (empty spare
+            # set if the seal is also unusable). Marks done so EXIT trap is a no-op.
+            echo "::warning::pid-snap helper unavailable — running sealed-snapshot inline fallback reap" >&2
+            _bb_fb_snap="$(mktemp "${RUNNER_TEMP}/bb-inline-pid-snap.XXXXXX")"
+            _bb_fb_ok=0
+            if [ -n "${PID_SNAP_SHA256:-}" ] && [ -n "${PID_SNAP_B64:-}" ] \
+                && printf '%s' "$PID_SNAP_B64" | base64 -d >"$_bb_fb_snap"; then
+              _bb_fb_got="$(sha256sum "$_bb_fb_snap" | awk '{print $1}')"
+              if [ "$_bb_fb_got" = "$PID_SNAP_SHA256" ] && [ ! -L "$_bb_fb_snap" ] && [ -f "$_bb_fb_snap" ]; then
+                _bb_fb_ok=1
+              fi
+            fi
+            if [ "$_bb_fb_ok" -ne 1 ]; then
+              : >"$_bb_fb_snap"
+              echo "::warning::inline fallback: sealed PID snapshot unusable — empty spare set" >&2
+            fi
+            chmod 600 -- "$_bb_fb_snap" 2>/dev/null || true
+            PID_SNAP="$_bb_fb_snap"
+            _bb_my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            _bb_victims=()
+            shopt -s nullglob
+            for _bb_d in /proc/[0-9]*; do
+              _bb_pid="${_bb_d#/proc/}"
+              case "$_bb_pid" in
+                *[!0-9]*) continue ;;
+              esac
+              _bb_walk="$$"
+              while [ -n "$_bb_walk" ] && [ "$_bb_walk" != "0" ]; do
+                if [ "$_bb_walk" = "$_bb_pid" ]; then
+                  continue 2
+                fi
+                _bb_walk="$(awk '/^PPid:/ { print $2; exit }' "/proc/${_bb_walk}/status" 2>/dev/null || echo 0)"
+              done
+              _bb_pgid="$(ps -o pgid= -p "$_bb_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" = "$_bb_my_pgid" ]; then
+                continue
+              fi
+              if grep -qx -- "$_bb_pid" "$_bb_fb_snap" 2>/dev/null; then
+                continue
+              fi
+              _bb_victims+=("$_bb_pid")
+            done
+            shopt -u nullglob
+            for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+              _bb_pgid="$(ps -o pgid= -p "$_bb_v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$_bb_pgid" ] && [ "$_bb_pgid" != "$_bb_my_pgid" ] && [ "$_bb_pgid" != "1" ] && [ "$_bb_pgid" != "0" ]; then
+                kill -TERM -- "-${_bb_pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$_bb_v" 2>/dev/null || true
+            done
+            if [ "${#_bb_victims[@]}" -gt 0 ]; then
+              sleep 1
+              for _bb_v in "${_bb_victims[@]+"${_bb_victims[@]}"}"; do
+                kill -KILL "$_bb_v" 2>/dev/null || true
+              done
+            fi
+            rm -f -- "$_bb_fb_snap"
+            _BB_REAP_DONE=1
           fi
-          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
-          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
-            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
-            exit 1
-          fi
-          # shellcheck disable=SC1090
-          source "$_bb_pid_helper"
-          rm -f -- "$_bb_pid_helper"
-          backlog_burn_rematerialize_pid_snap
-          reap_agent_orphans
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1

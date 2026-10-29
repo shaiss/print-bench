@@ -4584,9 +4584,39 @@ EOF
     echo "selftest: burn start_ref does not pin backlog-burn-pid-snap.sh" >&2
     exit 1
   }
+  grep -q 'pid_snap_helper_b64=' "$burn" || {
+    echo "selftest: burn start_ref does not seal backlog-burn-pid-snap.sh body" >&2
+    exit 1
+  }
+  grep -q 'PID_SNAP_HELPER_B64:' "$burn" || {
+    echo "selftest: burn capture/bundle do not receive sealed PID_SNAP_HELPER_B64" >&2
+    exit 1
+  }
   burn_reap_n="$(grep -c 'backlog_burn_rematerialize_pid_snap' "$burn" || true)"
   [ "$burn_reap_n" -eq 6 ] || {
     echo "selftest: expected rematerialize+reap helper in 5 capture + bundle steps, found ${burn_reap_n}" >&2
+    exit 1
+  }
+  # EXIT trap on every capture + bundle so helper-restore failure still reaps.
+  burn_trap_n="$(grep -c "trap '_bb_reap_on_exit' EXIT" "$burn" || true)"
+  [ "$burn_trap_n" -eq 6 ] || {
+    echo "selftest: expected EXIT-trap reap in 5 capture + bundle steps, found ${burn_trap_n}" >&2
+    exit 1
+  }
+  # Helper-restore failure must warn+continue, never exit 1 before reap.
+  if grep -E '::error::could not restore backlog-burn-pid-snap\.sh' "$burn" >/dev/null; then
+    echo "selftest: burn still hard-errors on pid-snap helper restore failure" >&2
+    exit 1
+  fi
+  # Capture pins the same GIT_* list Bundle blanks (plants cannot break restore).
+  burn_capture_git_dir="$(awk '
+    /name: Capture denied tools/ { c=1; next }
+    c && /GIT_DIR: ""/ { n++; c=0 }
+    c && /^      - name:/ { c=0 }
+    END { print n+0 }
+  ' "$burn")"
+  [ "$burn_capture_git_dir" -eq 5 ] || {
+    echo "selftest: expected GIT_DIR blanked in all 5 Capture steps, found ${burn_capture_git_dir}" >&2
     exit 1
   }
   # Predicate lives in the helper, not inlined in the workflow.
