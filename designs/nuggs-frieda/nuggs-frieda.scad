@@ -423,8 +423,8 @@ module marks() {
     if (mark_h > 0) {
         wrap_text(mark_rev(), ro, (z_top + z_cone0) / 2);
         zt = (z_cone1 + straight_len - z_top) / 2;
-        wrap_text(mark_rule()[0], ro, zt + mark_h * 0.8);
-        wrap_text(mark_rule()[1], ro, zt - mark_h * 0.8);
+        wrap_text(mark_rule()[0], ro, zt + mark_h * 0.5);
+        wrap_text(mark_rule()[1], ro, zt - mark_h * 0.5);
     }
 }
 
@@ -475,9 +475,10 @@ module wordpair() {
                 translate([0, 0, z0]) tube(z1 - z0);
                 cage();
             }
-            rotate([0, 0, amid - span / 2])
-                rotate_extrude(angle = span)
-                    square([r_so + 4, z1 - z0]);
+            translate([0, 0, z0])
+                rotate([0, 0, amid - span / 2])
+                    rotate_extrude(angle = span)
+                        square([r_so + 4, z1 - z0]);
         }
 }
 
