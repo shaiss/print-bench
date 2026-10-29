@@ -502,12 +502,6 @@ surfaces studies awaiting a read live in
     reasons, and a ≤500-char final assistant message scrubbed via
     `provenance.gitstore.scrub` (exact secrets + credential patterns);
     `show_full_output` stays false (Refs #885 #886 #889)
-  - `backlog-burn-pid-snap.sh` — rematerialize the sealed pre-agent PID
-    snapshot and reap post-agent orphans for backlog-burn capture/bundle
-    steps (restored from the START_SHA pin; integrity failure warns and
-    continues with an empty spare set so reap and `pending` still run);
-    `--selftest` exercises missing/symlink/digest/tampered snaps plus a
-    happy-path orphan reap
   - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
     context (Gate contract / Acceptance criteria / Design name / Chosen
     approach) from an allowlisted author only (github-actions[bot] or

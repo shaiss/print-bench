@@ -1,0 +1,185 @@
+name: Backlog-burn cgroup reaper fixture
+
+# Runtime proof that sudo systemd-run --scope + systemctl kill work on
+# ubuntu-latest the same way backlog-burn.yml uses them. Not wired into
+# check.sh (no process signaling / sudo in the local gate).
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/backlog-burn.yml'
+      - '.github/workflows/backlog-burn-cgroup-reap.yml'
+      - '.github/actions/bb-scoped-claude/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cgroup-reap-fixture:
+    name: systemd scope orphan reap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Prove passwordless sudo + systemd
+        run: |
+          set -euo pipefail
+          ps -p 1 -o comm= | grep -qx systemd
+          sudo -n true
+          command -v systemd-run
+          command -v systemctl
+
+      - name: Fixture — scope orphans, control outside, reap, no-op
+        env:
+          BB_FIXTURE_SECRET: "fixture-secret-value-must-not-appear-in-unit"
+        run: |
+          set -euo pipefail
+          UNIT="bb-fixture-${{ github.run_id }}-${{ github.run_attempt }}"
+          CTRL_PID_FILE="$(mktemp)"
+          ORPHAN_PID_FILE="$(mktemp)"
+          DAEMON_PID_FILE="$(mktemp)"
+          INSIDE_ENV_FILE="$(mktemp)"
+
+          # Control process OUTSIDE the unit — must survive reap.
+          sleep 600 &
+          echo $! >"$CTRL_PID_FILE"
+          CTRL_PID="$(cat "$CTRL_PID_FILE")"
+
+          # Start a scope that spawns (a) double-fork orphan and (b) setsid
+          # daemon with cwd=/tmp, then sleeps so the unit stays alive for reap.
+          sudo --preserve-env=BB_FIXTURE_SECRET,PATH \
+            systemd-run --scope \
+            --uid="$(id -u)" \
+            --gid="$(id -g)" \
+            --unit="${UNIT}" \
+            --collect \
+            --quiet \
+            -- bash -c "
+              set -euo pipefail
+              printf '%s' \"\${BB_FIXTURE_SECRET:-}\" >'${INSIDE_ENV_FILE}'
+              # (a) double-forked orphan reparented toward init
+              ( setsid sh -c 'sleep 600 &' & )
+              sleep 0.5
+              # (b) setsid daemon whose cwd is /tmp
+              (
+                cd /tmp
+                setsid sleep 600 </dev/null >/dev/null 2>&1 &
+                echo \$! >'${DAEMON_PID_FILE}'
+              )
+              sleep 0.5
+              # Record PIDs that landed in this scope's cgroup
+              cg=\$(systemctl show -p ControlGroup --value '${UNIT}.scope' 2>/dev/null || systemctl show -p ControlGroup --value '${UNIT}' 2>/dev/null || true)
+              if [ -n \"\$cg\" ] && [ -f \"/sys/fs/cgroup\${cg}/cgroup.procs\" ]; then
+                tr ' ' '\\n' <\"/sys/fs/cgroup\${cg}/cgroup.procs\" | grep -v '^\$' >'${ORPHAN_PID_FILE}' || true
+              else
+                # fallback: list children of sleep holders excluding this bash
+                ps -eo pid=,cmd= | awk '/sleep 600/ {print \$1}' >'${ORPHAN_PID_FILE}'
+              fi
+              # Keep the scope's main process alive until the reaper stops us
+              sleep 600
+            " &
+          SCOPE_WRAPPER_PID=$!
+          # Give the scope time to spawn children
+          sleep 2
+
+          # Env inheritance: secret visible inside scope process environ path
+          if ! grep -q 'fixture-secret-value-must-not-appear-in-unit' "$INSIDE_ENV_FILE"; then
+            echo "::error::test env var not visible inside the scope" >&2
+            exit 1
+          fi
+          # Must NOT appear in unit properties / systemctl show
+          SHOW="$(sudo systemctl show "${UNIT}.scope" 2>/dev/null || sudo systemctl show "${UNIT}" 2>/dev/null || true)"
+          if printf '%s' "$SHOW" | grep -q 'fixture-secret-value-must-not-appear-in-unit'; then
+            echo "::error::secret leaked into systemctl show output" >&2
+            exit 1
+          fi
+
+          # Exact same reap commands as backlog-burn.yml (one unit only).
+          if ! sudo -n true 2>/dev/null; then
+            echo "::warning::sudo -n failed — skipping cgroup reaper for ${UNIT}"
+            exit 1
+          fi
+          sudo systemctl kill --signal=SIGTERM "${UNIT}.scope" 2>/dev/null \
+            || sudo systemctl kill --signal=SIGTERM "${UNIT}" 2>/dev/null \
+            || true
+          sleep 5
+          sudo systemctl kill --signal=SIGKILL "${UNIT}.scope" 2>/dev/null \
+            || sudo systemctl kill --signal=SIGKILL "${UNIT}" 2>/dev/null \
+            || true
+          sudo systemctl stop "${UNIT}.scope" 2>/dev/null \
+            || sudo systemctl stop "${UNIT}" 2>/dev/null \
+            || true
+
+          sleep 1
+          # In-unit sleepers must be gone (control outside must remain).
+          if kill -0 "$CTRL_PID" 2>/dev/null; then
+            echo "control outside scope still alive (ok)"
+          else
+            echo "::error::control process outside the unit was killed" >&2
+            exit 1
+          fi
+          # Any remaining sleep 600 other than CTRL must be gone
+          survivors="$(ps -eo pid=,cmd= | awk -v c="$CTRL_PID" '/sleep 600/ && $1 != c {print $1}')"
+          if [ -n "$survivors" ]; then
+            echo "::error::in-unit sleepers still alive: ${survivors}" >&2
+            exit 1
+          fi
+          kill -KILL "$CTRL_PID" 2>/dev/null || true
+          wait "$CTRL_PID" 2>/dev/null || true
+
+          # Reap on an already-gone unit succeeds as a no-op
+          sudo systemctl kill --signal=SIGTERM "${UNIT}.scope" 2>/dev/null \
+            || sudo systemctl kill --signal=SIGTERM "${UNIT}" 2>/dev/null \
+            || true
+          sleep 1
+          sudo systemctl kill --signal=SIGKILL "${UNIT}.scope" 2>/dev/null \
+            || sudo systemctl kill --signal=SIGKILL "${UNIT}" 2>/dev/null \
+            || true
+          sudo systemctl stop "${UNIT}.scope" 2>/dev/null \
+            || sudo systemctl stop "${UNIT}" 2>/dev/null \
+            || true
+          echo "already-gone unit reap: ok (no-op)"
+
+          rm -f "$CTRL_PID_FILE" "$ORPHAN_PID_FILE" "$DAEMON_PID_FILE" "$INSIDE_ENV_FILE"
+          wait "$SCOPE_WRAPPER_PID" 2>/dev/null || true
+
+      - name: Structural — deliverer does not depend on reap outcome
+        run: |
+          set -euo pipefail
+          wf=".github/workflows/backlog-burn.yml"
+          # Reap steps are continue-on-error and never gate Bundle/pending.
+          grep -n 'Reap agent cgroup' "$wf" | head -5
+          # Every reap step has continue-on-error: true
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text = Path(".github/workflows/backlog-burn.yml").read_text()
+          # Each reap block must have continue-on-error: true and no set -e
+          for m in re.finditer(r"- name: Reap agent cgroup \(link (\d)\)\n(.*?)(?=\n      - name:|\Z)", text, re.S):
+              body = m.group(2)
+              assert "continue-on-error: true" in body, m.group(1)
+              assert "set -e" not in body, f"link {m.group(1)} uses set -e"
+              assert "systemctl kill" in body
+              assert "pkill" not in body
+          # Bundle must not reference reap step outcomes
+          bundle = text.split("- name: Bundle the ship commits", 1)[1].split("\n      - name:", 1)[0]
+          assert "reap" not in bundle.lower() or "cgroup" in bundle.lower()
+          assert "steps.reap" not in bundle
+          assert "pending=" in bundle
+          # No pid-snap machinery left
+          assert "pid_snap" not in text
+          assert "backlog-burn-pid-snap" not in text
+          assert "reap_agent_orphans" not in text
+          print("structural checks ok")
+          PY
+
+      - name: actionlint (scoped paths)
+        run: |
+          set -euo pipefail
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color \
+            .github/workflows/backlog-burn.yml \
+            .github/workflows/backlog-burn-cgroup-reap.yml

@@ -915,14 +915,6 @@ if ! ./scripts/design-run-deliver.sh --selftest; then
   fail=1
 fi
 
-# backlog-burn-pid-snap.sh is the rematerialize+reap helper capture/bundle
-# restore from the pre-agent pin. Its --selftest is behavioral (missing/
-# symlink/digest/tampered snap + happy-path orphan reap), not YAML greps.
-echo "-- backlog-burn-pid-snap selftest: scripts/backlog-burn-pid-snap.sh --selftest"
-if ! ./scripts/backlog-burn-pid-snap.sh --selftest; then
-  fail=1
-fi
-
 # oracle-ship-contract.sh picks the frozen §2 contract for Oracle context —
 # never the settle stub lock (Bugbot MED / Cipher, #864).
 echo "-- oracle-ship-contract selftest: scripts/oracle-ship-contract.sh --selftest"

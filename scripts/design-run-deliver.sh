@@ -4272,12 +4272,14 @@ EOF
     echo "selftest: burn bundle step still executes the worktree script" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep 'reap_agent_orphans' >/dev/null || {
-    echo "selftest: burn bundle step does not reap detached agent processes" >&2
+  # Orphans are reaped per-link via systemd cgroup scopes — bundle must not
+  # call the deleted PID-snapshot reaper, and must still re-check the digest.
+  if printf '%s\n' "$burn_run" | grep 'reap_agent_orphans' >/dev/null; then
+    echo "selftest: burn bundle step still calls reap_agent_orphans (pid-snap removed)" >&2
     exit 1
-  }
+  fi
   printf '%s\n' "$burn_run" | grep 'now" != "$captured"' >/dev/null || {
-    echo "selftest: burn bundle step does not re-check the bundle after the reap" >&2
+    echo "selftest: burn bundle step does not re-check the bundle digest" >&2
     exit 1
   }
   grep -q 'deliver_sha256=' "$burn" || {
@@ -4573,41 +4575,52 @@ EOF
     echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
     exit 1
   }
-  # Five Capture denied-tools steps + the Bundle step each restore+source the
-  # shared pid-snap helper (snapshot-based reaper; no comm/name exemptions).
-  burn_pid_helper="${repo_root}/scripts/backlog-burn-pid-snap.sh"
-  [ -f "$burn_pid_helper" ] || {
-    echo "selftest: scripts/backlog-burn-pid-snap.sh is missing" >&2
-    exit 1
-  }
-  grep -q 'pid_snap_helper_sha256=' "$burn" || {
-    echo "selftest: burn start_ref does not pin backlog-burn-pid-snap.sh" >&2
-    exit 1
-  }
-  grep -q 'pid_snap_helper_b64=' "$burn" || {
-    echo "selftest: burn start_ref does not seal backlog-burn-pid-snap.sh body" >&2
-    exit 1
-  }
-  grep -q 'PID_SNAP_HELPER_B64:' "$burn" || {
-    echo "selftest: burn capture/bundle do not receive sealed PID_SNAP_HELPER_B64" >&2
-    exit 1
-  }
-  burn_reap_n="$(grep -c 'backlog_burn_rematerialize_pid_snap' "$burn" || true)"
-  [ "$burn_reap_n" -eq 6 ] || {
-    echo "selftest: expected rematerialize+reap helper in 5 capture + bundle steps, found ${burn_reap_n}" >&2
-    exit 1
-  }
-  # EXIT trap on every capture + bundle so helper-restore failure still reaps.
-  burn_trap_n="$(grep -c "trap '_bb_reap_on_exit' EXIT" "$burn" || true)"
-  [ "$burn_trap_n" -eq 6 ] || {
-    echo "selftest: expected EXIT-trap reap in 5 capture + bundle steps, found ${burn_trap_n}" >&2
-    exit 1
-  }
-  # Helper-restore failure must warn+continue, never exit 1 before reap.
-  if grep -E '::error::could not restore backlog-burn-pid-snap\.sh' "$burn" >/dev/null; then
-    echo "selftest: burn still hard-errors on pid-snap helper restore failure" >&2
+  # Cgroup-scope reaper: each ship link runs inside bb-agent-<run_id>-<attempt>-<link>
+  # via ./.github/actions/bb-scoped-claude; a continue-on-error reap step kills
+  # that one unit only. PID-snapshot machinery must be gone.
+  if [ -f "${repo_root}/scripts/backlog-burn-pid-snap.sh" ]; then
+    echo "selftest: scripts/backlog-burn-pid-snap.sh still present (replaced by cgroup scope)" >&2
     exit 1
   fi
+  if grep -E 'pid_snap|PID_SNAP|backlog-burn-pid-snap|backlog_burn_rematerialize_pid_snap|_bb_reap_on_exit|reap_agent_orphans' "$burn" >/dev/null; then
+    echo "selftest: burn still references pid-snap / EXIT-trap reaper machinery" >&2
+    exit 1
+  fi
+  grep -q 'uses: ./.github/actions/bb-scoped-claude' "$burn" || {
+    echo "selftest: burn ship steps do not use bb-scoped-claude" >&2
+    exit 1
+  }
+  burn_scoped_n="$(grep -c 'uses: \./\.github/actions/bb-scoped-claude' "$burn" || true)"
+  [ "$burn_scoped_n" -eq 5 ] || {
+    echo "selftest: expected 5 scoped ship links, found ${burn_scoped_n}" >&2
+    exit 1
+  }
+  burn_reap_n="$(grep -c 'Reap agent cgroup (link' "$burn" || true)"
+  [ "$burn_reap_n" -eq 5 ] || {
+    echo "selftest: expected 5 cgroup reap steps, found ${burn_reap_n}" >&2
+    exit 1
+  }
+  grep -q 'bb-agent-${{ github.run_id }}-${{ github.run_attempt }}-' "$burn" || {
+    echo "selftest: burn reap units are not derived from run_id/run_attempt/link" >&2
+    exit 1
+  }
+  bb_scoped="${repo_root}/.github/actions/bb-scoped-claude/action.yml"
+  [ -f "$bb_scoped" ] || {
+    echo "selftest: .github/actions/bb-scoped-claude/action.yml is missing" >&2
+    exit 1
+  }
+  if grep -E 'systemd-run' "$bb_scoped" | grep -E -- '--setenv|^[^-]*-E([[:space:]]|$)' >/dev/null; then
+    echo "selftest: systemd-run still passes env via --setenv/-E" >&2
+    exit 1
+  fi
+  grep -q 'sudo --preserve-env' "$bb_scoped" || {
+    echo "selftest: bb-scoped-claude does not use sudo --preserve-env" >&2
+    exit 1
+  }
+  grep -q -- '--uid=' "$bb_scoped" || {
+    echo "selftest: bb-scoped-claude does not drop to runner uid" >&2
+    exit 1
+  }
   # Capture pins the same GIT_* list Bundle blanks (plants cannot break restore).
   burn_capture_git_dir="$(awk '
     /name: Capture denied tools/ { c=1; next }
@@ -4619,59 +4632,6 @@ EOF
     echo "selftest: expected GIT_DIR blanked in all 5 Capture steps, found ${burn_capture_git_dir}" >&2
     exit 1
   }
-  # Predicate lives in the helper, not inlined in the workflow.
-  if grep -q 'reap_should_kill()' "$burn"; then
-    echo "selftest: burn still inlines reap_should_kill (should source pid-snap helper)" >&2
-    exit 1
-  fi
-  grep -q 'pid_snap_sha256=' "$burn" || {
-    echo "selftest: burn start_ref does not snapshot pre-agent PIDs" >&2
-    exit 1
-  }
-  grep -q 'pid_snap_b64=' "$burn" || {
-    echo "selftest: burn start_ref does not seal PID snapshot into step outputs" >&2
-    exit 1
-  }
-  grep -q 'PID_SNAP_B64:' "$burn" || {
-    echo "selftest: burn capture/bundle do not receive sealed PID_SNAP_B64" >&2
-    exit 1
-  }
-  # Must rematerialize from sealed outputs — never treat the predictable
-  # agent-writable $RUNNER_TEMP/backlog-burn-pre-agent-pids as authority
-  # (Bugbot HIGH: snapshot file gates delivery and reap).
-  if grep -E 'PID_SNAP="\$\{RUNNER_TEMP\}/backlog-burn-pre-agent-pids"' "$burn" >/dev/null; then
-    echo "selftest: burn still trusts agent-writable pre-agent-pids path" >&2
-    exit 1
-  fi
-  grep -q 'conservative reap' "$burn" || {
-    echo "selftest: burn does not fail-safe to conservative reap on snap integrity failure" >&2
-    exit 1
-  }
-  # Integrity failure must warn+continue inside rematerialize, never exit 1 before reap.
-  # Scope to the rematerialize function — the --selftest body also mentions those
-  # warning strings next to unrelated `exit 1` lines.
-  if awk '
-    /^backlog_burn_rematerialize_pid_snap\(\)/ { in_fn=1 }
-    in_fn && /^}/ { in_fn=0 }
-    in_fn && /PID snapshot outputs empty|PID snapshot b64 decode failed|PID snapshot digest mismatch/ {
-      in_fail=1; next
-    }
-    in_fn && in_fail && /exit 1/ { found=1; exit }
-    in_fn && in_fail && /snap_ok=1/ { in_fail=0 }
-    END { exit !found }
-  ' "$burn_pid_helper"; then
-    echo "selftest: snap integrity failure still exits 1 before reap in pid-snap helper" >&2
-    exit 1
-  fi
-  # No name-based exemptions remain (comm matching is agent-spoofable).
-  if grep -E 'case "\$comm"|^\s+Runner\.\*\|Agent' "$burn" >/dev/null; then
-    echo "selftest: burn reaper still has comm/name-based exemptions" >&2
-    exit 1
-  fi
-  if grep -E 'case "\$comm"|Runner\.\*\|Agent' "$burn_pid_helper" >/dev/null; then
-    echo "selftest: pid-snap helper still has comm/name-based exemptions" >&2
-    exit 1
-  fi
   # Exact-value scrub removed: unset does not clear /proc/<pid>/environ.
   if grep -E 'SCRUB_ZAI_KEY|SCRUB_ANTHROPIC_API_KEY|SCRUB_GITHUB_TOKEN|backlog-burn-diag-secrets' "$burn" >/dev/null; then
     echo "selftest: burn still rematerializes exact-value scrub secrets" >&2
@@ -4693,79 +4653,12 @@ EOF
     echo "selftest: expected LD_AUDIT blanked in all 5 Capture steps, found ${burn_ld_audit_n}" >&2
     exit 1
   }
-  # Snapshot-based predicate: source the shared helper (same code the workflow runs).
-  # Signature: reap_should_kill pid snap_file self_pid my_pgid
-  snap_dir="$(mktemp -d)"
-  snap_file="${snap_dir}/pids"
-  printf '%s\n' 40 41 1 >"$snap_file"
-  (
-    # shellcheck disable=SC1090
-    source "$burn_pid_helper"
-    # Stub ps so pgid checks are deterministic (pid 99 = reaper pgid).
-    ps() {
-      if [ "$1" = "-o" ] && [ "$2" = "pgid=" ]; then
-        case "$4" in
-          99|98) echo " 99" ;;
-          *) echo " 7" ;;
-        esac
-        return 0
-      fi
-      command ps "$@"
-    }
-    expect_kill() {
-      if ! reap_should_kill "$@"; then
-        echo "selftest: capture reap_should_kill kept a process it must kill: $*" >&2
-        exit 1
-      fi
-    }
-    expect_keep() {
-      if reap_should_kill "$@"; then
-        echo "selftest: capture reap_should_kill killed a process it must keep: $*" >&2
-        exit 1
-      fi
-    }
-    # Pre-snapshot PID spared regardless of name/cwd.
-    expect_keep 40 "$snap_file" 99 99
-    # Post-snapshot process renamed to Runner.Worker — still reaped (no name match).
-    expect_kill 50 "$snap_file" 99 99
-    # Self and ancestors spared.
-    expect_keep 99 "$snap_file" 99 99
-    # Same process group spared (reaper helpers).
-    expect_keep 98 "$snap_file" 99 99
-  )
-  rm -rf -- "$snap_dir"
-  # Bundle step uses the same helper predicate.
-  snap_dir="$(mktemp -d)"
-  snap_file="${snap_dir}/pids"
-  printf '%s\n' 40 >"$snap_file"
-  (
-    # shellcheck disable=SC1090
-    source "$burn_pid_helper"
-    ps() {
-      if [ "$1" = "-o" ] && [ "$2" = "pgid=" ]; then
-        case "$4" in
-          99|98) echo " 99" ;;
-          *) echo " 7" ;;
-        esac
-        return 0
-      fi
-      command ps "$@"
-    }
-    if ! reap_should_kill 50 "$snap_file" 99 99; then
-      echo "selftest: burn bundle reap_should_kill kept a post-snapshot process" >&2
-      exit 1
-    fi
-    if reap_should_kill 40 "$snap_file" 99 99; then
-      echo "selftest: burn bundle reap_should_kill killed a pre-snapshot process" >&2
-      exit 1
-    fi
-    # Renamed Runner.Worker started after snapshot must still be reaped.
-    if ! reap_should_kill 51 "$snap_file" 99 99; then
-      echo "selftest: burn bundle reap_should_kill kept a renamed Runner.Worker" >&2
-      exit 1
-    fi
-  )
-  rm -rf -- "$snap_dir"
+  # Reap must not gate delivery: Bundle has no if: on reap outcomes.
+  bundle_hdr="$(awk '/name: Bundle the ship commits/{p=1} p && /run: \|/{exit} p' "$burn")"
+  if printf '%s\n' "$bundle_hdr" | grep -E 'steps\.[^ ]*reap|Reap agent cgroup' >/dev/null; then
+    echo "selftest: Bundle step depends on reap outcome" >&2
+    exit 1
+  fi
   grep -q '  triage:' "$burn" || {
     echo "selftest: burn provider-triage is not a separate job" >&2
     exit 1
