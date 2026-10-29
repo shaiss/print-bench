@@ -1191,24 +1191,8 @@ jobs:
             mkdir -p -- "${stage}/link-${i}"
             # Write sealed step-output bytes only; re-check schema before upload.
             printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
-            python3 -I -c '
-import json, sys
-from pathlib import Path
-ALLOWED = {"label", "log_note", "denied_tools", "final_assistant_message_truncated"}
-p = Path(sys.argv[1])
-raw = p.read_bytes()
-if len(raw) > 64 * 1024:
-    raise SystemExit("diag too large")
-obj = json.loads(raw.decode("utf-8"))
-if set(obj) != ALLOWED:
-    raise SystemExit("bad keys")
-if not isinstance(obj["denied_tools"], list):
-    raise SystemExit("denied_tools")
-if not isinstance(obj["final_assistant_message_truncated"], str):
-    raise SystemExit("final")
-if len(obj["final_assistant_message_truncated"]) > 500:
-    raise SystemExit("final too long")
-' "${stage}/link-${i}/diag.json"
+            python3 -I -c "import json,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_truncated'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536, 'diag too large'; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED, 'bad keys'; assert isinstance(obj['denied_tools'], list); f=obj['final_assistant_message_truncated']; assert isinstance(f, str) and len(f)<=500" \
+              "${stage}/link-${i}/diag.json"
             staged=$((staged + 1))
           done
           echo "staged ${staged} diag.json file(s) from sealed step outputs"
