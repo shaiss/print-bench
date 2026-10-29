@@ -649,6 +649,7 @@ jobs:
       # Sanitized denial capture. if: always() so a failed/cancelled link
       # still leaves a diagnostic. show_full_output stays false above.
       - name: Capture denied tools (link 1)
+        id: diag_1
         if: always() && steps.ship_zai_1.outcome != 'skipped'
         continue-on-error: true
         env:
@@ -670,15 +671,16 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute worktree copies — the agent has Write/Edit.
-          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
-          # restores the diag script + tools/provenance/src from the same pin.
+          echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
+          # Restore capture helper to a mktemp path (no predictable name) and
+          # exec it in-place after the digest check — closes TOCTOU on a
+          # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
               show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
             echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
@@ -689,10 +691,39 @@ jobs:
             echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
-          mv -f "$blob" "$capture"
-          chmod +x "$capture"
-          "$capture" 1
+          chmod +x "$blob"
+          # Secrets file prepared here; helper + diag child never inherit tokens.
+          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          {
+            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+              val="${!key-}"
+              if [ -n "$val" ]; then
+                printf '%s\n' "$val"
+              fi
+            done
+          } >"$secrets"
+          diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
+          # shellcheck disable=SC2064
+          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
+              PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
+              "$blob" 1; then
+            echo "::error::capture helper failed for link 1" >&2
+            exit 1
+          fi
+          if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
+            echo "::error::capture helper did not produce DIAG_OUT" >&2
+            exit 1
+          fi
+          # Seal into this step's outputs — later ship links cannot rewrite them.
+          echo "present=1" >> "$GITHUB_OUTPUT"
+          {
+            echo "diag<<DIAG_EOF_1"
+            cat -- "$diag_out"
+            echo "DIAG_EOF_1"
+          } >> "$GITHUB_OUTPUT"
 
       # The GLM tail (#327): links 2 and 3 of the registry's `backlog-burn`
       # chain, reached only when every earlier link did not succeed — the
@@ -723,6 +754,7 @@ jobs:
           show_full_output: "false"
 
       - name: Capture denied tools (link 2)
+        id: diag_2
         if: always() && steps.ship_zai_2.outcome != 'skipped'
         continue-on-error: true
         env:
@@ -744,15 +776,16 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute worktree copies — the agent has Write/Edit.
-          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
-          # restores the diag script + tools/provenance/src from the same pin.
+          echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
+          # Restore capture helper to a mktemp path (no predictable name) and
+          # exec it in-place after the digest check — closes TOCTOU on a
+          # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
               show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
             echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
@@ -763,10 +796,39 @@ jobs:
             echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
-          mv -f "$blob" "$capture"
-          chmod +x "$capture"
-          "$capture" 2
+          chmod +x "$blob"
+          # Secrets file prepared here; helper + diag child never inherit tokens.
+          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          {
+            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+              val="${!key-}"
+              if [ -n "$val" ]; then
+                printf '%s\n' "$val"
+              fi
+            done
+          } >"$secrets"
+          diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
+          # shellcheck disable=SC2064
+          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
+              PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
+              "$blob" 2; then
+            echo "::error::capture helper failed for link 2" >&2
+            exit 1
+          fi
+          if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
+            echo "::error::capture helper did not produce DIAG_OUT" >&2
+            exit 1
+          fi
+          # Seal into this step's outputs — later ship links cannot rewrite them.
+          echo "present=1" >> "$GITHUB_OUTPUT"
+          {
+            echo "diag<<DIAG_EOF_2"
+            cat -- "$diag_out"
+            echo "DIAG_EOF_2"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Ship via Z.AI (GLM, chain link 3)
         id: ship_zai_3
@@ -795,6 +857,7 @@ jobs:
           show_full_output: "false"
 
       - name: Capture denied tools (link 3)
+        id: diag_3
         if: always() && steps.ship_zai_3.outcome != 'skipped'
         continue-on-error: true
         env:
@@ -816,15 +879,16 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute worktree copies — the agent has Write/Edit.
-          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
-          # restores the diag script + tools/provenance/src from the same pin.
+          echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
+          # Restore capture helper to a mktemp path (no predictable name) and
+          # exec it in-place after the digest check — closes TOCTOU on a
+          # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
               show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
             echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
@@ -835,10 +899,39 @@ jobs:
             echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
-          mv -f "$blob" "$capture"
-          chmod +x "$capture"
-          "$capture" 3
+          chmod +x "$blob"
+          # Secrets file prepared here; helper + diag child never inherit tokens.
+          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          {
+            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+              val="${!key-}"
+              if [ -n "$val" ]; then
+                printf '%s\n' "$val"
+              fi
+            done
+          } >"$secrets"
+          diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
+          # shellcheck disable=SC2064
+          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
+              PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
+              "$blob" 3; then
+            echo "::error::capture helper failed for link 3" >&2
+            exit 1
+          fi
+          if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
+            echo "::error::capture helper did not produce DIAG_OUT" >&2
+            exit 1
+          fi
+          # Seal into this step's outputs — later ship links cannot rewrite them.
+          echo "present=1" >> "$GITHUB_OUTPUT"
+          {
+            echo "diag<<DIAG_EOF_3"
+            cat -- "$diag_out"
+            echo "DIAG_EOF_3"
+          } >> "$GITHUB_OUTPUT"
 
       # The cross-provider tail (issue #544): links 4 and 5 of the registry's
       # `backlog-burn` chain on Anthropic's native endpoint, reached only when
@@ -875,6 +968,7 @@ jobs:
           show_full_output: "false"
 
       - name: Capture denied tools (link 4)
+        id: diag_4
         if: always() && steps.ship_anthropic_4.outcome != 'skipped'
         continue-on-error: true
         env:
@@ -896,15 +990,16 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute worktree copies — the agent has Write/Edit.
-          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
-          # restores the diag script + tools/provenance/src from the same pin.
+          echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
+          # Restore capture helper to a mktemp path (no predictable name) and
+          # exec it in-place after the digest check — closes TOCTOU on a
+          # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
               show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
             echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
@@ -915,10 +1010,39 @@ jobs:
             echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
-          mv -f "$blob" "$capture"
-          chmod +x "$capture"
-          "$capture" 4
+          chmod +x "$blob"
+          # Secrets file prepared here; helper + diag child never inherit tokens.
+          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          {
+            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+              val="${!key-}"
+              if [ -n "$val" ]; then
+                printf '%s\n' "$val"
+              fi
+            done
+          } >"$secrets"
+          diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
+          # shellcheck disable=SC2064
+          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
+              PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
+              "$blob" 4; then
+            echo "::error::capture helper failed for link 4" >&2
+            exit 1
+          fi
+          if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
+            echo "::error::capture helper did not produce DIAG_OUT" >&2
+            exit 1
+          fi
+          # Seal into this step's outputs — later ship links cannot rewrite them.
+          echo "present=1" >> "$GITHUB_OUTPUT"
+          {
+            echo "diag<<DIAG_EOF_4"
+            cat -- "$diag_out"
+            echo "DIAG_EOF_4"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Ship via Anthropic (Claude, chain link 5)
         id: ship_anthropic_5
@@ -946,6 +1070,7 @@ jobs:
           show_full_output: "false"
 
       - name: Capture denied tools (link 5)
+        id: diag_5
         if: always() && steps.ship_anthropic_5.outcome != 'skipped'
         continue-on-error: true
         env:
@@ -967,15 +1092,16 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute worktree copies — the agent has Write/Edit.
-          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
-          # restores the diag script + tools/provenance/src from the same pin.
+          echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
             echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
+          # Restore capture helper to a mktemp path (no predictable name) and
+          # exec it in-place after the digest check — closes TOCTOU on a
+          # well-known $RUNNER_TEMP/backlog-burn-agent-diag-capture.sh.
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
               show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
             echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
@@ -986,17 +1112,46 @@ jobs:
             echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
-          mv -f "$blob" "$capture"
-          chmod +x "$capture"
-          "$capture" 5
+          chmod +x "$blob"
+          # Secrets file prepared here; helper + diag child never inherit tokens.
+          secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          {
+            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+              val="${!key-}"
+              if [ -n "$val" ]; then
+                printf '%s\n' "$val"
+              fi
+            done
+          } >"$secrets"
+          diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
+          # shellcheck disable=SC2064
+          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+              SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
+              START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
+              PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
+              "$blob" 5; then
+            echo "::error::capture helper failed for link 5" >&2
+            exit 1
+          fi
+          if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
+            echo "::error::capture helper did not produce DIAG_OUT" >&2
+            exit 1
+          fi
+          # Seal into this step's outputs — later ship links cannot rewrite them.
+          echo "present=1" >> "$GITHUB_OUTPUT"
+          {
+            echo "diag<<DIAG_EOF_5"
+            cat -- "$diag_out"
+            echo "DIAG_EOF_5"
+          } >> "$GITHUB_OUTPUT"
 
       # Redacted denial + truncated assistant message only. show_full_output
       # stays false on every ship step; this artifact is the diagnosability
       # surface for "agent success, nothing pushed" deaths (#885/#886/#889).
-      # Stage ONLY link-*/diag.json into a fresh directory — never upload the
-      # shared RUNNER_TEMP tree recursively (a ship link with Write/Edit could
-      # plant the unsanitized execution log or other files beside diag.json).
+      # Rebuild the upload tree ONLY from sealed step outputs (diag_1..diag_5).
+      # Never read $RUNNER_TEMP/backlog-burn-agent-diag/** — later ship links
+      # with Write/Edit can replace those bytes after capture returns.
       - name: Stage agent denial diagnostic
         id: diag_stage
         if: always() && steps.select.outputs.issue != ''
@@ -1007,30 +1162,56 @@ jobs:
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
           BASH_ENV: ""
+          PRESENT_1: ${{ steps.diag_1.outputs.present }}
+          DIAG_1: ${{ steps.diag_1.outputs.diag }}
+          PRESENT_2: ${{ steps.diag_2.outputs.present }}
+          DIAG_2: ${{ steps.diag_2.outputs.diag }}
+          PRESENT_3: ${{ steps.diag_3.outputs.present }}
+          DIAG_3: ${{ steps.diag_3.outputs.diag }}
+          PRESENT_4: ${{ steps.diag_4.outputs.present }}
+          DIAG_4: ${{ steps.diag_4.outputs.diag }}
+          PRESENT_5: ${{ steps.diag_5.outputs.present }}
+          DIAG_5: ${{ steps.diag_5.outputs.diag }}
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Default to 0 up front so a mid-step failure cannot leave the
-          # output unset (upload treats unset != '0' as true — Bugbot on #953).
           echo "staged=0" >> "$GITHUB_OUTPUT"
-          src_root="${RUNNER_TEMP}/backlog-burn-agent-diag"
           stage="${RUNNER_TEMP}/backlog-burn-agent-diag-upload"
           rm -rf -- "$stage"
           mkdir -p -- "$stage"
           staged=0
           for i in 1 2 3 4 5; do
-            src="${src_root}/link-${i}/diag.json"
-            if [ -f "$src" ] && [ ! -L "$src" ]; then
-              # Refuse anything that is not a regular file named diag.json
-              # under the expected link-N layout.
-              mkdir -p -- "${stage}/link-${i}"
-              # Copy bytes only; do not follow a planted symlink.
-              cp -f -- "$src" "${stage}/link-${i}/diag.json"
-              staged=$((staged + 1))
+            present_var="PRESENT_${i}"
+            diag_var="DIAG_${i}"
+            present="${!present_var-}"
+            diag="${!diag_var-}"
+            if [ "$present" != "1" ] || [ -z "$diag" ]; then
+              continue
             fi
+            mkdir -p -- "${stage}/link-${i}"
+            # Write sealed step-output bytes only; re-check schema before upload.
+            printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
+            python3 -I -c '
+import json, sys
+from pathlib import Path
+ALLOWED = {"label", "log_note", "denied_tools", "final_assistant_message_truncated"}
+p = Path(sys.argv[1])
+raw = p.read_bytes()
+if len(raw) > 64 * 1024:
+    raise SystemExit("diag too large")
+obj = json.loads(raw.decode("utf-8"))
+if set(obj) != ALLOWED:
+    raise SystemExit("bad keys")
+if not isinstance(obj["denied_tools"], list):
+    raise SystemExit("denied_tools")
+if not isinstance(obj["final_assistant_message_truncated"], str):
+    raise SystemExit("final")
+if len(obj["final_assistant_message_truncated"]) > 500:
+    raise SystemExit("final too long")
+' "${stage}/link-${i}/diag.json"
+            staged=$((staged + 1))
           done
-          echo "staged ${staged} diag.json file(s) for upload"
-          # Record whether anything landed so the upload can no-op cleanly.
+          echo "staged ${staged} diag.json file(s) from sealed step outputs"
           echo "staged=${staged}" >> "$GITHUB_OUTPUT"
 
       - name: Upload agent denial diagnostic
