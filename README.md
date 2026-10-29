@@ -495,6 +495,10 @@ surfaces studies awaiting a read live in
     and opens its draft PR after the agent step, and posts the success
     comment only once the remote tip and a same-repo draft PR at that tip
     are verified (issue #853)
+  - `backlog-burn-agent-diag.sh` — sanitized post-agent diagnostic for
+    backlog-burn: denied tool names, deny reasons, and a truncated final
+    assistant message (≤500 chars), all through `provenance.gitstore.redact`;
+    `show_full_output` stays false (Refs #885 #886 #889)
   - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
     context (Gate contract / Acceptance criteria / Design name / Chosen
     approach) from an allowlisted author only (github-actions[bot] or
