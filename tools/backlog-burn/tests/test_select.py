@@ -315,6 +315,20 @@ def test_ship_lock_bom_heading_bold_lead_still_locks(body):
     assert select_issue(snap([issue_]))["excluded"]["875"].startswith("an active")
 
 
+def test_ship_lock_partial_bold_prefix_is_not_a_lock():
+    # Leading ** without a matching trailing ** must not unwrap.
+    from backlog_burn.select import SHIP_LOCK_HTML_MARKER
+    issue_ = issue(876, "2026-08-01T00:00:00Z", comments=[
+        {"body": (
+            "**🚢 SHIP-LOCK** is the lead the routine writes.\n\n"
+            f"Quoted marker: `{SHIP_LOCK_HTML_MARKER}`."
+         ),
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "shaiss", "authorType": "User"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 876
+
+
 # --------------------------------------------------------------------------
 # Guard: an open PR already closes the issue
 # --------------------------------------------------------------------------

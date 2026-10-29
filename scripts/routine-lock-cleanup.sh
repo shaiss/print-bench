@@ -133,8 +133,7 @@ def lock_lead($b):
   fl($b)
   | gsub("^\ufeff"; "")
   | gsub("^#{1,6}[[:space:]]+"; "")
-  | if startswith("**") then
-      (.[2:] | if (endswith("**") and length >= 2) then .[:-2] else . end)
+  | if (startswith("**") and endswith("**") and length > 4) then .[2:-2]
     else . end;
 def lock_logins:
   ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
@@ -705,6 +704,19 @@ EOF
 EOF
   [ "$(lock_state < "$tmp/bold-lead.ndjson")" = "active" ] \
     || st_fail "a bold-wrapped SHIP-LOCK lead was not counted as a lock"
+  # Partial bold prefix (leading ** without trailing **) must NOT unwrap.
+  python3 -c '
+import json, sys
+sys.stdout.write(json.dumps({
+    "body": "**🚢 SHIP-LOCK** is the lead the routine writes.\n\n"
+            "Quoted: `<!-- design-run-ship-lock:v1 -->`.",
+    "created_at": "2026-08-01T00:00:00Z",
+    "login": "shaiss",
+    "type": "User",
+}) + "\n")
+' > "$tmp/partial-bold.ndjson"
+  [ "$(lock_state < "$tmp/partial-bold.ndjson")" = "none" ] \
+    || st_fail "a partial-bold lead prefix was counted as a lock"
   echo "ok    selftest: lock classification (active / withdrawn / none / mid-line / first-non-blank / settle-login-only / #872-backtick / bom-heading-bold)"
 
   # -- decline detection: the skill's §1/§8 stop markers AFTER the claim -----

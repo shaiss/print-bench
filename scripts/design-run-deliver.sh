@@ -907,8 +907,7 @@ hard_stop_from_comments() {  # [run-started-at]
         fl($b)
         | gsub("^\ufeff"; "")
         | gsub("^#{1,6}[[:space:]]+"; "")
-        | if startswith("**") then
-            (.[2:] | if (endswith("**") and length >= 2) then .[:-2] else . end)
+        | if (startswith("**") and endswith("**") and length > 4) then .[2:-2]
           else . end;
       # Stops may come from github-actions[bot] (settle intents) or the
       # repo owner (attended PAT). Locks use the named allowlist — see is_lock.

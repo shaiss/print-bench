@@ -270,6 +270,28 @@ def test_gather_bom_heading_bold_lead_still_locks(monkeypatch, wrap):
     assert any(i["number"] == 281 for i in health["issues"])
 
 
+def test_gather_partial_bold_prefix_is_not_a_lock(monkeypatch):
+    # Bugbot on #952: stripping a leading ** alone would let a sentence
+    # that opens by bolding the lead + quotes the HTML marker mid-body
+    # authenticate. Only a full-line **…** wrap unwraps.
+    responses = _responses()
+    marker = github.SHIP_LOCK_HTML_MARKER
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
+        {
+            "body": (
+                f"**🚢 SHIP-LOCK** is the lead the routine writes.\n\n"
+                f"A spec quotes the marker: `{marker}`."
+            ),
+            "created_at": "2026-08-14T05:23:00Z",
+            "user": {"login": "shaiss", "type": "User"},
+        },
+    ], "")
+
+    monkeypatch.setattr(github, "_get", lambda url, token: responses[url])
+    health = github.gather_run_health(REPO, "tok")
+    assert not any(i["number"] == 281 for i in health["issues"])
+
+
 def test_gather_drops_pr_entries_from_the_issues_listing(monkeypatch):
     calls: list[str] = []
     fake_get(monkeypatch, calls)

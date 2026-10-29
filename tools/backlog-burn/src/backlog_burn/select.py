@@ -220,10 +220,10 @@ def _lock_lead_line(text: str) -> str:
     if line.startswith(_BOM):
         line = line[len(_BOM) :]
     line = _LOCK_HEADING_RE.sub("", line, count=1)
-    if line.startswith("**"):
-        line = line[2:]
-        if line.endswith("**") and len(line) >= 2:
-            line = line[:-2]
+    # Only a full-line bold wrap (**…**). A leading ** alone must not
+    # strip — otherwise "**LEAD** is discussed…" would authenticate.
+    if line.startswith("**") and line.endswith("**") and len(line) > 4:
+        line = line[2:-2]
     return line
 
 
