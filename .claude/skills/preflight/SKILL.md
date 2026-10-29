@@ -51,6 +51,8 @@ drifts. Read the outputs and run §2 accordingly:
 | `andon_tests` | `pytest tools/andon/tests` |
 | `concept_preview_tests` | `pytest tools/concept-preview/tests` |
 | `agent_memory_tests` | `pytest tools/agent-memory/tests` |
+| `provenance_tests` | `pytest tools/provenance` |
+| `provenance_read_lens` | `pytest tools/provenance/tests/test_read_lens.py` plus the four scan-root pins ci.yml lists (`test_selftest.py::test_check_sh_runs_the_selftest`, `test_conf.py::test_watched_workflows_exist`, `test_freeze.py::test_reeve_mirrors_the_deferral_reasons`, `test_gitstore.py::test_reeve_mirrors_the_mark_order_slack`) — redundant when `provenance_tests` is true |
 
 The classifier already applies everything this section used to spell out by
 hand — the geo/soft-infra split, blast radius (a changed design drags in its
@@ -95,6 +97,12 @@ python -m pytest tools/growth/tests -q               # if growth_tests=true
 python -m pytest tools/andon/tests -q                # if andon_tests=true
 python -m pytest tools/concept-preview/tests -q      # if concept_preview_tests=true
 python -m pytest tools/agent-memory/tests -q         # if agent_memory_tests=true
+python -m pytest tools/provenance -q                 # if provenance_tests=true
+python -m pytest tools/provenance/tests/test_read_lens.py \
+  'tools/provenance/tests/test_selftest.py::test_check_sh_runs_the_selftest' \
+  'tools/provenance/tests/test_conf.py::test_watched_workflows_exist' \
+  'tools/provenance/tests/test_freeze.py::test_reeve_mirrors_the_deferral_reasons' \
+  'tools/provenance/tests/test_gitstore.py::test_reeve_mirrors_the_mark_order_slack' -q   # if provenance_read_lens=true (and provenance_tests is not)
 ```
 
 The `if <output>=true` conditions above are exactly §1's table — read them off
@@ -104,7 +112,7 @@ The pytest lines presume the suite's package is importable. CI pip-installs each
 one before running it; locally the SessionStart hook installs only `printcheck`
 and `stylelift`. Of the rest, the suites whose tests bootstrap `src/` into
 `sys.path` themselves (`lineage`, `stylelift`, `model-registry`, `ci-gates`,
-`backlog-burn`, `cogcheck`, `concept-preview`) collect with no install, while `reeve`, `backlog-groomer`,
+`backlog-burn`, `cogcheck`, `concept-preview`, `provenance`) collect with no install, while `reeve`, `backlog-groomer`,
 `telemetry`, `brief-sources` and `growth` die at collection with
 `ModuleNotFoundError` in a fresh session — run `pip install -e 'tools/<t>[test]'`
 on those first (the same command CI's job uses).

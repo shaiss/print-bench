@@ -1,0 +1,78 @@
+{
+ "committed_at": "2026-09-10T08:00:00Z",
+ "designs": {
+  "beta-hinge": {
+   "kinds": [
+    "docs"
+   ],
+   "membership": "member"
+  }
+ },
+ "events": [
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "C:d63588d4",
+   "fields": {
+    "parents": 1,
+    "signature_verified": false
+   },
+   "head_sha": null,
+   "id": "commit:d63588d44d5248bae73e9487528a9387c269726b",
+   "issue": null,
+   "kind": "commit.human",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": "d63588d44d5248bae73e9487528a9387c269726b",
+   "signals": {
+    "app": null,
+    "commit_author_email": "owner@example.invalid",
+    "commit_author_name": "Owner",
+    "committer_login": "shaiss",
+    "login": "shaiss",
+    "login_type": "User",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-10T08:00:00Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/commit/d63588d44d5248bae73e9487528a9387c269726b"
+  }
+ ],
+ "evidence": {
+  "raw": null,
+  "raw_sha256": null,
+  "receipts": [],
+  "revision": null,
+  "source": "git"
+ },
+ "extractor": "provenance-extract 1",
+ "format": "record@1",
+ "incomplete": [],
+ "kind": "commit",
+ "sha": "d63588d44d5248bae73e9487528a9387c269726b"
+}

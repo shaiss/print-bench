@@ -45,6 +45,7 @@ _KNOWN_KEYS = (
     "walltime_min_seconds",
     "routine_dead_runs",
     "lock_leak_hours",
+    "provenance_lag_hours",
 )
 
 # The providers a `provider:` value may name (#443): each is a reviewed ship
@@ -209,6 +210,12 @@ class Config:
     walltime_min_seconds: int = 30
     routine_dead_runs: int = 3
     lock_leak_hours: float = 2.0
+    # The provenance-lag grace (docs/provenance.md §Registration): hours a pending
+    # unit may sit past its due_at, and the slack the stall check adds to the
+    # harvester's settle + max-defer window. Reeve's own key — the harvester's
+    # values are read from .github/provenance.conf, never duplicated here. An
+    # integer like the harvester's conf (no float policy values).
+    provenance_lag_hours: int = 3
 
     def approval_rules(self) -> approval.Rules:
         """The standing approval rules as the poll and Select step consume them."""
@@ -265,7 +272,8 @@ def load(path: str = DEFAULT_PATH) -> Config:
                 cfg.routine_dead_runs = parsed
             elif key == "lock_leak_hours":
                 cfg.lock_leak_hours = _parse_positive_float(value, key, where)
-            else:  # score_drop, walltime_min_seconds, greenlight_cap, greenlight_precedent_cap
+            else:  # score_drop, walltime_min_seconds, greenlight_cap, greenlight_precedent_cap,
+                # provenance_lag_hours
                 setattr(cfg, key, _parse_positive_int(value, key, where))
     # A category in both lists is contradictory standing authority — refused
     # whole rather than resolved by precedence, so the reviewed file always

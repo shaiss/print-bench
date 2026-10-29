@@ -1,0 +1,3523 @@
+{
+ "contract": "print-bench-provenance-contract",
+ "version": 1,
+ "doc": "docs/provenance.md",
+ "note": "The closed, machine-readable contract for the provenance harvester's stored shapes. Python (tools/provenance/src/provenance/contract.py) and Node (site/lib/provenance-contract.mjs) validate against THIS file with hand-rolled validators; no JSON Schema dependency. Type language: see 'typelang'. Every 'obj' is closed (extra keys invalid) and every listed field is required (nullable where 'null': true) unless listed under 'optional_fields'. Patterns are written without anchors and always FULL-match (Python re.fullmatch; JS new RegExp('^(?:'+p+')$')). Content identity and every stored digest (evidence_ref.raw_sha256, receipt parity, the ingest's identical-vs-conflict test, TreeBuilder.add on a .json.gz path) are defined on the DECOMPRESSED canonical JSON bytes; gzip bytes are storage only and may differ across zlib builds.",
+ "typelang": {
+  "str": "string; optional 're' (full-match, ASCII-only pattern) and 'max' (an upper bound on the number of Unicode CODE POINTS — Python len(s), JS [...s].length, never JS s.length)",
+  "int": "integer (never a bool, never a float); optional 'min'/'max' inclusive. An integral float spelling (1.0) is refused by Python value validation and by the canonical-bytes check of a stored file (canonical JSON never emits a float); JSON.parse cannot tell 1.0 from 1, so a Node consumer that validates parsed values must also verify the canonical bytes of the file it read to refuse it",
+  "bool": "true/false",
+  "enum": "one of 'of' (strings)",
+  "list": "array of 'of'; optional 'max' length; 'unique' — no two elements with the same canonical JSON (sorted keys at every depth, no whitespace: Python json.dumps(v, sort_keys=True, separators=(',', ':'), ensure_ascii=False); Node must stringify with recursively sorted keys, never plain JSON.stringify); 'sorted' — ascending, comparing ints numerically and strings by Unicode CODE POINT (Python '<'; Node must compare [...a] against [...b] code point by code point, never the default UTF-16 sort or localeCompare); a 'sorted' list is always homogeneous (all ints or all strings)",
+  "obj": "closed object: exactly the keys of 'fields' (+ any of 'optional_fields'); all 'fields' required",
+  "open": "object that must carry 'fields' (typed) and may carry any other key (opaque complete API objects)",
+  "map": "object whose keys full-match 'key' and whose values are 'of'; optional 'max' entries",
+  "ref": "the named type 'to' from 'types' or 'shapes'",
+  "any": "any JSON value (only inside receipt jobs[].steps)",
+  "kindfields": "the closed field set field_sets[<sibling 'kind' value>] (event@1 'fields')",
+  "null": "on any type: null is also accepted",
+  "tag": "derivation tag (documentation only): D deterministic, J join, W window, N not-derivable; 'D|W' = depends on the source"
+ },
+ "formats": {
+  "evidence_FORMAT": "print-bench-provenance 1",
+  "derived_FORMAT": "print-bench-provenance-site 1",
+  "record": "record@1",
+  "event": "event@1",
+  "view": "view@1",
+  "bundle": "bundle@1",
+  "receipt": "receipt@1",
+  "raw_pr": "raw-pr@1",
+  "raw_brief": "raw-brief@1",
+  "raw_release": "raw-release@1",
+  "raw_snapshot_runs": "raw-snapshot-runs@1",
+  "raw_snapshot_statuses": "raw-snapshot-statuses@1",
+  "state": "state@1",
+  "intent": "intent@1",
+  "body_digest": "body-digest@2",
+  "message_digest": "message-digest@1",
+  "checkpoint": "checkpoint@1"
+ },
+ "enums": {
+  "kind": [
+   "brief.filed",
+   "brief.claimed",
+   "brief.shipped",
+   "brief.declined",
+   "brief.deferred",
+   "brief.withdrawn",
+   "brief.closed",
+   "pr.opened",
+   "pr.ready_for_review",
+   "pr.merged",
+   "pr.closed",
+   "commit.design",
+   "commit.fix",
+   "commit.human",
+   "commit.merge_main",
+   "commit.regen",
+   "review.signoff",
+   "triage.verdict",
+   "coach.lock",
+   "coach.round",
+   "oracle.review",
+   "status.reviewer_signoff",
+   "job.reviewer",
+   "ci.gate",
+   "decision.pm_log",
+   "decision.notes_log",
+   "field_test",
+   "changelog",
+   "deploy.production",
+   "release"
+  ],
+  "role": [
+   "jane",
+   "drik",
+   "pm",
+   "coach",
+   "oracle",
+   "wright",
+   "reeve-signoff",
+   "design-run",
+   "backlog-burn",
+   "product-scout",
+   "spike-converter",
+   "chunker",
+   "labeler"
+  ],
+  "platform": [
+   "github-actions",
+   "claude-code",
+   "cursor",
+   "copilot",
+   "coderabbit",
+   "vercel",
+   "github-web",
+   "unknown"
+  ],
+  "trust": [
+   "verified",
+   "window",
+   "claimed",
+   "login",
+   "ambiguous",
+   "none"
+  ],
+  "noise_key": [
+   "comment.bot.coderabbit",
+   "comment.bot.cursor",
+   "comment.bot.qodo",
+   "comment.bot.vercel",
+   "comment.bot.entelligence",
+   "comment.bot.copilot",
+   "comment.bot.other",
+   "comment.bugbot_limit",
+   "comment.qodo_paused",
+   "comment.decision_needed",
+   "comment.clear_prs",
+   "comment.unclassified",
+   "review.bot",
+   "review.empty_wrapper",
+   "review.human",
+   "review_comment.bot",
+   "review_comment.human",
+   "status.coderabbit",
+   "status.vercel",
+   "status.other",
+   "status.reviewer_signoff.no_design_changes",
+   "sticky.auto_review_stamp",
+   "sticky.printcheck_gate_report",
+   "sticky.argus_diff_report",
+   "timeline.deployed",
+   "timeline.other",
+   "marker.unknown"
+  ],
+  "lead": [
+   "ship_lock_withdrawn",
+   "ship_lock_settle",
+   "ship_lock",
+   "declined",
+   "deferred",
+   "shipped",
+   "decision_needed",
+   "coach_lock",
+   "coach_round",
+   "bugbot_limit",
+   "qodo_paused",
+   "clear_prs",
+   "contract"
+  ],
+  "conclusion": [
+   "success",
+   "failure",
+   "cancelled",
+   "skipped",
+   "neutral",
+   "timed_out",
+   "action_required",
+   "stale",
+   "startup_failure"
+  ],
+  "source_rank": [
+   "issue",
+   "pr",
+   "timeline",
+   "commit",
+   "issuecomment",
+   "review",
+   "status",
+   "run",
+   "job",
+   "deployment",
+   "release",
+   "row"
+  ],
+  "precision_rank": [
+   "day",
+   "second"
+  ]
+ },
+ "sort_key": "events sort ascending by (ts, precision_rank.index(ts_precision), source_rank.index(id prefix before the first ':'), numeric github id = the first all-digit ':'-segment after the prefix or 0, sub-index = the last ':'-segment if all-digit and not the github id else 0, id); see canonical.event_sort_key",
+ "types": {
+  "sha40": {
+   "t": "str",
+   "re": "[0-9a-f]{40}"
+  },
+  "ts": {
+   "t": "str",
+   "re": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"
+  },
+  "date": {
+   "t": "str",
+   "re": "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+  },
+  "login": {
+   "t": "str",
+   "re": "[A-Za-z0-9][A-Za-z0-9-]{0,38}(\\[bot\\])?"
+  },
+  "design": {
+   "t": "str",
+   "re": "[a-z0-9][a-z0-9-]{0,63}"
+  },
+  "hex64": {
+   "t": "str",
+   "re": "[0-9a-f]{64}"
+  },
+  "url": {
+   "t": "str",
+   "re": "https://github\\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/(issues/[0-9]+(#issuecomment-[0-9]+)?|pull/[0-9]+(/commits/[0-9a-f]{40}|#issuecomment-[0-9]+|#pullrequestreview-[0-9]+)?|commit/[0-9a-f]{40}|actions/runs/[0-9]+(/job/[0-9]+)?|releases/tag/[A-Za-z0-9._-]+|blob/[0-9a-f]{40}/designs/[a-z0-9-]+/(PM|NOTES)\\.md#L[0-9]+)",
+   "max": 300
+  },
+  "event_id": {
+   "t": "str",
+   "re": "(issue:[0-9]+:filed|issuecomment:[0-9]+|review:[0-9]+|timeline:[0-9]+|pr:[0-9]+:(opened|merged|closed)|commit:[0-9a-f]{40}|status:[0-9]+|run:[0-9]+|job:[0-9]+|deployment:[0-9]+|release:[0-9]+|row:[a-z0-9][a-z0-9-]{0,63}:(PM|NOTES)\\.md:[0-9a-f]{16}:[0-9]+)"
+  },
+  "episode": {
+   "t": "str",
+   "re": "(E0:brief:[0-9]+|R:[0-9]+:[0-9a-f]{8}|M:[0-9]+|C:[0-9a-f]{8}|D:[0-9]{4}-[0-9]{2}-[0-9]{2})"
+  },
+  "user": {
+   "t": "obj",
+   "fields": {
+    "login": {
+     "t": "ref",
+     "to": "login"
+    },
+    "type": {
+     "t": "enum",
+     "of": [
+      "User",
+      "Bot",
+      "Organization",
+      "Mannequin"
+     ],
+     "null": true
+    }
+   },
+   "null": true
+  },
+  "body_digest": {
+   "t": "obj",
+   "fields": {
+    "digest": {
+     "t": "enum",
+     "of": [
+      "body-digest@1",
+      "body-digest@2"
+     ]
+    },
+    "sha256": {
+     "t": "ref",
+     "to": "hex64"
+    },
+    "length": {
+     "t": "int",
+     "min": 0
+    },
+    "head_marker": {
+     "t": "str",
+     "re": "<!-- ?[A-Za-z][A-Za-z0-9_:-]{0,63}(?: [A-Za-z_]{1,24}=[A-Za-z0-9._,:/-]{1,128}){0,8} ?-->",
+     "null": true
+    },
+    "marker_lines": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "<!-- ?[A-Za-z][A-Za-z0-9_:-]{0,63}(?: [A-Za-z_]{1,24}=[A-Za-z0-9._,:/-]{1,128}){0,8} ?-->"
+     },
+     "max": 10
+    },
+    "footer_ok": {
+     "t": "bool"
+    },
+    "suffix_markers": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "<!-- ?[A-Za-z][A-Za-z0-9_:-]{0,63}(?: [A-Za-z_]{1,24}=[A-Za-z0-9._,:/-]{1,128}){0,8} ?-->"
+     },
+     "max": 3
+    },
+    "suffix_ok": {
+     "t": "bool"
+    },
+    "table_verdicts": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "(act-now|decline|no-action|queue)(\\+(act-now|decline|no-action|queue)){0,3}|unknown"
+     },
+     "max": 200
+    },
+    "lead": {
+     "t": "enum",
+     "of": [
+      "ship_lock_withdrawn",
+      "ship_lock_settle",
+      "ship_lock",
+      "declined",
+      "deferred",
+      "shipped",
+      "decision_needed",
+      "coach_lock",
+      "coach_round",
+      "bugbot_limit",
+      "qodo_paused",
+      "clear_prs",
+      "contract"
+     ],
+     "null": true
+    },
+    "lead_fields": {
+     "t": "obj",
+     "fields": {},
+     "optional_fields": {
+      "design_name": {
+       "t": "ref",
+       "to": "design",
+       "null": true
+      },
+      "shipped_pr": {
+       "t": "int",
+       "min": 1,
+       "null": true
+      },
+      "death": {
+       "t": "bool"
+      },
+      "round": {
+       "t": "int",
+       "min": 0,
+       "max": 999
+      },
+      "round_sub": {
+       "t": "str",
+       "re": "[a-z]",
+       "null": true
+      }
+     }
+    },
+    "refs_closes": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "max": 20,
+     "unique": true,
+     "sorted": true
+    }
+   }
+  },
+  "message_digest": {
+   "t": "obj",
+   "fields": {
+    "digest": {
+     "t": "enum",
+     "of": [
+      "message-digest@1"
+     ]
+    },
+    "sha256": {
+     "t": "ref",
+     "to": "hex64"
+    },
+    "length": {
+     "t": "int",
+     "min": 0
+    },
+    "subject_regen": {
+     "t": "bool"
+    },
+    "subject_pr": {
+     "t": "int",
+     "min": 1,
+     "null": true
+    },
+    "trailers": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "key": {
+        "t": "enum",
+        "of": [
+         "Co-Authored-By",
+         "Claude-Session",
+         "Preview-Diff"
+        ]
+       },
+       "value": {
+        "t": "str",
+        "max": 200
+       }
+      }
+     },
+     "max": 12
+    }
+   }
+  },
+  "run": {
+   "t": "obj",
+   "fields": {
+    "id": {
+     "t": "int",
+     "min": 1
+    },
+    "name": {
+     "t": "str",
+     "max": 200,
+     "null": true
+    },
+    "path": {
+     "t": "str",
+     "max": 200,
+     "null": true
+    },
+    "event": {
+     "t": "str",
+     "max": 40,
+     "null": true
+    },
+    "status": {
+     "t": "str",
+     "max": 40,
+     "null": true
+    },
+    "conclusion": {
+     "t": "str",
+     "max": 40,
+     "null": true
+    },
+    "head_branch": {
+     "t": "str",
+     "max": 255,
+     "null": true
+    },
+    "head_sha": {
+     "t": "ref",
+     "to": "sha40",
+     "null": true
+    },
+    "created_at": {
+     "t": "ref",
+     "to": "ts"
+    },
+    "updated_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "run_started_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "run_attempt": {
+     "t": "int",
+     "min": 1,
+     "null": true
+    },
+    "run_number": {
+     "t": "int",
+     "min": 0,
+     "null": true
+    },
+    "html_url": {
+     "t": "str",
+     "max": 300,
+     "null": true
+    },
+    "display_title": {
+     "t": "str",
+     "max": 1000,
+     "null": true
+    },
+    "actor": {
+     "t": "ref",
+     "to": "login",
+     "null": true
+    },
+    "triggering_actor": {
+     "t": "ref",
+     "to": "login",
+     "null": true
+    },
+    "pull_requests": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
+    }
+   }
+  },
+  "status": {
+   "t": "obj",
+   "fields": {
+    "id": {
+     "t": "int",
+     "min": 1
+    },
+    "context": {
+     "t": "str",
+     "max": 200
+    },
+    "state": {
+     "t": "enum",
+     "of": [
+      "success",
+      "failure",
+      "pending",
+      "error"
+     ]
+    },
+    "created_at": {
+     "t": "ref",
+     "to": "ts"
+    },
+    "updated_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "creator": {
+     "t": "ref",
+     "to": "login",
+     "null": true
+    },
+    "target_url": {
+     "t": "str",
+     "max": 400,
+     "null": true
+    },
+    "description": {
+     "t": "str",
+     "max": 1000,
+     "null": true
+    }
+   }
+  },
+  "signals": {
+   "t": "obj",
+   "fields": {
+    "login": {
+     "t": "ref",
+     "to": "login",
+     "null": true
+    },
+    "login_type": {
+     "t": "enum",
+     "of": [
+      "User",
+      "Bot",
+      "Organization",
+      "Mannequin"
+     ],
+     "null": true
+    },
+    "app": {
+     "t": "str",
+     "re": "[a-z0-9-]{1,64}",
+     "null": true
+    },
+    "marker": {
+     "t": "str",
+     "re": "[A-Za-z][A-Za-z0-9_:-]{0,63}",
+     "null": true
+    },
+    "commit_author_name": {
+     "t": "str",
+     "max": 120,
+     "null": true
+    },
+    "commit_author_email": {
+     "t": "str",
+     "max": 200,
+     "null": true
+    },
+    "committer_login": {
+     "t": "ref",
+     "to": "login",
+     "null": true
+    },
+    "status_context": {
+     "t": "str",
+     "max": 200,
+     "null": true
+    },
+    "regen_identity": {
+     "t": "bool"
+    },
+    "trailer_coauthors": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "max": 200
+     },
+     "max": 8
+    },
+    "trailer_session": {
+     "t": "str",
+     "re": "https://claude\\.ai/code/session_[A-Za-z0-9]{8,64}",
+     "null": true
+    }
+   }
+  },
+  "runtime": {
+   "t": "obj",
+   "fields": {
+    "platform": {
+     "t": "enum",
+     "of": [
+      "github-actions",
+      "claude-code",
+      "cursor",
+      "copilot",
+      "coderabbit",
+      "vercel",
+      "github-web",
+      "unknown"
+     ],
+     "tag": "D"
+    },
+    "harness": {
+     "t": "enum",
+     "of": [
+      "claude-code-action",
+      "claude-code",
+      "cursor-agent"
+     ],
+     "null": true,
+     "tag": "D"
+    },
+    "role": {
+     "t": "enum",
+     "of": [
+      "jane",
+      "drik",
+      "pm",
+      "coach",
+      "oracle",
+      "wright",
+      "reeve-signoff",
+      "design-run",
+      "backlog-burn",
+      "product-scout",
+      "spike-converter",
+      "chunker",
+      "labeler"
+     ],
+     "null": true,
+     "tag": "J|W"
+    },
+    "workflow": {
+     "t": "str",
+     "re": "[a-z0-9][a-z0-9-]{0,63}\\.yml",
+     "null": true,
+     "tag": "D|W"
+    },
+    "job": {
+     "t": "str",
+     "max": 200,
+     "null": true,
+     "tag": "D|W"
+    },
+    "job_id": {
+     "t": "int",
+     "min": 1,
+     "null": true,
+     "tag": "D|W"
+    },
+    "run_id": {
+     "t": "int",
+     "min": 1,
+     "null": true,
+     "tag": "D|W"
+    },
+    "attempt": {
+     "t": "int",
+     "min": 1,
+     "null": true,
+     "tag": "D|W"
+    },
+    "chain": {
+     "t": "str",
+     "re": "[a-z0-9-]{1,64}",
+     "null": true,
+     "tag": "J"
+    },
+    "chain_link": {
+     "t": "int",
+     "min": 1,
+     "max": 99,
+     "null": true,
+     "tag": "J"
+    },
+    "links_not_served": {
+     "t": "int",
+     "min": 0,
+     "max": 98,
+     "null": true,
+     "tag": "J"
+    },
+    "provider": {
+     "t": "enum",
+     "of": [
+      "zai",
+      "anthropic",
+      "openrouter"
+     ],
+     "null": true,
+     "tag": "J"
+    },
+    "model": {
+     "t": "str",
+     "re": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}",
+     "null": true,
+     "tag": "J|N"
+    },
+    "model_basis": {
+     "t": "str",
+     "re": "(step-window\\+registry@head\\([0-9a-f]{8}\\)|step-window\\+registry@merge\\([0-9a-f]{8}\\+[0-9a-f]{8}\\)|step-window\\+registry@main\\([0-9a-f]{8}\\)|job-link\\+registry@(head|main)\\([0-9a-f]{8}\\)|job-link\\+registry@merge\\([0-9a-f]{8}\\+[0-9a-f]{8}\\)|provider-step\\+inline-pin@[0-9a-f]{8}|trailer|ambiguous|none)",
+     "tag": "D"
+    }
+   }
+  },
+  "membership": {
+   "t": "obj",
+   "fields": {
+    "membership": {
+     "t": "enum",
+     "of": [
+      "member",
+      "regen-only",
+      "sweep",
+      "stacked-excluded"
+     ]
+    },
+    "kinds": {
+     "t": "list",
+     "of": {
+      "t": "enum",
+      "of": [
+       "source",
+       "docs",
+       "previews",
+       "stamp",
+       "ai",
+       "other"
+      ]
+     },
+     "unique": true,
+     "sorted": true
+    }
+   }
+  },
+  "evidence_ref": {
+   "t": "obj",
+   "fields": {
+    "raw": {
+     "t": "str",
+     "re": "raw/(pr|brief|release)/[A-Za-z0-9._-]+\\.json\\.gz",
+     "null": true
+    },
+    "raw_sha256": {
+     "t": "ref",
+     "to": "hex64",
+     "null": true
+    },
+    "revision": {
+     "t": "int",
+     "min": 1,
+     "null": true
+    },
+    "receipts": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "receipts/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]+\\.a[0-9]+\\.json\\.gz"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "source": {
+     "t": "enum",
+     "of": [
+      "evidence",
+      "git"
+     ]
+    }
+   }
+  },
+  "round": {
+   "t": "obj",
+   "fields": {
+    "id": {
+     "t": "ref",
+     "to": "episode"
+    },
+    "head": {
+     "t": "ref",
+     "to": "sha40"
+    },
+    "heads": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "sha40"
+     },
+     "unique": true
+    },
+    "commits": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "sha40"
+     },
+     "unique": true
+    },
+    "pushed_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "start": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "end": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    }
+   }
+  },
+  "unknown_counts": {
+   "t": "obj",
+   "fields": {
+    "markers": {
+     "t": "map",
+     "key": "[A-Za-z][A-Za-z0-9_:-]{0,63}",
+     "of": {
+      "t": "int",
+      "min": 1
+     }
+    },
+    "steps": {
+     "t": "map",
+     "key": ".{1,200}",
+     "of": {
+      "t": "int",
+      "min": 1
+     }
+    }
+   }
+  }
+ },
+ "field_sets": {
+  "brief.filed": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   }
+  },
+  "brief.claimed": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   },
+   "settle": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "brief.shipped": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   },
+   "shipped_pr": {
+    "t": "int",
+    "min": 1,
+    "null": true,
+    "tag": "D"
+   }
+  },
+  "brief.declined": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   }
+  },
+  "brief.deferred": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   }
+  },
+  "brief.withdrawn": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   },
+   "death": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "brief.closed": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   },
+   "state_reason": {
+    "t": "enum",
+    "of": [
+     "completed",
+     "not_planned",
+     "duplicate",
+     "reopened"
+    ],
+    "null": true,
+    "tag": "D"
+   },
+   "closed_by_pr": {
+    "t": "int",
+    "min": 1,
+    "null": true,
+    "tag": "J"
+   }
+  },
+  "pr.opened": {
+   "draft": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "pr.ready_for_review": {},
+  "pr.merged": {
+   "merge_method": {
+    "t": "enum",
+    "of": [
+     "squash",
+     "merge",
+     "rebase"
+    ],
+    "null": true,
+    "tag": "J"
+   },
+   "merged_by_login": {
+    "t": "ref",
+    "to": "login",
+    "null": true,
+    "tag": "D"
+   },
+   "main_subject": {
+    "t": "str",
+    "max": 300,
+    "null": true,
+    "tag": "D"
+   }
+  },
+  "pr.closed": {},
+  "commit.design": {
+   "parents": {
+    "t": "int",
+    "min": 0,
+    "max": 8,
+    "tag": "D"
+   },
+   "signature_verified": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "commit.fix": {
+   "parents": {
+    "t": "int",
+    "min": 0,
+    "max": 8,
+    "tag": "D"
+   },
+   "signature_verified": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "commit.human": {
+   "parents": {
+    "t": "int",
+    "min": 0,
+    "max": 8,
+    "tag": "D"
+   },
+   "signature_verified": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "commit.merge_main": {
+   "parents": {
+    "t": "int",
+    "min": 0,
+    "max": 8,
+    "tag": "D"
+   }
+  },
+  "commit.regen": {
+   "preview_diff": {
+    "t": "enum",
+    "of": [
+     "all-noise",
+     "content",
+     "absent",
+     "multiple"
+    ],
+    "tag": "D"
+   }
+  },
+  "review.signoff": {
+   "family": {
+    "t": "enum",
+    "of": [
+     "JANE_SIGNOFF",
+     "DRIK_SIGNOFF"
+    ],
+    "tag": "D"
+   },
+   "verdict": {
+    "t": "enum",
+    "of": [
+     "pass",
+     "block",
+     "fail"
+    ],
+    "tag": "D"
+   },
+   "fuse": {
+    "t": "enum",
+    "of": [
+     "none",
+     "acknowledged"
+    ],
+    "null": true,
+    "tag": "D"
+   },
+   "edited": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "triage.verdict": {
+   "designs": {
+    "t": "list",
+    "of": {
+     "t": "ref",
+     "to": "design"
+    },
+    "unique": true,
+    "sorted": true,
+    "tag": "D"
+   },
+   "act_now": {
+    "t": "int",
+    "min": 0,
+    "tag": "D"
+   },
+   "queue": {
+    "t": "int",
+    "min": 0,
+    "tag": "D"
+   },
+   "decline": {
+    "t": "int",
+    "min": 0,
+    "tag": "D"
+   },
+   "no_action": {
+    "t": "int",
+    "min": 0,
+    "tag": "D"
+   },
+   "rows": {
+    "t": "int",
+    "min": 0,
+    "tag": "D"
+   },
+   "completion_marker": {
+    "t": "bool",
+    "tag": "D"
+   },
+   "edited": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "coach.lock": {
+   "completion_sha": {
+    "t": "ref",
+    "to": "sha40",
+    "null": true,
+    "tag": "D"
+   },
+   "edited": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "coach.round": {
+   "round": {
+    "t": "int",
+    "min": 0,
+    "max": 999,
+    "tag": "D"
+   },
+   "sub": {
+    "t": "str",
+    "re": "[a-z]",
+    "null": true,
+    "tag": "D"
+   }
+  },
+  "oracle.review": {
+   "edited": {
+    "t": "bool",
+    "tag": "D"
+   }
+  },
+  "status.reviewer_signoff": {
+   "state": {
+    "t": "enum",
+    "of": [
+     "success",
+     "failure",
+     "pending",
+     "error"
+    ],
+    "tag": "D"
+   },
+   "verdict": {
+    "t": "enum",
+    "of": [
+     "PASS",
+     "BLOCK",
+     "PENDING"
+    ],
+    "tag": "D"
+   },
+   "reason": {
+    "t": "enum",
+    "of": [
+     "signed-off",
+     "fuse-acknowledged",
+     "not-signed",
+     "stale",
+     "blocked",
+     "fuse-unacknowledged",
+     "overridden",
+     "other"
+    ],
+    "tag": "D"
+   }
+  },
+  "job.reviewer": {
+   "conclusion": {
+    "t": "enum",
+    "of": [
+     "success",
+     "failure",
+     "cancelled",
+     "skipped",
+     "neutral",
+     "timed_out",
+     "action_required",
+     "stale",
+     "startup_failure"
+    ],
+    "null": true,
+    "tag": "D"
+   },
+   "posted": {
+    "t": "bool",
+    "tag": "J"
+   },
+   "links_tried": {
+    "t": "int",
+    "min": 0,
+    "max": 99,
+    "tag": "D"
+   }
+  },
+  "ci.gate": {
+   "conclusion": {
+    "t": "enum",
+    "of": [
+     "success",
+     "failure",
+     "cancelled",
+     "skipped",
+     "neutral",
+     "timed_out",
+     "action_required",
+     "stale",
+     "startup_failure"
+    ],
+    "null": true,
+    "tag": "D"
+   },
+   "event": {
+    "t": "str",
+    "max": 40,
+    "tag": "D"
+   }
+  },
+  "decision.pm_log": {
+   "file": {
+    "t": "enum",
+    "of": [
+     "PM.md"
+    ],
+    "tag": "D"
+   },
+   "line": {
+    "t": "int",
+    "min": 1,
+    "tag": "J"
+   },
+   "line_sha256": {
+    "t": "ref",
+    "to": "hex64",
+    "tag": "D"
+   },
+   "added_in_pr": {
+    "t": "int",
+    "min": 1,
+    "null": true,
+    "tag": "J"
+   },
+   "added_in_sha": {
+    "t": "ref",
+    "to": "sha40",
+    "tag": "J"
+   }
+  },
+  "decision.notes_log": {
+   "file": {
+    "t": "enum",
+    "of": [
+     "NOTES.md"
+    ],
+    "tag": "D"
+   },
+   "line": {
+    "t": "int",
+    "min": 1,
+    "tag": "J"
+   },
+   "line_sha256": {
+    "t": "ref",
+    "to": "hex64",
+    "tag": "D"
+   },
+   "added_in_pr": {
+    "t": "int",
+    "min": 1,
+    "null": true,
+    "tag": "J"
+   },
+   "added_in_sha": {
+    "t": "ref",
+    "to": "sha40",
+    "tag": "J"
+   }
+  },
+  "field_test": {
+   "file": {
+    "t": "enum",
+    "of": [
+     "NOTES.md"
+    ],
+    "tag": "D"
+   },
+   "line": {
+    "t": "int",
+    "min": 1,
+    "tag": "J"
+   },
+   "line_sha256": {
+    "t": "ref",
+    "to": "hex64",
+    "tag": "D"
+   },
+   "added_in_pr": {
+    "t": "int",
+    "min": 1,
+    "null": true,
+    "tag": "J"
+   },
+   "added_in_sha": {
+    "t": "ref",
+    "to": "sha40",
+    "tag": "J"
+   }
+  },
+  "changelog": {
+   "file": {
+    "t": "enum",
+    "of": [
+     "NOTES.md"
+    ],
+    "tag": "D"
+   },
+   "line": {
+    "t": "int",
+    "min": 1,
+    "tag": "J"
+   },
+   "line_sha256": {
+    "t": "ref",
+    "to": "hex64",
+    "tag": "D"
+   },
+   "added_in_pr": {
+    "t": "int",
+    "min": 1,
+    "null": true,
+    "tag": "J"
+   },
+   "added_in_sha": {
+    "t": "ref",
+    "to": "sha40",
+    "tag": "J"
+   }
+  },
+  "deploy.production": {
+   "state": {
+    "t": "enum",
+    "of": [
+     "success",
+     "failure",
+     "error",
+     "inactive",
+     "pending",
+     "in_progress",
+     "queued"
+    ],
+    "null": true,
+    "tag": "D"
+   },
+   "deployment_id": {
+    "t": "int",
+    "min": 1,
+    "tag": "D"
+   }
+  },
+  "release": {
+   "tag": {
+    "t": "str",
+    "re": "[A-Za-z0-9._-]{1,100}",
+    "tag": "D"
+   },
+   "prerelease": {
+    "t": "bool",
+    "tag": "D"
+   },
+   "assets": {
+    "t": "int",
+    "min": 0,
+    "tag": "D"
+   }
+  }
+ },
+ "shapes": {
+  "event@1": {
+   "t": "obj",
+   "fields": {
+    "id": {
+     "t": "ref",
+     "to": "event_id",
+     "tag": "D"
+    },
+    "ts": {
+     "t": "ref",
+     "to": "ts",
+     "tag": "D"
+    },
+    "ts_precision": {
+     "t": "enum",
+     "of": [
+      "second",
+      "day"
+     ],
+     "tag": "D"
+    },
+    "tz": {
+     "t": "enum",
+     "of": [
+      "UTC"
+     ],
+     "tag": "D"
+    },
+    "kind": {
+     "t": "enum",
+     "of": [
+      "brief.filed",
+      "brief.claimed",
+      "brief.shipped",
+      "brief.declined",
+      "brief.deferred",
+      "brief.withdrawn",
+      "brief.closed",
+      "pr.opened",
+      "pr.ready_for_review",
+      "pr.merged",
+      "pr.closed",
+      "commit.design",
+      "commit.fix",
+      "commit.human",
+      "commit.merge_main",
+      "commit.regen",
+      "review.signoff",
+      "triage.verdict",
+      "coach.lock",
+      "coach.round",
+      "oracle.review",
+      "status.reviewer_signoff",
+      "job.reviewer",
+      "ci.gate",
+      "decision.pm_log",
+      "decision.notes_log",
+      "field_test",
+      "changelog",
+      "deploy.production",
+      "release"
+     ],
+     "tag": "D"
+    },
+    "episode": {
+     "t": "ref",
+     "to": "episode",
+     "tag": "J"
+    },
+    "pr": {
+     "t": "int",
+     "min": 1,
+     "null": true,
+     "tag": "D"
+    },
+    "issue": {
+     "t": "int",
+     "min": 1,
+     "null": true,
+     "tag": "D"
+    },
+    "sha": {
+     "t": "ref",
+     "to": "sha40",
+     "null": true,
+     "tag": "D"
+    },
+    "head_sha": {
+     "t": "ref",
+     "to": "sha40",
+     "null": true,
+     "tag": "J"
+    },
+    "stale_sha": {
+     "t": "bool",
+     "tag": "J"
+    },
+    "after_merge": {
+     "t": "bool",
+     "tag": "D"
+    },
+    "url": {
+     "t": "ref",
+     "to": "url",
+     "tag": "D"
+    },
+    "signals": {
+     "t": "ref",
+     "to": "signals",
+     "tag": "D"
+    },
+    "trust": {
+     "t": "enum",
+     "of": [
+      "verified",
+      "window",
+      "claimed",
+      "login",
+      "ambiguous",
+      "none"
+     ],
+     "tag": "D|W"
+    },
+    "trust_basis": {
+     "t": "str",
+     "re": "(actions-bot\\+suffix|actions-bot\\+head-marker|actions-status\\+receipt|receipt|window:run [0-9]+|marker:(owner-token|other-author|no-suffix|edited)|trailer|login|ambiguous|none)",
+     "tag": "D"
+    },
+    "runtime": {
+     "t": "ref",
+     "to": "runtime"
+    },
+    "fields": {
+     "t": "kindfields",
+     "by": "kind",
+     "tag": "D"
+    },
+    "edges": {
+     "t": "obj",
+     "fields": {
+      "verifies": {
+       "t": "list",
+       "of": {
+        "t": "ref",
+        "to": "sha40"
+       },
+       "unique": true,
+       "tag": "J"
+      }
+     }
+    }
+   }
+  },
+  "record@1:pr": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "record@1"
+     ]
+    },
+    "extractor": {
+     "t": "str",
+     "re": "provenance-extract [0-9]+"
+    },
+    "incomplete": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "events": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "event@1"
+     }
+    },
+    "kind": {
+     "t": "enum",
+     "of": [
+      "pr"
+     ]
+    },
+    "pr": {
+     "t": "int",
+     "min": 1
+    },
+    "state": {
+     "t": "enum",
+     "of": [
+      "merged",
+      "closed"
+     ]
+    },
+    "created_at": {
+     "t": "ref",
+     "to": "ts"
+    },
+    "closed_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "merged_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "merge_commit_sha": {
+     "t": "ref",
+     "to": "sha40",
+     "null": true
+    },
+    "merge_method": {
+     "t": "enum",
+     "of": [
+      "squash",
+      "merge",
+      "rebase"
+     ],
+     "null": true
+    },
+    "head_ref": {
+     "t": "str",
+     "max": 255,
+     "null": true
+    },
+    "base_ref": {
+     "t": "str",
+     "max": 255,
+     "null": true
+    },
+    "linked_issues": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "briefs": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "designs": {
+     "t": "map",
+     "key": "[a-z0-9][a-z0-9-]{0,63}",
+     "of": {
+      "t": "ref",
+      "to": "membership"
+     }
+    },
+    "rounds": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "round"
+     }
+    },
+    "threads": {
+     "t": "obj",
+     "fields": {
+      "total": {
+       "t": "int",
+       "min": 0
+      },
+      "resolved": {
+       "t": "int",
+       "min": 0
+      }
+     },
+     "null": true
+    },
+    "noise_counts": {
+     "t": "map",
+     "key": "(comment\\.bot\\.coderabbit|comment\\.bot\\.cursor|comment\\.bot\\.qodo|comment\\.bot\\.vercel|comment\\.bot\\.entelligence|comment\\.bot\\.copilot|comment\\.bot\\.other|comment\\.bugbot_limit|comment\\.qodo_paused|comment\\.decision_needed|comment\\.clear_prs|comment\\.unclassified|review\\.bot|review\\.empty_wrapper|review\\.human|review_comment\\.bot|review_comment\\.human|status\\.coderabbit|status\\.vercel|status\\.other|status\\.reviewer_signoff\\.no_design_changes|sticky\\.auto_review_stamp|sticky\\.printcheck_gate_report|sticky\\.argus_diff_report|timeline\\.deployed|timeline\\.other|marker\\.unknown)",
+     "of": {
+      "t": "int",
+      "min": 1
+     }
+    },
+    "unknown": {
+     "t": "ref",
+     "to": "unknown_counts"
+    },
+    "evidence": {
+     "t": "ref",
+     "to": "evidence_ref"
+    }
+   }
+  },
+  "record@1:brief": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "record@1"
+     ]
+    },
+    "extractor": {
+     "t": "str",
+     "re": "provenance-extract [0-9]+"
+    },
+    "incomplete": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "events": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "event@1"
+     }
+    },
+    "kind": {
+     "t": "enum",
+     "of": [
+      "brief"
+     ]
+    },
+    "issue": {
+     "t": "int",
+     "min": 1
+    },
+    "state": {
+     "t": "enum",
+     "of": [
+      "open",
+      "closed"
+     ]
+    },
+    "state_reason": {
+     "t": "enum",
+     "of": [
+      "completed",
+      "not_planned",
+      "duplicate",
+      "reopened"
+     ],
+     "null": true
+    },
+    "created_at": {
+     "t": "ref",
+     "to": "ts"
+    },
+    "closed_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "labels": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "max": 100
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "design_name": {
+     "t": "ref",
+     "to": "design",
+     "null": true
+    },
+    "prs": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "evidence": {
+     "t": "ref",
+     "to": "evidence_ref"
+    }
+   }
+  },
+  "record@1:commit": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "record@1"
+     ]
+    },
+    "extractor": {
+     "t": "str",
+     "re": "provenance-extract [0-9]+"
+    },
+    "incomplete": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "events": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "event@1"
+     }
+    },
+    "kind": {
+     "t": "enum",
+     "of": [
+      "commit"
+     ]
+    },
+    "sha": {
+     "t": "ref",
+     "to": "sha40"
+    },
+    "committed_at": {
+     "t": "ref",
+     "to": "ts"
+    },
+    "designs": {
+     "t": "map",
+     "key": "[a-z0-9][a-z0-9-]{0,63}",
+     "of": {
+      "t": "ref",
+      "to": "membership"
+     }
+    },
+    "evidence": {
+     "t": "ref",
+     "to": "evidence_ref"
+    }
+   }
+  },
+  "record@1:release": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "record@1"
+     ]
+    },
+    "extractor": {
+     "t": "str",
+     "re": "provenance-extract [0-9]+"
+    },
+    "incomplete": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "events": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "event@1"
+     }
+    },
+    "kind": {
+     "t": "enum",
+     "of": [
+      "release"
+     ]
+    },
+    "tag": {
+     "t": "str",
+     "re": "[A-Za-z0-9._-]{1,100}"
+    },
+    "published_at": {
+     "t": "ref",
+     "to": "ts",
+     "null": true
+    },
+    "designs": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "design"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "evidence": {
+     "t": "ref",
+     "to": "evidence_ref"
+    }
+   }
+  },
+  "view@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "view@1"
+     ]
+    },
+    "design": {
+     "t": "ref",
+     "to": "design"
+    },
+    "extractor": {
+     "t": "str",
+     "re": "provenance-extract [0-9]+"
+    },
+    "aliases": {
+     "t": "obj",
+     "fields": {
+      "briefs": {
+       "t": "list",
+       "of": {
+        "t": "int",
+        "min": 1
+       },
+       "unique": true,
+       "sorted": true
+      },
+      "slugs": {
+       "t": "list",
+       "of": {
+        "t": "ref",
+        "to": "design"
+       },
+       "unique": true,
+       "sorted": true
+      }
+     }
+    },
+    "prs": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "briefs": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "commits": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "sha40"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "episodes": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "id": {
+        "t": "ref",
+        "to": "episode"
+       },
+       "kind": {
+        "t": "enum",
+        "of": [
+         "brief",
+         "round",
+         "merge",
+         "commit",
+         "day"
+        ]
+       },
+       "pr": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "issue": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "head": {
+        "t": "ref",
+        "to": "sha40",
+        "null": true
+       },
+       "start": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "end": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "events": {
+        "t": "list",
+        "of": {
+         "t": "ref",
+         "to": "event_id"
+        },
+        "unique": true
+       }
+      }
+     }
+    },
+    "events": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "event@1"
+     }
+    },
+    "maintenance": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "pr": {
+        "t": "int",
+        "min": 1
+       },
+       "membership": {
+        "t": "enum",
+        "of": [
+         "regen-only",
+         "sweep"
+        ]
+       },
+       "at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "url": {
+        "t": "ref",
+        "to": "url"
+       }
+      }
+     }
+    },
+    "releases": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "tag": {
+        "t": "str",
+        "re": "[A-Za-z0-9._-]{1,100}"
+       },
+       "published_at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "url": {
+        "t": "ref",
+        "to": "url"
+       }
+      }
+     }
+    },
+    "counts": {
+     "t": "obj",
+     "fields": {
+      "events": {
+       "t": "int",
+       "min": 0
+      },
+      "rounds": {
+       "t": "int",
+       "min": 0
+      },
+      "prs": {
+       "t": "int",
+       "min": 0
+      },
+      "maintenance": {
+       "t": "int",
+       "min": 0
+      },
+      "signoffs": {
+       "t": "obj",
+       "fields": {
+        "verified": {
+         "t": "int",
+         "min": 0
+        },
+        "window": {
+         "t": "int",
+         "min": 0
+        },
+        "claimed": {
+         "t": "int",
+         "min": 0
+        }
+       }
+      },
+      "triage": {
+       "t": "int",
+       "min": 0
+      },
+      "jobs_posted_nothing": {
+       "t": "int",
+       "min": 0
+      }
+     }
+    }
+   }
+  },
+  "bundle@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "bundle@1"
+     ]
+    },
+    "contract": {
+     "t": "int",
+     "min": 1
+    },
+    "extractor": {
+     "t": "str",
+     "re": "provenance-extract [0-9]+"
+    },
+    "main_sha": {
+     "t": "ref",
+     "to": "sha40"
+    },
+    "evidence_sha": {
+     "t": "ref",
+     "to": "sha40"
+    },
+    "producer_run": {
+     "t": "int",
+     "min": 1
+    },
+    "content_sha256": {
+     "t": "ref",
+     "to": "hex64"
+    },
+    "views": {
+     "t": "map",
+     "key": "[a-z0-9][a-z0-9-]{0,63}",
+     "of": {
+      "t": "ref",
+      "to": "view@1"
+     }
+    },
+    "views_sha256": {
+     "t": "map",
+     "key": "[a-z0-9][a-z0-9-]{0,63}",
+     "of": {
+      "t": "ref",
+      "to": "hex64"
+     }
+    }
+   }
+  },
+  "receipt@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "receipt@1"
+     ]
+    },
+    "source": {
+     "t": "str",
+     "re": "live|snapshot:pr[0-9]+"
+    },
+    "workflow": {
+     "t": "str",
+     "re": "[a-z0-9][a-z0-9-]{0,63}\\.yml"
+    },
+    "run": {
+     "t": "ref",
+     "to": "run"
+    },
+    "kind": {
+     "t": "enum",
+     "of": [
+      "full",
+      "stub"
+     ]
+    },
+    "step_grammar": {
+     "t": "int",
+     "min": 1
+    },
+    "jobs": {
+     "t": "list",
+     "of": {
+      "t": "open",
+      "fields": {
+       "id": {
+        "t": "int",
+        "min": 1
+       },
+       "run_attempt": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "name": {
+        "t": "str",
+        "max": 200
+       },
+       "steps": {
+        "t": "list",
+        "of": {
+         "t": "any"
+        }
+       }
+      }
+     },
+     "null": true
+    },
+    "jobs_sha256": {
+     "t": "ref",
+     "to": "hex64"
+    },
+    "stub": {
+     "t": "obj",
+     "fields": {
+      "jobs": {
+       "t": "list",
+       "of": {
+        "t": "obj",
+        "fields": {
+         "name": {
+          "t": "str",
+          "max": 200
+         },
+         "conclusion": {
+          "t": "str",
+          "max": 40,
+          "null": true
+         },
+         "run_attempt": {
+          "t": "int",
+          "min": 1,
+          "null": true
+         }
+        }
+       }
+      }
+     },
+     "null": true
+    },
+    "suspicious_steps": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "max": 200
+     },
+     "unique": true,
+     "sorted": true
+    }
+   }
+  },
+  "raw-pr@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "raw-pr@1"
+     ]
+    },
+    "pr": {
+     "t": "int",
+     "min": 1
+    },
+    "revision": {
+     "t": "int",
+     "min": 1
+    },
+    "captured": {
+     "t": "obj",
+     "fields": {
+      "run_id": {
+       "t": "int",
+       "min": 0
+      },
+      "harvester": {
+       "t": "str",
+       "max": 60
+      },
+      "digest": {
+       "t": "enum",
+       "of": [
+        "body-digest@1",
+        "body-digest@2"
+       ]
+      }
+     }
+    },
+    "incomplete": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "linked_issues": {
+     "t": "list",
+     "of": {
+      "t": "int",
+      "min": 1
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "pull": {
+     "t": "obj",
+     "fields": {
+      "number": {
+       "t": "int",
+       "min": 1
+      },
+      "state": {
+       "t": "enum",
+       "of": [
+        "open",
+        "closed"
+       ]
+      },
+      "draft": {
+       "t": "bool"
+      },
+      "title": {
+       "t": "str",
+       "max": 1000,
+       "null": true
+      },
+      "created_at": {
+       "t": "ref",
+       "to": "ts"
+      },
+      "updated_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "closed_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "merged_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "merged": {
+       "t": "bool"
+      },
+      "merge_commit_sha": {
+       "t": "ref",
+       "to": "sha40",
+       "null": true
+      },
+      "user": {
+       "t": "ref",
+       "to": "user"
+      },
+      "merged_by": {
+       "t": "ref",
+       "to": "user"
+      },
+      "head": {
+       "t": "obj",
+       "fields": {
+        "ref": {
+         "t": "str",
+         "max": 255,
+         "null": true
+        },
+        "sha": {
+         "t": "ref",
+         "to": "sha40",
+         "null": true
+        },
+        "repo": {
+         "t": "str",
+         "max": 200,
+         "null": true
+        }
+       }
+      },
+      "base": {
+       "t": "obj",
+       "fields": {
+        "ref": {
+         "t": "str",
+         "max": 255,
+         "null": true
+        },
+        "sha": {
+         "t": "ref",
+         "to": "sha40",
+         "null": true
+        }
+       }
+      },
+      "labels": {
+       "t": "list",
+       "of": {
+        "t": "str",
+        "max": 100
+       },
+       "unique": true,
+       "sorted": true
+      },
+      "body": {
+       "t": "ref",
+       "to": "body_digest"
+      },
+      "commits": {
+       "t": "int",
+       "min": 0,
+       "null": true
+      },
+      "changed_files": {
+       "t": "int",
+       "min": 0,
+       "null": true
+      }
+     }
+    },
+    "files": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "filename": {
+        "t": "str",
+        "max": 500
+       },
+       "status": {
+        "t": "str",
+        "max": 40,
+        "null": true
+       },
+       "previous_filename": {
+        "t": "str",
+        "max": 500,
+        "null": true
+       }
+      }
+     }
+    },
+    "commits": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "sha": {
+        "t": "ref",
+        "to": "sha40"
+       },
+       "parents": {
+        "t": "list",
+        "of": {
+         "t": "ref",
+         "to": "sha40"
+        }
+       },
+       "author": {
+        "t": "ref",
+        "to": "user"
+       },
+       "committer": {
+        "t": "ref",
+        "to": "user"
+       },
+       "commit": {
+        "t": "obj",
+        "fields": {
+         "author": {
+          "t": "obj",
+          "fields": {
+           "name": {
+            "t": "str",
+            "max": 200,
+            "null": true
+           },
+           "email": {
+            "t": "str",
+            "max": 200,
+            "null": true
+           },
+           "date": {
+            "t": "ref",
+            "to": "ts",
+            "null": true
+           }
+          },
+          "null": true
+         },
+         "committer": {
+          "t": "obj",
+          "fields": {
+           "name": {
+            "t": "str",
+            "max": 200,
+            "null": true
+           },
+           "email": {
+            "t": "str",
+            "max": 200,
+            "null": true
+           },
+           "date": {
+            "t": "ref",
+            "to": "ts",
+            "null": true
+           }
+          },
+          "null": true
+         },
+         "message": {
+          "t": "ref",
+          "to": "message_digest"
+         },
+         "verified": {
+          "t": "bool"
+         },
+         "verification_reason": {
+          "t": "str",
+          "max": 60,
+          "null": true
+         }
+        }
+       }
+      }
+     }
+    },
+    "reviews": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "id": {
+        "t": "int",
+        "min": 1
+       },
+       "user": {
+        "t": "ref",
+        "to": "user"
+       },
+       "state": {
+        "t": "str",
+        "max": 40,
+        "null": true
+       },
+       "submitted_at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "commit_id": {
+        "t": "ref",
+        "to": "sha40",
+        "null": true
+       },
+       "body": {
+        "t": "ref",
+        "to": "body_digest"
+       }
+      }
+     }
+    },
+    "review_comments": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "id": {
+        "t": "int",
+        "min": 1
+       },
+       "user": {
+        "t": "ref",
+        "to": "user"
+       },
+       "created_at": {
+        "t": "ref",
+        "to": "ts"
+       },
+       "updated_at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "in_reply_to_id": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "pull_request_review_id": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "commit_id": {
+        "t": "ref",
+        "to": "sha40",
+        "null": true
+       },
+       "path": {
+        "t": "str",
+        "max": 500,
+        "null": true
+       },
+       "body": {
+        "t": "ref",
+        "to": "body_digest"
+       }
+      }
+     }
+    },
+    "issue_comments": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "id": {
+        "t": "int",
+        "min": 1
+       },
+       "user": {
+        "t": "ref",
+        "to": "user"
+       },
+       "created_at": {
+        "t": "ref",
+        "to": "ts"
+       },
+       "updated_at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "app": {
+        "t": "str",
+        "re": "[a-z0-9-]{1,64}",
+        "null": true
+       },
+       "body": {
+        "t": "ref",
+        "to": "body_digest"
+       }
+      }
+     }
+    },
+    "timeline": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "event": {
+        "t": "str",
+        "re": "[a-z_-]{1,40}"
+       },
+       "id": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "created_at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "actor": {
+        "t": "ref",
+        "to": "user"
+       },
+       "app": {
+        "t": "str",
+        "re": "[a-z0-9-]{1,64}",
+        "null": true
+       },
+       "commit_id": {
+        "t": "ref",
+        "to": "sha40",
+        "null": true
+       },
+       "label": {
+        "t": "str",
+        "max": 100,
+        "null": true
+       },
+       "requested_reviewer": {
+        "t": "ref",
+        "to": "login",
+        "null": true
+       },
+       "source_issue": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "source_is_pr": {
+        "t": "bool",
+        "null": true
+       },
+       "state": {
+        "t": "str",
+        "max": 40,
+        "null": true
+       },
+       "state_reason": {
+        "t": "str",
+        "max": 40,
+        "null": true
+       }
+      }
+     }
+    },
+    "threads": {
+     "t": "obj",
+     "fields": {
+      "source": {
+       "t": "enum",
+       "of": [
+        "graphql",
+        "ccr-fixture"
+       ]
+      },
+      "total": {
+       "t": "int",
+       "min": 0
+      },
+      "pr_last_edited_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "nodes": {
+       "t": "list",
+       "of": {
+        "t": "obj",
+        "fields": {
+         "first_comment_id": {
+          "t": "int",
+          "min": 1,
+          "null": true
+         },
+         "resolved": {
+          "t": "bool"
+         },
+         "outdated": {
+          "t": "bool"
+         }
+        }
+       }
+      }
+     }
+    },
+    "ci_runs": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "run"
+     }
+    },
+    "statuses": {
+     "t": "map",
+     "key": "[0-9a-f]{40}",
+     "of": {
+      "t": "list",
+      "of": {
+       "t": "ref",
+       "to": "status"
+      }
+     }
+    },
+    "deployments": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "id": {
+        "t": "int",
+        "min": 1
+       },
+       "sha": {
+        "t": "ref",
+        "to": "sha40",
+        "null": true
+       },
+       "ref": {
+        "t": "str",
+        "max": 255,
+        "null": true
+       },
+       "environment": {
+        "t": "str",
+        "max": 100,
+        "null": true
+       },
+       "created_at": {
+        "t": "ref",
+        "to": "ts"
+       },
+       "creator": {
+        "t": "ref",
+        "to": "login",
+        "null": true
+       },
+       "statuses": {
+        "t": "list",
+        "of": {
+         "t": "obj",
+         "fields": {
+          "id": {
+           "t": "int",
+           "min": 1
+          },
+          "state": {
+           "t": "str",
+           "max": 40
+          },
+          "created_at": {
+           "t": "ref",
+           "to": "ts"
+          },
+          "creator": {
+           "t": "ref",
+           "to": "login",
+           "null": true
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "raw-brief@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "raw-brief@1"
+     ]
+    },
+    "number": {
+     "t": "int",
+     "min": 1
+    },
+    "revision": {
+     "t": "int",
+     "min": 1
+    },
+    "captured": {
+     "t": "obj",
+     "fields": {
+      "run_id": {
+       "t": "int",
+       "min": 0
+      },
+      "harvester": {
+       "t": "str",
+       "max": 60
+      },
+      "digest": {
+       "t": "enum",
+       "of": [
+        "body-digest@1",
+        "body-digest@2"
+       ]
+      }
+     }
+    },
+    "incomplete": {
+     "t": "list",
+     "of": {
+      "t": "str",
+      "re": "(settle-deferred|deployment-not-terminal|graphql-unavailable|threads-unavailable|brief-open|commits-truncated|ci-runs-truncated|files-truncated|force-pushed-heads|no-ci-runs|statuses-unavailable:[0-9a-f]{8}|receipts-missing:[0-9]+|codebasis-unavailable:[0-9a-f]{8})"
+     },
+     "unique": true,
+     "sorted": true
+    },
+    "issue": {
+     "t": "obj",
+     "fields": {
+      "number": {
+       "t": "int",
+       "min": 1
+      },
+      "state": {
+       "t": "enum",
+       "of": [
+        "open",
+        "closed"
+       ]
+      },
+      "state_reason": {
+       "t": "str",
+       "max": 40,
+       "null": true
+      },
+      "title": {
+       "t": "str",
+       "max": 1000,
+       "null": true
+      },
+      "created_at": {
+       "t": "ref",
+       "to": "ts"
+      },
+      "updated_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "closed_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "user": {
+       "t": "ref",
+       "to": "user"
+      },
+      "labels": {
+       "t": "list",
+       "of": {
+        "t": "str",
+        "max": 100
+       },
+       "unique": true,
+       "sorted": true
+      },
+      "app": {
+       "t": "str",
+       "re": "[a-z0-9-]{1,64}",
+       "null": true
+      },
+      "body": {
+       "t": "ref",
+       "to": "body_digest"
+      },
+      "last_edited_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      }
+     }
+    },
+    "comments": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "id": {
+        "t": "int",
+        "min": 1
+       },
+       "user": {
+        "t": "ref",
+        "to": "user"
+       },
+       "created_at": {
+        "t": "ref",
+        "to": "ts"
+       },
+       "updated_at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "app": {
+        "t": "str",
+        "re": "[a-z0-9-]{1,64}",
+        "null": true
+       },
+       "body": {
+        "t": "ref",
+        "to": "body_digest"
+       }
+      }
+     }
+    },
+    "timeline": {
+     "t": "list",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "event": {
+        "t": "str",
+        "re": "[a-z_-]{1,40}"
+       },
+       "id": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "created_at": {
+        "t": "ref",
+        "to": "ts",
+        "null": true
+       },
+       "actor": {
+        "t": "ref",
+        "to": "user"
+       },
+       "app": {
+        "t": "str",
+        "re": "[a-z0-9-]{1,64}",
+        "null": true
+       },
+       "commit_id": {
+        "t": "ref",
+        "to": "sha40",
+        "null": true
+       },
+       "label": {
+        "t": "str",
+        "max": 100,
+        "null": true
+       },
+       "requested_reviewer": {
+        "t": "ref",
+        "to": "login",
+        "null": true
+       },
+       "source_issue": {
+        "t": "int",
+        "min": 1,
+        "null": true
+       },
+       "source_is_pr": {
+        "t": "bool",
+        "null": true
+       },
+       "state": {
+        "t": "str",
+        "max": 40,
+        "null": true
+       },
+       "state_reason": {
+        "t": "str",
+        "max": 40,
+        "null": true
+       }
+      }
+     }
+    }
+   }
+  },
+  "raw-release@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "raw-release@1"
+     ]
+    },
+    "tag": {
+     "t": "str",
+     "re": "[A-Za-z0-9._-]{1,100}"
+    },
+    "revision": {
+     "t": "int",
+     "min": 1
+    },
+    "captured": {
+     "t": "obj",
+     "fields": {
+      "run_id": {
+       "t": "int",
+       "min": 0
+      },
+      "harvester": {
+       "t": "str",
+       "max": 60
+      },
+      "digest": {
+       "t": "enum",
+       "of": [
+        "body-digest@1",
+        "body-digest@2"
+       ]
+      }
+     }
+    },
+    "release": {
+     "t": "obj",
+     "fields": {
+      "id": {
+       "t": "int",
+       "min": 1
+      },
+      "tag_name": {
+       "t": "str",
+       "re": "[A-Za-z0-9._-]{1,100}"
+      },
+      "name": {
+       "t": "str",
+       "max": 300,
+       "null": true
+      },
+      "draft": {
+       "t": "bool"
+      },
+      "prerelease": {
+       "t": "bool"
+      },
+      "created_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "published_at": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "author": {
+       "t": "ref",
+       "to": "user"
+      },
+      "target_commitish": {
+       "t": "str",
+       "max": 255,
+       "null": true
+      },
+      "body": {
+       "t": "ref",
+       "to": "body_digest"
+      },
+      "assets": {
+       "t": "list",
+       "of": {
+        "t": "obj",
+        "fields": {
+         "name": {
+          "t": "str",
+          "max": 300
+         },
+         "size": {
+          "t": "int",
+          "min": 0,
+          "null": true
+         },
+         "content_type": {
+          "t": "str",
+          "max": 100,
+          "null": true
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "raw-snapshot-runs@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "raw-snapshot-runs@1"
+     ]
+    },
+    "snapshot": {
+     "t": "str",
+     "re": "pr[0-9]+"
+    },
+    "workflow": {
+     "t": "str",
+     "re": "[a-z0-9][a-z0-9-]{0,63}\\.yml"
+    },
+    "runs": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "run"
+     }
+    }
+   }
+  },
+  "raw-snapshot-statuses@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "raw-snapshot-statuses@1"
+     ]
+    },
+    "snapshot": {
+     "t": "str",
+     "re": "pr[0-9]+"
+    },
+    "sha": {
+     "t": "ref",
+     "to": "sha40"
+    },
+    "statuses": {
+     "t": "list",
+     "of": {
+      "t": "ref",
+      "to": "status"
+     }
+    },
+    "check_runs_dropped": {
+     "t": "int",
+     "min": 0
+    }
+   }
+  },
+  "state@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "state@1"
+     ]
+    },
+    "versions": {
+     "t": "obj",
+     "fields": {
+      "harvester": {
+       "t": "str",
+       "max": 40
+      },
+      "digest": {
+       "t": "enum",
+       "of": [
+        "body-digest@1",
+        "body-digest@2"
+       ]
+      },
+      "step_grammar": {
+       "t": "int",
+       "min": 1
+      },
+      "contract": {
+       "t": "int",
+       "min": 1
+      }
+     }
+    },
+    "cursors": {
+     "t": "obj",
+     "fields": {
+      "receipts": {
+       "t": "map",
+       "key": "[a-z0-9][a-z0-9-]{0,63}\\.yml",
+       "of": {
+        "t": "ref",
+        "to": "ts"
+       }
+      },
+      "prs_updated": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "briefs_updated": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      },
+      "releases_published": {
+       "t": "ref",
+       "to": "ts",
+       "null": true
+      }
+     }
+    },
+    "pending": {
+     "t": "obj",
+     "fields": {
+      "pr": {
+       "t": "map",
+       "key": "[0-9]+",
+       "of": {
+        "t": "obj",
+        "fields": {
+         "closed_at": {
+          "t": "ref",
+          "to": "ts"
+         },
+         "due_at": {
+          "t": "ref",
+          "to": "ts"
+         },
+         "defer_until": {
+          "t": "ref",
+          "to": "ts"
+         },
+         "reasons": {
+          "t": "list",
+          "of": {
+           "t": "str",
+           "max": 80
+          },
+          "unique": true,
+          "sorted": true
+         }
+        }
+       }
+      },
+      "brief": {
+       "t": "map",
+       "key": "[0-9]+",
+       "of": {
+        "t": "obj",
+        "fields": {
+         "closed_at": {
+          "t": "ref",
+          "to": "ts",
+          "null": true
+         },
+         "due_at": {
+          "t": "ref",
+          "to": "ts"
+         },
+         "defer_until": {
+          "t": "ref",
+          "to": "ts"
+         },
+         "reasons": {
+          "t": "list",
+          "of": {
+           "t": "str",
+           "max": 80
+          },
+          "unique": true,
+          "sorted": true
+         }
+        }
+       }
+      }
+     }
+    },
+    "skipped": {
+     "t": "obj",
+     "fields": {
+      "pr": {
+       "t": "map",
+       "key": "[0-9]+",
+       "of": {
+        "t": "obj",
+        "fields": {
+         "closed_at": {
+          "t": "ref",
+          "to": "ts"
+         }
+        }
+       }
+      }
+     }
+    },
+    "ingested": {
+     "t": "map",
+     "key": "pr[0-9]+",
+     "of": {
+      "t": "obj",
+      "fields": {
+       "manifest_sha256": {
+        "t": "ref",
+        "to": "hex64"
+       },
+       "commit": {
+        "t": "ref",
+        "to": "sha40"
+       },
+       "version": {
+        "t": "int",
+        "min": 1
+       },
+       "snapshot_end": {
+        "t": "ref",
+        "to": "ts"
+       },
+       "receipts": {
+        "t": "int",
+        "min": 0
+       },
+       "statuses": {
+        "t": "int",
+        "min": 0
+       },
+       "runs_listings": {
+        "t": "int",
+        "min": 0
+       }
+      }
+     }
+    }
+   }
+  },
+  "intent@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "intent@1"
+     ]
+    },
+    "ref": {
+     "t": "enum",
+     "of": [
+      "provenance",
+      "provenance-site"
+     ]
+    },
+    "sha": {
+     "t": "ref",
+     "to": "sha40"
+    },
+    "parent": {
+     "t": "ref",
+     "to": "sha40",
+     "null": true
+    },
+    "run_id": {
+     "t": "int",
+     "min": 1
+    },
+    "run_attempt": {
+     "t": "int",
+     "min": 1
+    }
+   }
+  },
+  "checkpoint@1": {
+   "t": "obj",
+   "fields": {
+    "format": {
+     "t": "enum",
+     "of": [
+      "checkpoint@1"
+     ]
+    },
+    "ref": {
+     "t": "enum",
+     "of": [
+      "provenance",
+      "provenance-site"
+     ]
+    },
+    "sha": {
+     "t": "ref",
+     "to": "sha40"
+    },
+    "run_id": {
+     "t": "int",
+     "min": 1
+    },
+    "run_attempt": {
+     "t": "int",
+     "min": 1
+    }
+   }
+  }
+ },
+ "trees": {
+  "provenance": [
+   "vercel.json",
+   "scripts/vercel-ignore-build.sh",
+   "README.md",
+   "FORMAT",
+   "state.json",
+   "receipts/YYYY/MM/DD/<run_id>.a<attempt>.json.gz",
+   "raw/pr/<n>.json.gz",
+   "raw/pr/<n>.r<K>.json.gz",
+   "raw/brief/<n>.json.gz",
+   "raw/brief/<n>.r<K>.json.gz",
+   "raw/release/<tag>.json.gz",
+   "raw/snapshot/pr<N>/runs/<workflow>.json.gz",
+   "raw/snapshot/pr<N>/statuses/<sha40>.json.gz"
+  ],
+  "provenance-site": [
+   "vercel.json",
+   "scripts/vercel-ignore-build.sh",
+   "FORMAT",
+   "records/pr/<n>.json",
+   "records/brief/<n>.json",
+   "records/commit/<sha40>.json",
+   "records/release/<tag>.json",
+   "views/<design>.json",
+   "site/bundle.json"
+  ]
+ }
+}

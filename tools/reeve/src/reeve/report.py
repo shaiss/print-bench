@@ -68,6 +68,29 @@ def _line_lock_leak(f: dict) -> str:
     )
 
 
+def _line_provenance_tip(f: dict) -> str:
+    # Every field is our own: a ref name, a verdict word, 8-hex shas from validated
+    # artifact names / ref reads, and a reason string this package composed.
+    tip = f["tip"] or "absent"
+    checkpoint = f["checkpoint"] or "none"
+    return (f"- `{f['ref']}` — {f['verdict']}: tip {tip}, newest checkpoint {checkpoint} "
+            f"({f['reason']})")
+
+
+def _line_provenance_lag(f: dict) -> str:
+    if f["kind"] == "overdue":
+        # A legitimately deferred unit is measured from defer_until, a failing one from due_at.
+        when = "deferred until" if f["anchor"] == "defer_until" else "was due"
+        return (f"- overdue: {f['unit']} {when} {f['since']} — {f['hours_past']}h past "
+                f"that + grace ({f['count']} pending unit(s) overdue)")
+    if f["kind"] == "stall":
+        shown = ", ".join(f"#{n}" for n in f["prs"])
+        more = f" (+{f['count'] - len(f['prs'])} more)" if f["count"] > len(f["prs"]) else ""
+        return (f"- stall: {f['count']} PR(s) closed more than {f['window_hours']}h ago are in "
+                f"none of frozen / pending / skipped: {shown}{more}")
+    return f"- {f['kind']}: {f['detail']}"
+
+
 def _line_adoption_study(f: dict) -> str:
     # The title is untrusted GitHub text, so it goes through _clean_title.
     return f"- #{f['number']} {_clean_title(f['title'])} — {f['state']}"
@@ -121,6 +144,13 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any,
         ("lock-leak",
          f"Ship-lock leak — an uncorroborated 🚢 SHIP-LOCK older than {cfg.lock_leak_hours:g}h",
          _line_lock_leak),
+        ("provenance-foreign-tip",
+         "Provenance tip continuity — a data ref that is not its newest checkpoint",
+         _line_provenance_tip),
+        ("provenance-lag",
+         f"Provenance lag — a unit overdue by more than {cfg.provenance_lag_hours}h, "
+         "or the harvester no longer seeing closed PRs",
+         _line_provenance_lag),
         ("score-regression",
          f"Score regression — a part below {cfg.score_floor:g}/100 or down ≥{cfg.score_drop}",
          _line_score),
@@ -153,7 +183,8 @@ def render(result: dict[str, Any], snapshot: dict[str, Any], cfg: Any,
         f"Thresholds: low_headroom_pct={cfg.low_headroom_pct:g}, score_drop={cfg.score_drop}, "
         f"score_floor={cfg.score_floor:g}, walltime_ratio={cfg.walltime_ratio:g}, "
         f"walltime_min_seconds={cfg.walltime_min_seconds}, "
-        f"routine_dead_runs={cfg.routine_dead_runs}, lock_leak_hours={cfg.lock_leak_hours:g}.",
+        f"routine_dead_runs={cfg.routine_dead_runs}, lock_leak_hours={cfg.lock_leak_hours:g}, "
+        f"provenance_lag_hours={cfg.provenance_lag_hours}.",
         "",
         "## Summary",
         "",
