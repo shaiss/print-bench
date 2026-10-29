@@ -214,6 +214,12 @@ assert(len(letter_kern) == len(name) - 1, str(
     len(name), "-glyph name; it needs exactly ", len(name) - 1,
     " (one per gap). Any glyph with free-ended arms (E, F, L, T) wants a",
     " weld into its right-hand neighbour — see NOTES.md O3."));
+// wordpair() hardcodes letter_ang(0/1). A one-glyph rename is legal above
+// (letter_kern = []) but would read past advs/kerns and degrade to undef
+// geometry — refuse here, before module assignment binding evaluates it.
+assert(part != "wordpair" || len(name) >= 2, str(
+    "WORDPAIR: needs at least two glyphs to sample the first junction ",
+    "(got ", len(name), ")."));
 advs   = [for (i = [0 : len(name) - 1]) _adv_mm(name[i])];
 kerns  = letter_kern;
 word_w = _vsum(advs, len(advs)) - _vsum(kerns, len(kerns));
