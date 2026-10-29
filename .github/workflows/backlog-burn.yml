@@ -2190,21 +2190,21 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    env:
-      PRESENT_1: ${{ needs.burn.outputs.diag_present_1 }}
-      DIAG_1: ${{ needs.burn.outputs.diag_1 }}
-      PRESENT_2: ${{ needs.burn.outputs.diag_present_2 }}
-      DIAG_2: ${{ needs.burn.outputs.diag_2 }}
-      PRESENT_3: ${{ needs.burn.outputs.diag_present_3 }}
-      DIAG_3: ${{ needs.burn.outputs.diag_3 }}
-      PRESENT_4: ${{ needs.burn.outputs.diag_present_4 }}
-      DIAG_4: ${{ needs.burn.outputs.diag_4 }}
-      PRESENT_5: ${{ needs.burn.outputs.diag_present_5 }}
-      DIAG_5: ${{ needs.burn.outputs.diag_5 }}
-      RUNNER_TEMP: ${{ runner.temp }}
     steps:
       - name: Materialize sealed diag.json
         id: materialize
+        env:
+          PRESENT_1: ${{ needs.burn.outputs.diag_present_1 }}
+          DIAG_1: ${{ needs.burn.outputs.diag_1 }}
+          PRESENT_2: ${{ needs.burn.outputs.diag_present_2 }}
+          DIAG_2: ${{ needs.burn.outputs.diag_2 }}
+          PRESENT_3: ${{ needs.burn.outputs.diag_present_3 }}
+          DIAG_3: ${{ needs.burn.outputs.diag_3 }}
+          PRESENT_4: ${{ needs.burn.outputs.diag_present_4 }}
+          DIAG_4: ${{ needs.burn.outputs.diag_4 }}
+          PRESENT_5: ${{ needs.burn.outputs.diag_present_5 }}
+          DIAG_5: ${{ needs.burn.outputs.diag_5 }}
+          RUNNER_TEMP: ${{ runner.temp }}
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
