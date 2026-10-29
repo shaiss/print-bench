@@ -889,9 +889,10 @@ _fuse_warn_yaml_pin() {  # _fuse_warn_yaml_pin <auto-review.yml>
     printf '%s' 'grep -qi "STRONG WARN"'; return 1
   fi
   # A PR-head checkout path must not return on a runnable line (comments
-  # naming the script are fine): that was the pre-restore hole.
+  # naming the script are fine): that was the pre-restore hole. Optional
+  # closing quote after .sh covers `"scripts/reviewer-signoff.sh" fuse-warn`.
   if grep -vE '^[[:space:]]*#' "$f" \
-       | grep -qE 'scripts/reviewer-signoff\.sh[[:space:]]+(fuse-warn|key|decide|round)'; then
+       | grep -qE 'scripts/reviewer-signoff\.sh["'"'"']?[[:space:]]+(fuse-warn|key|decide|round)'; then
     printf '%s' 'scripts/reviewer-signoff.sh (PR-head path)'; return 1
   fi
 }
@@ -928,6 +929,13 @@ selftest_fuse_warn_drift() {
     echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML with no fuse-warn call"; pass=0
   else
     echo "selftest ok    fuse-warn-drift NEGCTL a YAML that dropped fuse-warn fails the pin"
+  fi
+  # Quoted PR-head path must also fail the pin (closing quote before the verb).
+  { cat "$wf"; printf '%s\n' '          "scripts/reviewer-signoff.sh" fuse-warn'; } > "$tmp"
+  if _fuse_warn_yaml_pin "$tmp" >/dev/null; then
+    echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML with a PR-head fuse-warn call"; pass=0
+  else
+    echo "selftest ok    fuse-warn-drift NEGCTL a YAML with a PR-head fuse-warn call fails the pin"
   fi
   rm -f "$tmp"
 }
