@@ -4584,10 +4584,37 @@ EOF
     echo "selftest: burn start_ref does not snapshot pre-agent PIDs" >&2
     exit 1
   }
-  grep -q 'backlog-burn-pre-agent-pids' "$burn" || {
-    echo "selftest: burn is missing the pre-agent PID snapshot path" >&2
+  grep -q 'pid_snap_b64=' "$burn" || {
+    echo "selftest: burn start_ref does not seal PID snapshot into step outputs" >&2
     exit 1
   }
+  grep -q 'PID_SNAP_B64:' "$burn" || {
+    echo "selftest: burn capture/bundle do not receive sealed PID_SNAP_B64" >&2
+    exit 1
+  }
+  # Must rematerialize from sealed outputs — never treat the predictable
+  # agent-writable $RUNNER_TEMP/backlog-burn-pre-agent-pids as authority
+  # (Bugbot HIGH: snapshot file gates delivery and reap).
+  if grep -E 'PID_SNAP="\$\{RUNNER_TEMP\}/backlog-burn-pre-agent-pids"' "$burn" >/dev/null; then
+    echo "selftest: burn still trusts agent-writable pre-agent-pids path" >&2
+    exit 1
+  fi
+  grep -q 'conservative reap' "$burn" || {
+    echo "selftest: burn does not fail-safe to conservative reap on snap integrity failure" >&2
+    exit 1
+  }
+  # Integrity failure must warn+continue, never exit 1 before reap/pending.
+  if awk '
+    /PID snapshot outputs empty|PID snapshot b64 decode failed|PID snapshot digest mismatch/ {
+      in_fail=1; next
+    }
+    in_fail && /exit 1/ { found=1; exit }
+    in_fail && /reap_agent_orphans\(\)|reap_ppid_of\(\)/ { in_fail=0 }
+    END { exit !found }
+  ' "$burn"; then
+    echo "selftest: snap integrity failure still exits 1 before reap" >&2
+    exit 1
+  fi
   # No name-based exemptions remain (comm matching is agent-spoofable).
   if grep -E 'case "\$comm"|^\s+Runner\.\*\|Agent' "$burn" >/dev/null; then
     echo "selftest: burn reaper still has comm/name-based exemptions" >&2

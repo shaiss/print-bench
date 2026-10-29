@@ -224,13 +224,16 @@ jobs:
           # Pre-agent PID snapshot for post-agent reapers. Capture/bundle kill
           # every PID not in this set (except the reaper, its ancestors, and
           # its process group). No comm/name exemptions — those are spoofable.
+          # Seal the snapshot (and its digest) through start_ref step outputs
+          # so later steps rematerialize from Actions-sealed data — never from
+          # a predictable agent-writable $RUNNER_TEMP path (Bugbot HIGH:
+          # "Snapshot file gates delivery and reap").
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot write PID snapshot" >&2
             exit 1
           fi
-          pid_snap="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
+          pid_snap="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
           umask 077
-          : >"$pid_snap"
           shopt -s nullglob
           for d in /proc/[0-9]*; do
             pid="${d#/proc/}"
@@ -240,9 +243,12 @@ jobs:
             printf '%s\n' "$pid"
           done >"$pid_snap"
           shopt -u nullglob
-          chmod 644 -- "$pid_snap"
+          chmod 600 -- "$pid_snap"
           pid_snap_sha256="$(sha256sum "$pid_snap" | awk '{print $1}')"
+          pid_snap_b64="$(base64 -w0 <"$pid_snap")"
           echo "pid_snap_sha256=${pid_snap_sha256}" >> "$GITHUB_OUTPUT"
+          echo "pid_snap_b64=${pid_snap_b64}" >> "$GITHUB_OUTPUT"
+          rm -f -- "$pid_snap"
 
       - name: Prove lock-cleanup restore leaves a regular file
         # #923: fail loudly BEFORE any agent work if the settle job's
@@ -694,6 +700,9 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          # Snapshot body sealed at start_ref — rematerialized below; do not
+          # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
+          PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -728,20 +737,35 @@ jobs:
           # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
           # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
           # its own process group (helpers during TERM→KILL).
-          if [ -z "${PID_SNAP_SHA256:-}" ]; then
-            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+          # Rematerialize from sealed step outputs. A missing/mismatched/
+          # agent-replaced file at the old predictable path must NOT exit 1
+          # here: that aborted reap (capture) and left bundle with no pending
+          # (neither-delivered-nor-declined). Integrity failure → empty spare
+          # set (conservative reap) and continue.
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
-          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
-            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
-            exit 1
+          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
+          snap_ok=0
+          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
+            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
+          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
+            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
+          else
+            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
+            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
+              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
+            else
+              snap_ok=1
+            fi
           fi
-          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-            echo "::error::pre-agent PID snapshot digest mismatch" >&2
-            exit 1
+          if [ "$snap_ok" -ne 1 ]; then
+            : >"$PID_SNAP"
           fi
+          chmod 600 -- "$PID_SNAP"
           reap_ppid_of() {
             awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
           }
@@ -886,6 +910,9 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          # Snapshot body sealed at start_ref — rematerialized below; do not
+          # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
+          PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -920,20 +947,35 @@ jobs:
           # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
           # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
           # its own process group (helpers during TERM→KILL).
-          if [ -z "${PID_SNAP_SHA256:-}" ]; then
-            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+          # Rematerialize from sealed step outputs. A missing/mismatched/
+          # agent-replaced file at the old predictable path must NOT exit 1
+          # here: that aborted reap (capture) and left bundle with no pending
+          # (neither-delivered-nor-declined). Integrity failure → empty spare
+          # set (conservative reap) and continue.
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
-          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
-            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
-            exit 1
+          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
+          snap_ok=0
+          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
+            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
+          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
+            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
+          else
+            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
+            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
+              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
+            else
+              snap_ok=1
+            fi
           fi
-          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-            echo "::error::pre-agent PID snapshot digest mismatch" >&2
-            exit 1
+          if [ "$snap_ok" -ne 1 ]; then
+            : >"$PID_SNAP"
           fi
+          chmod 600 -- "$PID_SNAP"
           reap_ppid_of() {
             awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
           }
@@ -1076,6 +1118,9 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          # Snapshot body sealed at start_ref — rematerialized below; do not
+          # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
+          PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -1110,20 +1155,35 @@ jobs:
           # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
           # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
           # its own process group (helpers during TERM→KILL).
-          if [ -z "${PID_SNAP_SHA256:-}" ]; then
-            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+          # Rematerialize from sealed step outputs. A missing/mismatched/
+          # agent-replaced file at the old predictable path must NOT exit 1
+          # here: that aborted reap (capture) and left bundle with no pending
+          # (neither-delivered-nor-declined). Integrity failure → empty spare
+          # set (conservative reap) and continue.
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
-          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
-            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
-            exit 1
+          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
+          snap_ok=0
+          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
+            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
+          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
+            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
+          else
+            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
+            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
+              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
+            else
+              snap_ok=1
+            fi
           fi
-          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-            echo "::error::pre-agent PID snapshot digest mismatch" >&2
-            exit 1
+          if [ "$snap_ok" -ne 1 ]; then
+            : >"$PID_SNAP"
           fi
+          chmod 600 -- "$PID_SNAP"
           reap_ppid_of() {
             awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
           }
@@ -1274,6 +1334,9 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          # Snapshot body sealed at start_ref — rematerialized below; do not
+          # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
+          PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -1308,20 +1371,35 @@ jobs:
           # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
           # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
           # its own process group (helpers during TERM→KILL).
-          if [ -z "${PID_SNAP_SHA256:-}" ]; then
-            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+          # Rematerialize from sealed step outputs. A missing/mismatched/
+          # agent-replaced file at the old predictable path must NOT exit 1
+          # here: that aborted reap (capture) and left bundle with no pending
+          # (neither-delivered-nor-declined). Integrity failure → empty spare
+          # set (conservative reap) and continue.
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
-          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
-            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
-            exit 1
+          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
+          snap_ok=0
+          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
+            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
+          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
+            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
+          else
+            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
+            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
+              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
+            else
+              snap_ok=1
+            fi
           fi
-          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-            echo "::error::pre-agent PID snapshot digest mismatch" >&2
-            exit 1
+          if [ "$snap_ok" -ne 1 ]; then
+            : >"$PID_SNAP"
           fi
+          chmod 600 -- "$PID_SNAP"
           reap_ppid_of() {
             awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
           }
@@ -1463,6 +1541,9 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          # Snapshot body sealed at start_ref — rematerialized below; do not
+          # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
+          PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
           # cannot leave provider/job tokens under these names. Pattern-based
           # scrub covers well-known shapes; never rematerialize live secrets
@@ -1497,20 +1578,35 @@ jobs:
           # No comm/name exemptions (Runner.*/Agent.*/systemd-* are spoofable).
           # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
           # its own process group (helpers during TERM→KILL).
-          if [ -z "${PID_SNAP_SHA256:-}" ]; then
-            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+          # Rematerialize from sealed step outputs. A missing/mismatched/
+          # agent-replaced file at the old predictable path must NOT exit 1
+          # here: that aborted reap (capture) and left bundle with no pending
+          # (neither-delivered-nor-declined). Integrity failure → empty spare
+          # set (conservative reap) and continue.
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
-          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
-            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
-            exit 1
+          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
+          snap_ok=0
+          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
+            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
+          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
+            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
+          else
+            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
+            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
+              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
+            else
+              snap_ok=1
+            fi
           fi
-          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-            echo "::error::pre-agent PID snapshot digest mismatch" >&2
-            exit 1
+          if [ "$snap_ok" -ne 1 ]; then
+            : >"$PID_SNAP"
           fi
+          chmod 600 -- "$PID_SNAP"
           reap_ppid_of() {
             awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
           }
@@ -1658,6 +1754,9 @@ jobs:
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DELIVER_SHA256: ${{ steps.start_ref.outputs.deliver_sha256 }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          # Snapshot body sealed at start_ref — rematerialized below; do not
+          # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
+          PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
           # The restored script lives in RUNNER_TEMP. It must operate on the
           # checkout, never on dirname($0)/.. (that is the runner work dir).
           DELIVER_WORKTREE: ${{ github.workspace }}
@@ -1706,20 +1805,35 @@ jobs:
           # Spare only: PIDs in the snapshot, the reaper, its ancestors, and
           # its own process group. Includes ppid=1 daemons and cwd in /, /tmp,
           # /dev/shm when those PIDs were started after the snapshot.
-          if [ -z "${PID_SNAP_SHA256:-}" ]; then
-            echo "::error::PID_SNAP_SHA256 empty — start_ref did not snapshot PIDs" >&2
+          # Rematerialize from sealed step outputs. A missing/mismatched/
+          # agent-replaced file at the old predictable path must NOT exit 1
+          # here: that aborted reap (capture) and left bundle with no pending
+          # (neither-delivered-nor-declined). Integrity failure → empty spare
+          # set (conservative reap) and continue.
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="${RUNNER_TEMP}/backlog-burn-pre-agent-pids"
-          if [ ! -f "$PID_SNAP" ] || [ -L "$PID_SNAP" ]; then
-            echo "::error::pre-agent PID snapshot missing at ${PID_SNAP}" >&2
-            exit 1
+          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
+          snap_ok=0
+          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
+            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
+          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
+            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
+          else
+            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
+            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
+              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
+            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
+              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
+            else
+              snap_ok=1
+            fi
           fi
-          got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-          if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-            echo "::error::pre-agent PID snapshot digest mismatch" >&2
-            exit 1
+          if [ "$snap_ok" -ne 1 ]; then
+            : >"$PID_SNAP"
           fi
+          chmod 600 -- "$PID_SNAP"
           reap_ppid_of() {
             awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
           }
