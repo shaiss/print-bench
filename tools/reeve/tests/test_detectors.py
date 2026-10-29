@@ -225,6 +225,35 @@ def test_lock_leak_cursor_branch_without_issue_token_does_not_corroborate():
     assert [f["number"] for f in found] == [768]
 
 
+def test_lock_leak_cursor_token_requires_hyphen_or_slash_delimiter():
+    # Non-digit boundaries alone are too loose (Bugbot / CodeRabbit on #952):
+    # a hex fragment, version fragment, or glued form must not corroborate.
+    cases = (
+        ("cursor/task768draft", 768),
+        ("cursor/abc768def", 768),
+        ("cursor/work-e6b6-only", 6),
+        ("cursor/v1.6.release", 6),
+    )
+    for branch, number in cases:
+        found = detectors.lock_leak(
+            [locked(number)], [], [branch], NOW, CFG.lock_leak_hours)
+        assert [f["number"] for f in found] == [number], (
+            f"{branch} must not corroborate #{number}"
+        )
+    # Positive controls: -768- mid-name and trailing -768 still clear.
+    assert detectors.lock_leak(
+        [locked(768)], [], ["cursor/ovodyo-geodesic-ball-768-e6b6"],
+        NOW, CFG.lock_leak_hours) == []
+    assert detectors.lock_leak(
+        [locked(768)], [], ["cursor/work-ending-768"],
+        NOW, CFG.lock_leak_hours) == []
+    # Hex suffix after a real -768- token must not also clear issue 6.
+    found = detectors.lock_leak(
+        [locked(6)], [], ["cursor/ovodyo-geodesic-ball-768-e6b6"],
+        NOW, CFG.lock_leak_hours)
+    assert [f["number"] for f in found] == [6]
+
+
 def test_lock_leak_refs_and_cursor_token_are_whole_number_safe():
     # #76 must not match Refs #768 or a ...-768-... branch.
     found = detectors.lock_leak(

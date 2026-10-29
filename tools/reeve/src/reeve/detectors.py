@@ -101,13 +101,16 @@ def _issue_branch_re(number: int) -> re.Pattern[str]:
 def _cursor_issue_branch_re(number: int) -> re.Pattern[str]:
     """Matcher for a ``cursor/*`` branch carrying ``number`` as a delimited token.
 
-    Whole-number only: ``-768-`` or a trailing ``-768`` corroborates #768;
-    a bare ``cursor/`` prefix never does, and ``#76`` must not match
-    ``...-768-...`` (issue #768 / PR #914). Digits must not glue to the
-    token on either side (``7680`` / ``1768`` are not ``768``).
+    Whole-number only, hyphen- or slash-delimited (the shapes the ship
+    branches actually use): ``-768-``, a trailing ``-768``, or ``/768``
+    right after the ``cursor/`` prefix. A bare ``cursor/`` prefix never
+    corroborates, ``#76`` must not match ``...-768-...``, and a non-digit
+    boundary alone is not enough — otherwise a hex suffix (``e6b6``), a
+    version fragment (``v1.6``), or a glued form (``task768draft``) would
+    corroborate the wrong issue (Bugbot / CodeRabbit on #952).
     """
     num = re.escape(str(number))
-    return re.compile(rf"^cursor/.*(?<![0-9]){num}(?![0-9])")
+    return re.compile(rf"^cursor/(?:.*[-/])?{num}(?:[-/].*)?$")
 
 
 def _references_issue(text: str, number: int) -> bool:
