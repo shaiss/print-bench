@@ -108,6 +108,18 @@ RP_FIXTURES = {
     "slurp": lambda: json.dumps([[{"body": "page1", "user": {"login": "github-actions[bot]"}}],
                                  [{"body": "Jane.\n\n" + jane + "\n\n" + FOOTER,
                                    "user": {"login": "github-actions[bot]"}}]]),
+    # Issue #947 marker-verb fixtures (parity is check-only; names must still
+    # match every mkfix the script writes so a dropped fixture fails here).
+    "planted-other-bot": lambda: _dump([mcp("plant", jane, user={"login": "copilot-pull-request-reviewer[bot]",
+                                                                  "type": "Bot"})]),
+    "short-sha": lambda: _dump([{"body": "x\n\n<!-- JANE_SIGNOFF sha=abc123 verdict=pass fuse=none -->\n\n"
+                                 + FOOTER, "user": bot}]),
+    "review-body-shape": lambda: _dump([{"body": "review body\n\n" + jane + "\n\n" + FOOTER,
+                                         "user": {"login": "attacker"}}]),
+    "bot-then-user": lambda: _dump([mcp("real", jane),
+                                    mcp("plant", jane, user={"login": "attacker"})]),
+    "two-bot": lambda: _dump([mcp("first", jane), mcp("second", jane_ack)]),
+    "head-then-old": lambda: _dump([mcp("head", jane), mcp("old", jane_stale)]),
 }
 
 #: Every decision row's label → the verdict this port must give (the script's own expectation
@@ -160,17 +172,29 @@ RP_REFUSALS = {
 
 
 def _rp_rows():
+    """Parse check-verb decision/refusal rows only.
+
+    Issue #947 added a ``marker`` verb whose selftest rows return marker
+    text (not true/false) and are not in the trust.served parity surface —
+    skip them here so a new marker row cannot break the check-port pin.
+    """
     rows, refusals = [], []
     for line in _logical_lines(_selftest_body(RP_SCRIPT)):
         stripped = line.strip()
         if stripped.startswith('row "'):
             tokens = shlex.split(stripped)
             label, want, args = tokens[1], tokens[2], tokens[3:]
-            assert args[:2] == ["$0", "check"], label
+            if args[:2] != ["$0", "check"]:
+                # marker (and any future non-check) rows — not trust.served.
+                continue
             opts = dict(zip(args[2::2], args[3::2]))
             rows.append((label, want, opts))
         elif stripped.startswith('refuses "'):
-            refusals.append(shlex.split(stripped)[1])
+            label = shlex.split(stripped)[1]
+            # marker: refusals are the marker verb's CLI; check refusals only.
+            if label.startswith("marker:"):
+                continue
+            refusals.append(label)
     return rows, refusals
 
 

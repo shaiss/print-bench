@@ -3684,12 +3684,13 @@ jobs:
   #    check.sh) — so the fail-closed policy is proven, not asserted in YAML.
   #
   #    Runs on EVERY PR event (always(), needs the reviewer jobs only so the
-  #    sign-off markers are already posted when we read them). The only repo
-  #    code it runs is reviewer-signoff.sh (`key`, which reads commits and
-  #    trees with git, `fuse-warn`, and `decide`), from the same merge-ref
-  #    checkout this workflow file and the design-changes job's round guard
-  #    come from — so the skip, the fuse sticky, and the currency are always
-  #    one version of one rule.
+  #    sign-off markers are already posted when we read them). Marker discovery
+  #    (issue #947) goes through scripts/reviewer-posted.sh `marker`, restored
+  #    from pull_request.base.sha — the same trust boundary as the artifact
+  #    checks (Actions-bot author + MCP suffix, issue comments only). The
+  #    pass/block decision still lives in reviewer-signoff.sh (`key`,
+  #    `fuse-warn`, `decide`) from the merge-ref checkout, so the skip, the
+  #    fuse sticky, and the currency are always one version of one rule.
   #
   #    ARMING (the one manual step): this status only *blocks* a merge once an
   #    admin adds `reviewer-signoff` to the branch's required status checks.
@@ -3721,6 +3722,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           DESIGNS_CHANGED: ${{ needs.design-changes.outputs.designs_changed }}
           NO_AUTO_REVIEW: ${{ contains(github.event.pull_request.labels.*.name, 'no-auto-review') }}
@@ -3730,26 +3732,51 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A reviewer's sign-off marker can land in any of three places
-          # depending on how the session posted (a PR review body, an issue
-          # comment, or a review line comment), so gather all three bodies.
-          all_bodies() {
-            gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" --jq '.[].body' 2>/dev/null || true
-            gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/reviews"   --jq '.[].body' 2>/dev/null || true
-            gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/comments"  --jq '.[].body' 2>/dev/null || true
+          # Trust boundary (issue #947): restore reviewer-posted.sh from
+          # base.sha — never the PR-head copy — then discover markers only
+          # through its `marker` verb (Actions-bot + MCP suffix, issue
+          # comments only). Same restore pattern as the coach artifact checks.
+          POSTED="${RUNNER_TEMP}/reviewer-posted.sh"
+          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > "$POSTED"
+          chmod +x "$POSTED"
+
+          # Issue comments only — the MCP's sole write target. Review bodies
+          # and review line comments are out of scope for marker discovery.
+          comments_file="$(mktemp)"
+          gh api --paginate --slurp \
+            "/repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+            >"$comments_file" 2>/dev/null || printf '%s\n' '[]' >"$comments_file"
+
+          # Last QUALIFYING marker per family on HEAD_SHA, with --currency so
+          # a trusted older-sha marker can still feed decide's tree-carry-
+          # forward. Pre-#947 base checkers lack `marker` (exit 2) — treat as
+          # empty (fail-closed); this landing PR is non-design so decide
+          # still PASSes. Never fall back to an author-blind grep.
+          trusted_marker() {  # $1 = jane|drik
+            local who="$1" err out rc
+            err="$(mktemp)"
+            set +e
+            out="$("$POSTED" marker --pr "$PR_NUMBER" --sha "$HEAD_SHA" \
+              --reviewer "$who" --comments-file "$comments_file" --currency \
+              2>"$err")"
+            rc=$?
+            set -e
+            if [[ "$rc" -eq 2 ]]; then
+              # stderr only — stdout is captured as the marker string.
+              echo "::notice::base reviewer-posted.sh predates #947 marker verb — treating $who marker as absent" >&2
+              out=""
+            elif [[ "$rc" -ne 0 ]]; then
+              cat "$err" >&2
+              rm -f "$err"
+              exit "$rc"
+            fi
+            rm -f "$err"
+            # Trim a single trailing newline the CLI adds; keep marker intact.
+            printf '%s' "${out%$'\n'}"
           }
-          bodies="$(all_bodies)"
-          # Prefer the marker stamped for THIS head (the current round); fall back
-          # to the latest one seen (the currency check BLOCKs if its tree is stale).
-          get_marker() {   # $1 = JANE_SIGNOFF | DRIK_SIGNOFF
-            local all m
-            all="$(grep -oiE "<!-- $1 [^>]*-->" <<<"$bodies" || true)"
-            m="$(grep -iF "sha=$HEAD_SHA" <<<"$all" | tail -1 || true)"
-            [[ -n "$m" ]] && { printf '%s' "$m"; return; }
-            tail -1 <<<"$all" || true
-          }
-          jane="$(get_marker JANE_SIGNOFF)"
-          drik="$(get_marker DRIK_SIGNOFF)"
+          jane="$(trusted_marker jane)"
+          drik="$(trusted_marker drik)"
+          rm -f "$comments_file"
 
           # Fuse warn live this round? The render-gate sticky (W1) renders a
           # fusecheck STRONG WARN when a print-in-place mechanism welds shut.

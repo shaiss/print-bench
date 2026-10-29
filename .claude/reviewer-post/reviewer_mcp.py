@@ -63,12 +63,12 @@ comment on the ONE PR the workflow selected":
   * a caller body that contains ``<!-- JANE_SIGNOFF`` / ``<!-- DRIK_SIGNOFF``
     / ``<!-- PM_TRIAGE`` / ``<!-- COACH_LOCK`` / ``<!-- COACH_DONE``
     (case-insensitive) is refused,
-    not posted: ``get_marker()`` greps every comment with no author check, so
-    a Jane body carrying a Drik pass would otherwise satisfy both identities
-    from one post, and a Jane/Drik/PM body carrying ``<!-- COACH_LOCK -->``
-    would satisfy the coach completeness pin (those jobs share
-    ``github-actions[bot]``). Only the server-assembled marker from trusted
-    REVIEWER_ID may appear;
+    not posted: signoff-status and the artifact checks both require an
+    Actions-bot MCP suffix (issue #947 / reviewer-posted.sh), but a Jane
+    body carrying a Drik pass would still confuse humans reading the
+    thread, and a Jane/Drik/PM body carrying a coach lock marker would
+    look like a coach completion. Only the server-assembled marker from
+    trusted REVIEWER_ID may appear;
   * the attribution footer is HARDCODED here — every post is disclosed as a
     Claude Code review whatever the body says;
   * a per-run cap of ONE post (counted in a state file every chain link of
@@ -323,12 +323,12 @@ _last_path = None
 
 
 # Reserved HTML-comment syntax the sign-off / coach-lock / completion
-# checks grep for. A caller body that already contains any family is
-# refused — REVIEWER_ID only chooses which marker *we* append. get_marker()
-# has no author check, and Jane/Drik/PM share github-actions[bot] with the
-# coach, so a planted COACH_LOCK / COACH_DONE / PM_TRIAGE_DONE in a sibling
-# caller body is refused here; coach-lock-check.sh and reviewer-posted.sh
-# also require the assembled marker-then-footer suffix.
+# checks look for. A caller body that already contains any family is
+# refused — REVIEWER_ID only chooses which marker *we* append. Jane/Drik/PM
+# share github-actions[bot] with the coach, so a planted COACH_LOCK /
+# COACH_DONE / PM_TRIAGE_DONE in a sibling caller body is refused here;
+# coach-lock-check.sh and reviewer-posted.sh also require the assembled
+# marker-then-footer suffix (and, since #947, an Actions-bot author).
 _INJECTED_MARKER = re.compile(
     r"<!--\s*(?:(?:JANE|DRIK)_SIGNOFF|PM_TRIAGE(?:_DONE)?|COACH_(?:LOCK|DONE))\b",
     re.IGNORECASE,
