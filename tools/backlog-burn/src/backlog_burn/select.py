@@ -67,12 +67,13 @@ cooldown **expires** so a later firing can retry. Owner activity re-arms.
 
 A sixth exclusion: an issue whose scope (title / ``Touches:`` / body path
 tokens) resolves to a path ``scripts/design-run-deliver.sh`` refuses —
-``.github/**``, ``**/.claude/**``, ``scripts/**``, ``tools/**``, and the
-agent-instruction files — is skipped, because the agent can "succeed" while
-the deliverer pushes nothing and settle turns the run red (the #885 / #886 /
-#889 shape). Fail closed: when the path set cannot be determined the issue
-is skipped too, so an opaque brief cannot burn a firing the deliverer would
-refuse. See :mod:`backlog_burn.protected`.
+``.github/**`` (any depth), ``**/.claude/**``, ``scripts/**``, ``tools/**``,
+and the agent-instruction files — is skipped, because the agent can
+"succeed" while the deliverer pushes nothing and settle turns the run red
+(the #885 / #886 / #889 shape). Fail closed for every required label: when
+the path set cannot be determined the issue is skipped too, so an opaque
+brief cannot burn a firing the deliverer would refuse. See
+:mod:`backlog_burn.protected`.
 
 The skill re-verifies all of this before it touches a line of code, so this
 module is a best-effort *pre-filter*. Its only jobs are to never hand the run
@@ -487,9 +488,9 @@ def exclusion_reason(
     deliverer refuses should never burn a firing, even when nothing else
     claims it. A positively identified protected path is refused for every
     routine that shares this selector. Fail-closed unknown scope (no
-    concrete paths / only globs) applies only when selecting under the
-    backlog-burn opt-in label (``autonomy-ok``) — design-run / chunker reuse
-    this selector with other labels and their briefs often name no paths yet.
+    concrete paths / only globs) applies for EVERY required label — an
+    opaque brief cannot burn a firing the deliverer would refuse (Security
+    on #953; previously only ``autonomy-ok`` failed closed).
     """
     number = issue["number"]
     labels = issue.get("labels", []) or []
@@ -502,20 +503,17 @@ def exclusion_reason(
         issue.get("body", "") or "",
     )
     if scope_paths is None:
-        # Fail closed for backlog-burn only (see docstring).
-        if required_label == DEFAULT_REQUIRED_LABEL:
+        return (
+            "scope paths could not be determined "
+            "(fail closed — title/Touches/body name no concrete paths)"
+        )
+    for path in sorted(scope_paths):
+        if is_protected_path(path):
             return (
-                "scope paths could not be determined "
-                "(fail closed — title/Touches/body name no concrete paths)"
+                f"touches protected path {path!r} "
+                "(deliverer refuses .github/**, **/.claude/**, scripts/**, "
+                "tools/**, and agent-instruction files)"
             )
-    else:
-        for path in sorted(scope_paths):
-            if is_protected_path(path):
-                return (
-                    f"touches protected path {path!r} "
-                    "(deliverer refuses .github/**, **/.claude/**, scripts/**, "
-                    "tools/**, and agent-instruction files)"
-                )
     if _has_issue_branch(branches, number, branch_ahead_by):
         return f"a claude/issue-{number}-* branch already exists"
     if _open_pr_claims(open_prs, number):

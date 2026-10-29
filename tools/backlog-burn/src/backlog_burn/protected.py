@@ -47,8 +47,9 @@ def is_protected_path(path: str) -> bool:
 
     Mirrors ``is_protected_path`` in ``scripts/design-run-deliver.sh``:
 
-    * prefixes: ``.github``, ``scripts``, ``tools`` (repo-root)
-    * ``**/.claude/**`` at any depth
+    * prefixes: ``scripts``, ``tools`` (repo-root)
+    * ``**/.github/**`` and ``**/.claude/**`` at any depth (leading ``./``
+      normalized away)
     * agent-instruction files at any depth: ``CLAUDE.md``, ``CLAUDE.local.md``,
       ``AGENTS.md``, ``.mcp.json``, ``.cursorrules``, ``.cursor/**``
 
@@ -57,7 +58,14 @@ def is_protected_path(path: str) -> bool:
     norm = normalize_repo_path(path)
     if norm is None:
         return True
-    if norm == ".github" or norm.startswith(".github/"):
+    # Repo-root prefixes (scripts/tools) plus any-depth .github / .claude
+    # (leading ``./`` is already stripped by normalize_repo_path; a nested
+    # ``sub/.github/x`` is as dangerous as the root tree — Security on #953).
+    if (
+        norm == ".github"
+        or norm.startswith(".github/")
+        or "/.github/" in f"/{norm}/"
+    ):
         return True
     if norm == "scripts" or norm.startswith("scripts/"):
         return True

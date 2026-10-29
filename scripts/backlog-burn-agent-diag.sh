@@ -5,21 +5,34 @@
 # show_full_output stays false) and writes ONLY:
 #   * denied tool names + deny reasons
 #   * a truncated final assistant message (<= 500 chars)
-# through the repo's existing redactor (provenance.gitstore.redact). Never
-# enables show_full_output; never prints tokens / raw gh output / headers.
+# through the repo's existing redactor (provenance.gitstore.scrub =
+# exact known secrets + pattern-based shapes). Never enables
+# show_full_output; never prints tokens / raw gh output / headers.
+#
+# MUST be restored from the pre-agent START_SHA pin into $RUNNER_TEMP
+# (see backlog-burn-agent-diag-capture.sh) — never run the worktree copy
+# after a ship agent that has Write/Edit. The redactor package is passed
+# explicitly via --provenance-src (also restored from START_SHA); this
+# script never derives an import path from dirname "$0" (which points into
+# RUNNER_TEMP after the restore move) and never imports the PR worktree.
 #
 # Usage:
-#   scripts/backlog-burn-agent-diag.sh [--link <n>] [--execution-log <path>]
-#                                     [--out-dir <dir>] [--summary <path>]
+#   scripts/backlog-burn-agent-diag.sh --provenance-src <dir> \
+#     [--link <n>] [--execution-log <path>] [--secrets-file <path>] \
+#     [--out-dir <dir>] [--summary <path>]
 #
 # Defaults: execution log at $RUNNER_TEMP/claude-execution-output.json,
 # out-dir $RUNNER_TEMP/backlog-burn-agent-diag, summary $GITHUB_STEP_SUMMARY.
+# A missing/failed provenance import exits non-zero (loud); the capture
+# step's continue-on-error keeps the burn walk going.
 set -euo pipefail
 
 link=""
 execution_log="${RUNNER_TEMP:+$RUNNER_TEMP/claude-execution-output.json}"
 out_dir="${RUNNER_TEMP:+$RUNNER_TEMP/backlog-burn-agent-diag}"
 summary_path="${GITHUB_STEP_SUMMARY:-}"
+provenance_src="${PROVENANCE_SRC:-}"
+secrets_file_arg=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,8 +40,10 @@ while [ $# -gt 0 ]; do
     --execution-log) execution_log="${2:?}"; shift 2 ;;
     --out-dir) out_dir="${2:?}"; shift 2 ;;
     --summary) summary_path="${2:?}"; shift 2 ;;
+    --provenance-src) provenance_src="${2:?}"; shift 2 ;;
+    --secrets-file) secrets_file_arg="${2:?}"; shift 2 ;;
     -h|--help)
-      sed -n '2,16p' "$0"
+      sed -n '2,28p' "$0"
       exit 0
       ;;
     *)
@@ -38,46 +53,86 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -z "$provenance_src" ]; then
+  echo "backlog-burn-agent-diag: --provenance-src (or PROVENANCE_SRC) is required" >&2
+  echo "  pass the pinned tools/provenance/src restored from START_SHA into \$RUNNER_TEMP" >&2
+  exit 2
+fi
+if [ ! -d "$provenance_src/provenance" ]; then
+  echo "backlog-burn-agent-diag: --provenance-src must contain the provenance package: $provenance_src" >&2
+  exit 2
+fi
+
 out_dir="${out_dir:-/tmp/backlog-burn-agent-diag}"
 mkdir -p -- "$out_dir"
 
-# Collect secret values to feed the existing redactor. Never print them.
-# Empty entries are ignored by redact().
+# Collect secret values for exact redact(). Prefer --secrets-file (written
+# by the trusted capture bootstrap); fall back to env for local dry-runs.
 secrets_file="$(mktemp)"
 cleanup() { rm -f -- "$secrets_file"; }
 trap cleanup EXIT
-{
-  for key in \
-    GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
-    ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
-    ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
-  do
-    # ${!key} is bash nameref expansion; skip unset / empty.
-    val="${!key-}"
-    if [ -n "$val" ]; then
-      printf '%s\n' "$val"
-    fi
-  done
-} >"$secrets_file"
+if [ -n "$secrets_file_arg" ]; then
+  if [ ! -f "$secrets_file_arg" ]; then
+    echo "backlog-burn-agent-diag: --secrets-file not found: $secrets_file_arg" >&2
+    exit 2
+  fi
+  cp -- "$secrets_file_arg" "$secrets_file"
+else
+  {
+    for key in \
+      GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+      ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+      ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+    do
+      val="${!key-}"
+      if [ -n "$val" ]; then
+        printf '%s\n' "$val"
+      fi
+    done
+  } >"$secrets_file"
+fi
 
 label="backlog-burn agent diag"
 [ -n "$link" ] && label="$label (link $link)"
 
-python3 -I - "$execution_log" "$secrets_file" "$out_dir" "$label" "$summary_path" "$repo_root" <<'PY'
+# Fail loud on import — do not fall back to the worktree.
+# python3 -I ignores PYTHONPATH, so the pinned path is passed as argv and
+# inserted onto sys.path inside the interpreter (never a worktree path).
+if ! python3 -I -c '
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+sys.path.insert(0, str(p))
+from provenance.gitstore import scrub, scrub_then_truncate, credential_env
+' "$provenance_src"; then
+  echo "::error::backlog-burn-agent-diag: cannot import provenance.gitstore from pinned --provenance-src=${provenance_src}" >&2
+  exit 1
+fi
+
+python3 -I - "$provenance_src" "$execution_log" "$secrets_file" "$out_dir" "$label" "$summary_path" <<'PY'
 import json
 import os
 import re
 import sys
 from pathlib import Path
 
-log_path, secrets_path, out_dir, label, summary_path, repo_root = sys.argv[1:7]
+provenance_src, log_path, secrets_path, out_dir, label, summary_path = sys.argv[1:7]
 
-sys.path.insert(0, str(Path(repo_root) / "tools" / "provenance" / "src"))
-from provenance.gitstore import (  # noqa: E402  — existing redactor + secret forms
-    credential_env,
-    redact,
-)
+# Import path is ONLY the pinned --provenance-src argv (START_SHA archive).
+# python3 -I ignores PYTHONPATH; never insert a worktree / dirname-derived root.
+sys.path.insert(0, str(Path(provenance_src)))
+try:
+    from provenance.gitstore import (  # noqa: E402
+        credential_env,
+        scrub,
+        scrub_then_truncate,
+    )
+except ImportError as exc:
+    print(
+        f"::error::backlog-burn-agent-diag: provenance.gitstore import failed: {exc}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 raw_secrets = [
     line.strip()
@@ -97,8 +152,16 @@ for s in raw_secrets:
     except Exception:  # noqa: BLE001 — never fail closed on expand
         pass
 
+
 def R(text: str) -> str:
-    return redact(text or "", secrets)
+    """Full scrub (exact secrets + patterns). Never truncate inside."""
+    return scrub(text or "", secrets)
+
+
+def RT(text: str, limit: int) -> str:
+    """Scrub the FULL text, then truncate — never truncate first."""
+    return scrub_then_truncate(text or "", limit, secrets)
+
 
 denials = []
 final_msg = ""
@@ -201,12 +264,17 @@ for d in denials:
             or d.get("rule")
             or ""
         )
+        # Scrub FULL strings, then truncate — never [:N] before scrub.
+        if name:
+            tool = RT(str(name), 200)
+        else:
+            tool = RT(json.dumps(d), 200)
         structured.append({
-            "tool": R(str(name)) if name else R(json.dumps(d)[:200]),
-            "reason": R(str(reason))[:300] if reason else "",
+            "tool": tool,
+            "reason": RT(str(reason), 300) if reason else "",
         })
     else:
-        structured.append({"tool": R(str(d)[:200]), "reason": ""})
+        structured.append({"tool": RT(str(d), 200), "reason": ""})
 
 if not structured and raw:
     for m in re.finditer(
@@ -215,7 +283,10 @@ if not structured and raw:
         raw,
         re.I,
     ):
-        structured.append({"tool": R(m.group(1)), "reason": R(m.group(0)[:200])})
+        structured.append({
+            "tool": RT(m.group(1), 200),
+            "reason": RT(m.group(0), 200),
+        })
 
 # De-dupe by tool name, keep first reason.
 seen = set()
@@ -229,7 +300,7 @@ for row in structured:
     if len(uniq) >= 40:
         break
 
-final_trunc = R(final_msg)[:500]
+final_trunc = RT(final_msg, 500)
 
 payload = {
     "label": label,
@@ -268,6 +339,8 @@ lines.append("")
 block = "\n".join(lines)
 
 # Step summary (optional) + always echo a short notice for the log.
+# Scrub the summary block too (belt and braces — fields already scrubbed).
+block = R(block)
 if summary_path:
     with open(summary_path, "a", encoding="utf-8") as fh:
         fh.write(block)

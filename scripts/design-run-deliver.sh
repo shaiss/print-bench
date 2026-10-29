@@ -275,7 +275,10 @@ is_protected_path() {
   local norm
   norm="$(normalize_repo_path "$1")" || return 0
   case "$norm" in
-    .github|.github/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    # .github at any depth (leading ./ stripped by normalize; sub/.github/x
+    # is as dangerous as the root tree — Security on #953). scripts/tools
+    # stay repo-root prefixes (a designs/.../scripts/ path is a design asset).
+    .github|.github/*|*/.github|*/.github/*|scripts|scripts/*|tools|tools/*) return 0 ;;
     # agent-instruction-path-drift (issue #869 / #879): any-depth, case-folded.
     # Keep these patterns in sync with the drift guard in
     # tools/model-registry/tests/test_workflow_drift.py.

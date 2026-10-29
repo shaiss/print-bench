@@ -202,6 +202,12 @@ jobs:
           # never execute a worktree copy (the agent has Write/Edit).
           diag_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-agent-diag.sh" | sha256sum | awk '{print $1}')"
           echo "diag_sha256=${diag_sha256}" >> "$GITHUB_OUTPUT"
+          # Capture bootstrap + provenance redactor archive — same pin discipline
+          # as the diag script (never execute/import worktree copies after Write/Edit).
+          capture_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-agent-diag-capture.sh" | sha256sum | awk '{print $1}')"
+          echo "capture_sha256=${capture_sha256}" >> "$GITHUB_OUTPUT"
+          prov_archive_sha256="$(git --no-replace-objects archive HEAD tools/provenance/src | sha256sum | awk '{print $1}')"
+          echo "prov_archive_sha256=${prov_archive_sha256}" >> "$GITHUB_OUTPUT"
 
       - name: Prove lock-cleanup restore leaves a regular file
         # #923: fail loudly BEFORE any agent work if the settle job's
@@ -652,6 +658,8 @@ jobs:
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
+          CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
+          PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
@@ -662,28 +670,29 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute the worktree copy — the agent has Write/Edit.
-          # Restore the pinned blob into $RUNNER_TEMP and verify its digest.
-          if [ -z "${START_SHA:-}" ] || [ -z "${DIAG_SHA256:-}" ]; then
-            echo "::error::START_SHA or DIAG_SHA256 empty — pin step did not run" >&2
+          # Never execute worktree copies — the agent has Write/Edit.
+          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
+          # restores the diag script + tools/provenance/src from the same pin.
+          if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
+              || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
+            echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-blob.XXXXXX")"
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-              show "${START_SHA}:scripts/backlog-burn-agent-diag.sh" > "$blob"; then
-            echo "::error::could not restore backlog-burn-agent-diag.sh from ${START_SHA}" >&2
+              show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
+            echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
             exit 1
           fi
           got="$(sha256sum "$blob" | awk '{print $1}')"
-          if [ "$got" != "$DIAG_SHA256" ]; then
-            echo "::error::restored backlog-burn-agent-diag.sh sha256 does not match the pre-agent pin" >&2
+          if [ "$got" != "$CAPTURE_SHA256" ]; then
+            echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          diag="${RUNNER_TEMP}/backlog-burn-agent-diag.sh"
-          mv -f "$blob" "$diag"
-          chmod +x "$diag"
-          "$diag" --link 1 \
-            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-1"
+          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
+          mv -f "$blob" "$capture"
+          chmod +x "$capture"
+          "$capture" 1
 
       # The GLM tail (#327): links 2 and 3 of the registry's `backlog-burn`
       # chain, reached only when every earlier link did not succeed — the
@@ -723,6 +732,8 @@ jobs:
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
+          CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
+          PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
@@ -733,28 +744,29 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute the worktree copy — the agent has Write/Edit.
-          # Restore the pinned blob into $RUNNER_TEMP and verify its digest.
-          if [ -z "${START_SHA:-}" ] || [ -z "${DIAG_SHA256:-}" ]; then
-            echo "::error::START_SHA or DIAG_SHA256 empty — pin step did not run" >&2
+          # Never execute worktree copies — the agent has Write/Edit.
+          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
+          # restores the diag script + tools/provenance/src from the same pin.
+          if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
+              || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
+            echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-blob.XXXXXX")"
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-              show "${START_SHA}:scripts/backlog-burn-agent-diag.sh" > "$blob"; then
-            echo "::error::could not restore backlog-burn-agent-diag.sh from ${START_SHA}" >&2
+              show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
+            echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
             exit 1
           fi
           got="$(sha256sum "$blob" | awk '{print $1}')"
-          if [ "$got" != "$DIAG_SHA256" ]; then
-            echo "::error::restored backlog-burn-agent-diag.sh sha256 does not match the pre-agent pin" >&2
+          if [ "$got" != "$CAPTURE_SHA256" ]; then
+            echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          diag="${RUNNER_TEMP}/backlog-burn-agent-diag.sh"
-          mv -f "$blob" "$diag"
-          chmod +x "$diag"
-          "$diag" --link 2 \
-            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-2"
+          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
+          mv -f "$blob" "$capture"
+          chmod +x "$capture"
+          "$capture" 2
 
       - name: Ship via Z.AI (GLM, chain link 3)
         id: ship_zai_3
@@ -792,6 +804,8 @@ jobs:
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
+          CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
+          PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
@@ -802,28 +816,29 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute the worktree copy — the agent has Write/Edit.
-          # Restore the pinned blob into $RUNNER_TEMP and verify its digest.
-          if [ -z "${START_SHA:-}" ] || [ -z "${DIAG_SHA256:-}" ]; then
-            echo "::error::START_SHA or DIAG_SHA256 empty — pin step did not run" >&2
+          # Never execute worktree copies — the agent has Write/Edit.
+          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
+          # restores the diag script + tools/provenance/src from the same pin.
+          if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
+              || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
+            echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-blob.XXXXXX")"
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-              show "${START_SHA}:scripts/backlog-burn-agent-diag.sh" > "$blob"; then
-            echo "::error::could not restore backlog-burn-agent-diag.sh from ${START_SHA}" >&2
+              show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
+            echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
             exit 1
           fi
           got="$(sha256sum "$blob" | awk '{print $1}')"
-          if [ "$got" != "$DIAG_SHA256" ]; then
-            echo "::error::restored backlog-burn-agent-diag.sh sha256 does not match the pre-agent pin" >&2
+          if [ "$got" != "$CAPTURE_SHA256" ]; then
+            echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          diag="${RUNNER_TEMP}/backlog-burn-agent-diag.sh"
-          mv -f "$blob" "$diag"
-          chmod +x "$diag"
-          "$diag" --link 3 \
-            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-3"
+          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
+          mv -f "$blob" "$capture"
+          chmod +x "$capture"
+          "$capture" 3
 
       # The cross-provider tail (issue #544): links 4 and 5 of the registry's
       # `backlog-burn` chain on Anthropic's native endpoint, reached only when
@@ -869,6 +884,8 @@ jobs:
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
+          CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
+          PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
@@ -879,28 +896,29 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute the worktree copy — the agent has Write/Edit.
-          # Restore the pinned blob into $RUNNER_TEMP and verify its digest.
-          if [ -z "${START_SHA:-}" ] || [ -z "${DIAG_SHA256:-}" ]; then
-            echo "::error::START_SHA or DIAG_SHA256 empty — pin step did not run" >&2
+          # Never execute worktree copies — the agent has Write/Edit.
+          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
+          # restores the diag script + tools/provenance/src from the same pin.
+          if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
+              || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
+            echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-blob.XXXXXX")"
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-              show "${START_SHA}:scripts/backlog-burn-agent-diag.sh" > "$blob"; then
-            echo "::error::could not restore backlog-burn-agent-diag.sh from ${START_SHA}" >&2
+              show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
+            echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
             exit 1
           fi
           got="$(sha256sum "$blob" | awk '{print $1}')"
-          if [ "$got" != "$DIAG_SHA256" ]; then
-            echo "::error::restored backlog-burn-agent-diag.sh sha256 does not match the pre-agent pin" >&2
+          if [ "$got" != "$CAPTURE_SHA256" ]; then
+            echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          diag="${RUNNER_TEMP}/backlog-burn-agent-diag.sh"
-          mv -f "$blob" "$diag"
-          chmod +x "$diag"
-          "$diag" --link 4 \
-            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-4"
+          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
+          mv -f "$blob" "$capture"
+          chmod +x "$capture"
+          "$capture" 4
 
       - name: Ship via Anthropic (Claude, chain link 5)
         id: ship_anthropic_5
@@ -937,6 +955,8 @@ jobs:
           ZAI_KEY: ${{ secrets.ZAI_KEY }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DIAG_SHA256: ${{ steps.start_ref.outputs.diag_sha256 }}
+          CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
+          PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
@@ -947,28 +967,29 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          # Never execute the worktree copy — the agent has Write/Edit.
-          # Restore the pinned blob into $RUNNER_TEMP and verify its digest.
-          if [ -z "${START_SHA:-}" ] || [ -z "${DIAG_SHA256:-}" ]; then
-            echo "::error::START_SHA or DIAG_SHA256 empty — pin step did not run" >&2
+          # Never execute worktree copies — the agent has Write/Edit.
+          # Restore the pinned capture bootstrap into $RUNNER_TEMP; it then
+          # restores the diag script + tools/provenance/src from the same pin.
+          if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
+              || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
+            echo "::error::START_SHA or pin digests empty — pin step did not run" >&2
             exit 1
           fi
-          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-blob.XXXXXX")"
+          blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag-capture-blob.XXXXXX")"
           if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-              show "${START_SHA}:scripts/backlog-burn-agent-diag.sh" > "$blob"; then
-            echo "::error::could not restore backlog-burn-agent-diag.sh from ${START_SHA}" >&2
+              show "${START_SHA}:scripts/backlog-burn-agent-diag-capture.sh" > "$blob"; then
+            echo "::error::could not restore backlog-burn-agent-diag-capture.sh from ${START_SHA}" >&2
             exit 1
           fi
           got="$(sha256sum "$blob" | awk '{print $1}')"
-          if [ "$got" != "$DIAG_SHA256" ]; then
-            echo "::error::restored backlog-burn-agent-diag.sh sha256 does not match the pre-agent pin" >&2
+          if [ "$got" != "$CAPTURE_SHA256" ]; then
+            echo "::error::restored capture helper sha256 does not match the pre-agent pin" >&2
             exit 1
           fi
-          diag="${RUNNER_TEMP}/backlog-burn-agent-diag.sh"
-          mv -f "$blob" "$diag"
-          chmod +x "$diag"
-          "$diag" --link 5 \
-            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-5"
+          capture="${RUNNER_TEMP}/backlog-burn-agent-diag-capture.sh"
+          mv -f "$blob" "$capture"
+          chmod +x "$capture"
+          "$capture" 5
 
       # Redacted denial + truncated assistant message only. show_full_output
       # stays false on every ship step; this artifact is the diagnosability

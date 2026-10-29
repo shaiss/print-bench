@@ -403,6 +403,76 @@ def redact(text: str, secrets: Iterable[str]) -> str:
     return out
 
 
+# Pattern-based scrub for public artifacts (backlog-burn agent diag, etc.).
+# Exact known-secret redact() cannot see a token that never entered the env
+# (or a fragment that straddles a truncation boundary). Always run these
+# patterns AFTER exact redact and BEFORE any truncation.
+_SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
+    # GitHub fine-grained / classic / app installation / user-to-server /
+    # refresh tokens (ghp_/gho_/ghs_/ghu_/ghr_).
+    (r"gh[pousr]_[A-Za-z0-9_]{20,}", "***"),
+    (r"github_pat_[A-Za-z0-9_]{20,}", "***"),
+    # OpenRouter / Anthropic API keys.
+    (r"sk-or-[A-Za-z0-9_\-]{20,}", "***"),
+    (r"sk-ant-[A-Za-z0-9_\-]{20,}", "***"),
+    # AWS secret access key sitting near an access-key id (40 chars of
+    # base64-ish, within ~80 chars of AKIA/ASIA — catch both orders).
+    # These MUST run before the standalone AKIA/ASIA patterns or the id
+    # is replaced first and the nearby secret is left behind. No
+    # lookbehind on [A-Za-z0-9/+=] — that class includes ``=``, which is
+    # the usual ``secret=…`` separator and would skip the value.
+    (
+        r"(?:AKIA|ASIA)[0-9A-Z]{16}"
+        r"(?:[\s\S]{0,80}?)"
+        r"[A-Za-z0-9/+]{40}",
+        "***",
+    ),
+    (
+        r"[A-Za-z0-9/+]{40}"
+        r"(?:[\s\S]{0,80}?)"
+        r"(?:AKIA|ASIA)[0-9A-Z]{16}",
+        "***",
+    ),
+    # AWS access key ids (after the nearby-secret pairs above).
+    (r"(?:AKIA|ASIA)[0-9A-Z]{16}", "***"),
+    # Authorization Bearer values (header form before bare Bearer).
+    (r"(?i)Authorization\s*:\s*Bearer\s+\S+", "Authorization: Bearer ***"),
+    (r"(?i)\bBearer\s+[A-Za-z0-9._\-+/=]{20,}", "Bearer ***"),
+    # Credentials in URLs (user:pass@ before x-access-token form).
+    (r"(?i)https?://[^\s/@:]+:[^\s/@]+@", "https://***:***@"),
+    (r"(?i)x-access-token:[^\s/@]+@", "x-access-token:***@"),
+    # Base64-encoded x-access-token basic-auth strings (Actions masks the
+    # raw token but not this form — see credential_env / Git.secrets).
+    (r"(?i)(?:AUTHORIZATION:\s*)?basic\s+[A-Za-z0-9+/]{20,}={0,2}", "basic ***"),
+)
+
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(pat), repl) for pat, repl in _SECRET_PATTERN_SPECS
+)
+
+
+def redact_patterns(text: str) -> str:
+    """Replace well-known credential shapes with ``***`` (pattern-based)."""
+    out = text or ""
+    for pat, repl in _SECRET_PATTERNS:
+        out = pat.sub(repl, out)
+    return out
+
+
+def scrub(text: str, secrets: Iterable[str] = ()) -> str:
+    """Exact known-secret redact, then pattern redact. Call BEFORE truncating."""
+    return redact_patterns(redact(text or "", secrets))
+
+
+def scrub_then_truncate(
+    text: str, limit: int, secrets: Iterable[str] = ()
+) -> str:
+    """``scrub`` the full text, then truncate — never the other way around."""
+    if limit < 0:
+        raise ValueError("limit must be >= 0")
+    return scrub(text, secrets)[:limit]
+
+
 # ---------------------------------------------------------------------------
 # I/O (H1). Everything below runs git through Git.run / Git._popen only.
 

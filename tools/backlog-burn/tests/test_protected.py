@@ -25,6 +25,9 @@ DELIVER_SH = REPO_ROOT / "scripts" / "design-run-deliver.sh"
 PROTECTED_FIXTURES = [
     ".github/workflows/ci.yml",
     ".github",
+    "./.github/workflows/ci.yml",  # leading ./ normalized
+    "sub/.github/x",  # any-depth .github segment
+    "docs/.github/workflows/evil.yml",
     "scripts/design-run-deliver.sh",
     "scripts",
     "tools/backlog-burn/src/backlog_burn/select.py",

@@ -526,6 +526,61 @@ def test_redact_replaces_longest_first():
     assert gitstore.redact("nothing", []) == "nothing"
 
 
+# Pattern fixtures for scrub()/redact_patterns() — public diag artifacts must
+# never carry these shapes even when the value was never in the env.
+_PATTERN_FIXTURES = [
+    ("ghp_" + "A" * 36, "ghp_"),
+    ("gho_" + "B" * 36, "gho_"),
+    ("ghs_" + "C" * 36, "ghs_"),
+    ("ghu_" + "D" * 36, "ghu_"),
+    ("ghr_" + "E" * 36, "ghr_"),
+    ("github_pat_" + "F" * 40, "github_pat_"),
+    ("sk-or-" + "G" * 40, "sk-or-"),
+    ("sk-ant-" + "H" * 40, "sk-ant-"),
+    ("AKIA" + ("I" * 16), "AKIA"),
+    ("ASIA" + ("J" * 16), "ASIA"),
+    ("AKIA" + ("K" * 16) + " secret=" + ("L" * 40), "aws-pair"),
+    ("Authorization: Bearer " + ("m" * 48), "auth-bearer"),
+    ("Bearer " + ("n" * 48), "bare-bearer"),
+    ("https://user:passw0rd@github.com/x", "url-userpass"),
+    ("https://x-access-token:deadbeefDEADBEEFdeadbeefDE@github.com/x.git", "x-access"),
+    ("AUTHORIZATION: basic " + ("YWJj" * 10) + "==", "basic-auth"),
+]
+
+
+@pytest.mark.parametrize("secret,label", _PATTERN_FIXTURES)
+def test_redact_patterns_covers_each_shape(secret, label):
+    text = f"prefix {secret} suffix"
+    out = gitstore.redact_patterns(text)
+    assert secret not in out, f"pattern left {label!r}-shaped secret intact: {out!r}"
+    assert "***" in out
+
+
+def test_scrub_applies_exact_then_patterns():
+    known = "EXACTKNOWNSECRETVALUE999"
+    pat = "ghp_" + "Z" * 36
+    out = gitstore.scrub(f"{known} and {pat}", [known])
+    assert known not in out and pat not in out
+    assert out.count("***") >= 2
+
+
+def test_scrub_then_truncate_redacts_before_cutting():
+    # Secret straddles the truncation boundary: truncate-first would leak the
+    # leading half; scrub-first replaces the whole token then cuts.
+    token = "ghp_" + ("Q" * 36)
+    assert len(token) == 40
+    prefix = "x" * 480
+    text = prefix + token + "TAIL"
+    # Boundary at 500 sits 20 chars into the token.
+    assert text[480:500] == token[:20]
+    right = gitstore.scrub_then_truncate(text, 500)
+    assert token not in right
+    assert "ghp_" not in right
+    assert token[:20] not in right
+    # Document the trap: a naive truncate-first still contains the prefix.
+    assert "ghp_" in text[:500]
+
+
 def test_git_reader_primitives(tmp_path):
     """The GitReader surface H3/H4 consume, over a real repo: rev_parse, show, parents, subject,
     committer e-mail/epoch, first_parent_log (with paths, merges by first parent), changed_paths,
