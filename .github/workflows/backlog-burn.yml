@@ -551,6 +551,48 @@ jobs:
             }
           done
 
+      # Probe gh the way an agent subprocess sees it (same scrub value the
+      # five ship steps already set — do NOT add another YAML scrub env
+      # entry; the deliverer selftest pins exactly five). Record ONLY exit
+      # codes + logged-in yes/no. Never print a token, never run
+      # `gh auth token`, never print headers or raw gh output.
+      # show_full_output stays false on every ship step.
+      - name: Probe gh auth as the agent subprocess sees it
+        id: gh_probe
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ steps.select.outputs.issue }}
+        run: |
+          set +e
+          # Mirror the ship steps' scrub value via shell export only — do
+          # not add a sixth YAML env entry (selftest pins count = 5).
+          export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1
+          gh auth status >/dev/null 2>&1
+          auth_rc=$?
+          if [ "$auth_rc" -eq 0 ]; then
+            logged_in=yes
+          else
+            logged_in=no
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}" >/dev/null 2>&1
+          api_rc=$?
+          set -e
+          {
+            echo "### backlog-burn gh probe (agent-subprocess env)"
+            echo
+            echo "- \`gh auth status\` exit: ${auth_rc} (logged-in: ${logged_in})"
+            echo "- \`gh api repos/\$GITHUB_REPOSITORY/issues/\$ISSUE\` exit: ${api_rc}"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::gh probe: auth_rc=${auth_rc} logged_in=${logged_in} api_rc=${api_rc}"
+
       - name: Ship via Z.AI (GLM, chain link 1)
         id: ship_zai_1
         if: >-
@@ -586,6 +628,23 @@ jobs:
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link1_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+          # Transcript stays hidden (issue #885 spin diagnosis). Do not flip
+          # this on — the capture step below reads the execution log only.
+          show_full_output: "false"
+
+      # Sanitized denial capture. if: always() so a failed/cancelled link
+      # still leaves a diagnostic. show_full_output stays false above.
+      - name: Capture denied tools (link 1)
+        if: always() && steps.ship_zai_1.outcome != 'skipped'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+        run: |
+          set -euo pipefail
+          scripts/backlog-burn-agent-diag.sh --link 1 \
+            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-1"
 
       # The GLM tail (#327): links 2 and 3 of the registry's `backlog-burn`
       # chain, reached only when every earlier link did not succeed — the
@@ -613,6 +672,19 @@ jobs:
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link2_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+          show_full_output: "false"
+
+      - name: Capture denied tools (link 2)
+        if: always() && steps.ship_zai_2.outcome != 'skipped'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+        run: |
+          set -euo pipefail
+          scripts/backlog-burn-agent-diag.sh --link 2 \
+            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-2"
 
       - name: Ship via Z.AI (GLM, chain link 3)
         id: ship_zai_3
@@ -638,6 +710,19 @@ jobs:
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link3_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+          show_full_output: "false"
+
+      - name: Capture denied tools (link 3)
+        if: always() && steps.ship_zai_3.outcome != 'skipped'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+        run: |
+          set -euo pipefail
+          scripts/backlog-burn-agent-diag.sh --link 3 \
+            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-3"
 
       # The cross-provider tail (issue #544): links 4 and 5 of the registry's
       # `backlog-burn` chain on Anthropic's native endpoint, reached only when
@@ -671,6 +756,19 @@ jobs:
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link4_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+          show_full_output: "false"
+
+      - name: Capture denied tools (link 4)
+        if: always() && steps.ship_anthropic_4.outcome != 'skipped'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+        run: |
+          set -euo pipefail
+          scripts/backlog-burn-agent-diag.sh --link 4 \
+            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-4"
 
       - name: Ship via Anthropic (Claude, chain link 5)
         id: ship_anthropic_5
@@ -695,6 +793,31 @@ jobs:
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link5_model }} --effort max
           prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
+          show_full_output: "false"
+
+      - name: Capture denied tools (link 5)
+        if: always() && steps.ship_anthropic_5.outcome != 'skipped'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ZAI_KEY: ${{ secrets.ZAI_KEY }}
+        run: |
+          set -euo pipefail
+          scripts/backlog-burn-agent-diag.sh --link 5 \
+            --out-dir "${RUNNER_TEMP}/backlog-burn-agent-diag/link-5"
+
+      # Redacted denial + truncated assistant message only. show_full_output
+      # stays false on every ship step; this artifact is the diagnosability
+      # surface for "agent success, nothing pushed" deaths (#885/#886/#889).
+      - name: Upload agent denial diagnostic
+        if: always() && steps.select.outputs.issue != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: backlog-burn-agent-diag-${{ github.run_id }}
+          path: ${{ runner.temp }}/backlog-burn-agent-diag/
+          if-no-files-found: ignore
+          retention-days: 14
 
       # The agent can append to GITHUB_PATH and GITHUB_ENV. Those files are
       # per-step: emptying them here would not undo PATH or BASH_ENV the

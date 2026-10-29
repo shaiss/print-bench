@@ -229,16 +229,19 @@ def test_paginate_raises_past_cap(monkeypatch):
 def test_gather_snapshot_normalizes_and_filters(monkeypatch):
     issues_payload = [
         {  # a real issue with a comment thread to fetch
-            "number": 5, "title": "real", "created_at": "2026-08-01T00:00:00Z",
+            "number": 5, "title": "real", "body": "Touches: docs/a.md\n",
+            "created_at": "2026-08-01T00:00:00Z",
             "labels": [{"name": "autonomy-ok"}, {"name": "enhancement"}],
             "comments": 2,
         },
         {  # a PR masquerading in the issues endpoint — must be dropped
-            "number": 6, "title": "a pr", "created_at": "2026-08-02T00:00:00Z",
+            "number": 6, "title": "a pr", "body": "",
+            "created_at": "2026-08-02T00:00:00Z",
             "labels": [], "comments": 0, "pull_request": {"url": "..."},
         },
         {  # a comment-free issue — no extra request, empty locks
-            "number": 7, "title": "fresh", "created_at": "2026-08-03T00:00:00Z",
+            "number": 7, "title": "fresh", "body": None,
+            "created_at": "2026-08-03T00:00:00Z",
             "labels": [], "comments": 0,
         },
     ]
@@ -277,6 +280,9 @@ def test_gather_snapshot_normalizes_and_filters(monkeypatch):
     issue5 = snap["issues"][0]
     assert issue5["labels"] == ["autonomy-ok", "enhancement"]
     assert issue5["createdAt"] == "2026-08-01T00:00:00Z"
+    # Body is kept so the protected-path guard can read Touches / path tokens.
+    assert issue5["body"] == "Touches: docs/a.md\n"
+    assert snap["issues"][1]["body"] == ""
     # The whole thread is kept, normalised to body/createdAt/authorType — no
     # marker filtering here, because which prefixes mean a lock, a decline or
     # a machine post is policy and lives in select.py behind its tests. The
