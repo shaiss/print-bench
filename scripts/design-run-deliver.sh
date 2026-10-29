@@ -4573,13 +4573,16 @@ EOF
     echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
     exit 1
   }
+  # Five Capture denied-tools steps + the Bundle step each define the
+  # predicate. The Bundle copy stays burn-scoped; Capture copies are broader.
   burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
-  [ "$burn_reap_n" -eq 1 ] || {
+  [ "$burn_reap_n" -eq 6 ] || {
     echo "selftest: expected the reaper predicate in the burn bundle step, found ${burn_reap_n}" >&2
     exit 1
   }
-  burn_reap_a="$(awk '
-    /reap_should_kill\(\) \{/ { c++; if (c==1) p=1 }
+  # Extract the LAST definition (Bundle step) for the burn-scoped contract.
+  burn_reap_a="$(awk -v want="$burn_reap_n" '
+    /reap_should_kill\(\) \{/ { c++; p=0; if (c==want) p=1 }
     p { print }
     p && /^          \}$/ { exit }
   ' "$burn")"

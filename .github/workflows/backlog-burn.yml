@@ -1747,10 +1747,11 @@ jobs:
             case "$cmd" in
               *backlog-burn.bundle*|*model_registry*) mentions=1 ;;
             esac
-            # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /). System comms already excluded
-            # above; anything else reparented to init is fair game for reap.
-            if [ "$ppid" = "1" ]; then
+            # Bundle reaper stays burn-scoped (in_tree / bundle mention / setsid
+            # in tree / run-*.scope). Capture steps use a broader ppid=1 reap;
+            # this predicate must not kill an unrelated init-child that only
+            # mentions design-run.bundle (design-run-deliver.sh --selftest).
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
               return 0
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
