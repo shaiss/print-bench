@@ -112,6 +112,19 @@ jobs:
       job_window_start: ${{ steps.job_window.outputs.start }}
       enabled: ${{ steps.policy.outputs.enabled }}
       key_present: ${{ steps.policy.outputs.key_present }}
+      # Sealed denial diagnostics — uploaded on a FRESH runner (upload-diag
+      # job) so a leftover ship orphan on this runner cannot race the artifact
+      # tree. Only redacted schema-checked JSON crosses the job boundary.
+      diag_present_1: ${{ steps.diag_1.outputs.present }}
+      diag_1: ${{ steps.diag_1.outputs.diag }}
+      diag_present_2: ${{ steps.diag_2.outputs.present }}
+      diag_2: ${{ steps.diag_2.outputs.diag }}
+      diag_present_3: ${{ steps.diag_3.outputs.present }}
+      diag_3: ${{ steps.diag_3.outputs.diag }}
+      diag_present_4: ${{ steps.diag_4.outputs.present }}
+      diag_4: ${{ steps.diag_4.outputs.diag }}
+      diag_present_5: ${{ steps.diag_5.outputs.present }}
+      diag_5: ${{ steps.diag_5.outputs.diag }}
       # The settle job's two AGENT_OUTCOME reads are this output. The drift
       # guard counts the name AGENT_OUTCOME twice in the workflow file.
       walk_outcome: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
@@ -693,8 +706,16 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
+            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
+            # non-system setsid session leader (cwd /tmp or / used to evade
+            # the in_tree check and still read mode-600 secrets as same UID).
+            if [ "$ppid" = "1" ]; then
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+                return 0
+              fi
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -766,6 +787,12 @@ jobs:
           # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          # Only scrub secrets already decrypted for this job's ship steps
+          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
+          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
+          # — those are not ship inputs here; decrypting them on the agent
+          # runner would re-open the burn/deliver isolation the job header
+          # documents (push PAT only in backlog-burn-deliver.yml).
           {
             _tok='${{ github.token }}'
             [ -n "$_tok" ] && printf '%s\n' "$_tok"
@@ -773,12 +800,6 @@ jobs:
             [ -n "$_ant" ] && printf '%s\n' "$_ant"
             _zai='${{ secrets.ZAI_KEY }}'
             [ -n "$_zai" ] && printf '%s\n' "$_zai"
-            _oai='${{ secrets.OPENAI_API_KEY }}'
-            [ -n "$_oai" ] && printf '%s\n' "$_oai"
-            _or='${{ secrets.OPENROUTER_API_KEY }}'
-            [ -n "$_or" ] && printf '%s\n' "$_or"
-            _regen='${{ secrets.REGEN_TOKEN }}'
-            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -790,7 +811,7 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai _oai _or _regen || true
+          unset _tok _ant _zai || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
@@ -897,8 +918,16 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
+            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
+            # non-system setsid session leader (cwd /tmp or / used to evade
+            # the in_tree check and still read mode-600 secrets as same UID).
+            if [ "$ppid" = "1" ]; then
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+                return 0
+              fi
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -970,6 +999,12 @@ jobs:
           # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          # Only scrub secrets already decrypted for this job's ship steps
+          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
+          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
+          # — those are not ship inputs here; decrypting them on the agent
+          # runner would re-open the burn/deliver isolation the job header
+          # documents (push PAT only in backlog-burn-deliver.yml).
           {
             _tok='${{ github.token }}'
             [ -n "$_tok" ] && printf '%s\n' "$_tok"
@@ -977,12 +1012,6 @@ jobs:
             [ -n "$_ant" ] && printf '%s\n' "$_ant"
             _zai='${{ secrets.ZAI_KEY }}'
             [ -n "$_zai" ] && printf '%s\n' "$_zai"
-            _oai='${{ secrets.OPENAI_API_KEY }}'
-            [ -n "$_oai" ] && printf '%s\n' "$_oai"
-            _or='${{ secrets.OPENROUTER_API_KEY }}'
-            [ -n "$_or" ] && printf '%s\n' "$_or"
-            _regen='${{ secrets.REGEN_TOKEN }}'
-            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -994,7 +1023,7 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai _oai _or _regen || true
+          unset _tok _ant _zai || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
@@ -1099,8 +1128,16 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
+            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
+            # non-system setsid session leader (cwd /tmp or / used to evade
+            # the in_tree check and still read mode-600 secrets as same UID).
+            if [ "$ppid" = "1" ]; then
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+                return 0
+              fi
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1172,6 +1209,12 @@ jobs:
           # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          # Only scrub secrets already decrypted for this job's ship steps
+          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
+          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
+          # — those are not ship inputs here; decrypting them on the agent
+          # runner would re-open the burn/deliver isolation the job header
+          # documents (push PAT only in backlog-burn-deliver.yml).
           {
             _tok='${{ github.token }}'
             [ -n "$_tok" ] && printf '%s\n' "$_tok"
@@ -1179,12 +1222,6 @@ jobs:
             [ -n "$_ant" ] && printf '%s\n' "$_ant"
             _zai='${{ secrets.ZAI_KEY }}'
             [ -n "$_zai" ] && printf '%s\n' "$_zai"
-            _oai='${{ secrets.OPENAI_API_KEY }}'
-            [ -n "$_oai" ] && printf '%s\n' "$_oai"
-            _or='${{ secrets.OPENROUTER_API_KEY }}'
-            [ -n "$_or" ] && printf '%s\n' "$_or"
-            _regen='${{ secrets.REGEN_TOKEN }}'
-            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -1196,7 +1233,7 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai _oai _or _regen || true
+          unset _tok _ant _zai || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
@@ -1309,8 +1346,16 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
+            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
+            # non-system setsid session leader (cwd /tmp or / used to evade
+            # the in_tree check and still read mode-600 secrets as same UID).
+            if [ "$ppid" = "1" ]; then
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+                return 0
+              fi
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1382,6 +1427,12 @@ jobs:
           # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          # Only scrub secrets already decrypted for this job's ship steps
+          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
+          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
+          # — those are not ship inputs here; decrypting them on the agent
+          # runner would re-open the burn/deliver isolation the job header
+          # documents (push PAT only in backlog-burn-deliver.yml).
           {
             _tok='${{ github.token }}'
             [ -n "$_tok" ] && printf '%s\n' "$_tok"
@@ -1389,12 +1440,6 @@ jobs:
             [ -n "$_ant" ] && printf '%s\n' "$_ant"
             _zai='${{ secrets.ZAI_KEY }}'
             [ -n "$_zai" ] && printf '%s\n' "$_zai"
-            _oai='${{ secrets.OPENAI_API_KEY }}'
-            [ -n "$_oai" ] && printf '%s\n' "$_oai"
-            _or='${{ secrets.OPENROUTER_API_KEY }}'
-            [ -n "$_or" ] && printf '%s\n' "$_or"
-            _regen='${{ secrets.REGEN_TOKEN }}'
-            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -1406,7 +1451,7 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai _oai _or _regen || true
+          unset _tok _ant _zai || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
@@ -1510,8 +1555,16 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
+            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
+            # non-system setsid session leader (cwd /tmp or / used to evade
+            # the in_tree check and still read mode-600 secrets as same UID).
+            if [ "$ppid" = "1" ]; then
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+                return 0
+              fi
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1583,6 +1636,12 @@ jobs:
           # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
+          # Only scrub secrets already decrypted for this job's ship steps
+          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
+          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
+          # — those are not ship inputs here; decrypting them on the agent
+          # runner would re-open the burn/deliver isolation the job header
+          # documents (push PAT only in backlog-burn-deliver.yml).
           {
             _tok='${{ github.token }}'
             [ -n "$_tok" ] && printf '%s\n' "$_tok"
@@ -1590,12 +1649,6 @@ jobs:
             [ -n "$_ant" ] && printf '%s\n' "$_ant"
             _zai='${{ secrets.ZAI_KEY }}'
             [ -n "$_zai" ] && printf '%s\n' "$_zai"
-            _oai='${{ secrets.OPENAI_API_KEY }}'
-            [ -n "$_oai" ] && printf '%s\n' "$_oai"
-            _or='${{ secrets.OPENROUTER_API_KEY }}'
-            [ -n "$_or" ] && printf '%s\n' "$_or"
-            _regen='${{ secrets.REGEN_TOKEN }}'
-            [ -n "$_regen" ] && printf '%s\n' "$_regen"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -1607,7 +1660,7 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai _oai _or _regen || true
+          unset _tok _ant _zai || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
@@ -1641,324 +1694,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
 
-      # Redacted denial + truncated assistant message only. show_full_output
-      # stays false on every ship step; this artifact is the diagnosability
-      # surface for "agent success, nothing pushed" deaths (#885/#886/#889).
-      # Rebuild the upload tree ONLY from sealed step outputs (diag_1..diag_5).
-      # Never read $RUNNER_TEMP/backlog-burn-agent-diag/** — later ship links
-      # with Write/Edit can replace those bytes after capture returns.
-      - name: Stage agent denial diagnostic
-        id: diag_stage
-        if: always() && steps.select.outputs.issue != ''
-        continue-on-error: true
-        env:
-          RUNNER_TEMP: ${{ runner.temp }}
-          PATH: /usr/bin:/bin
-          LD_PRELOAD: ""
-          LD_LIBRARY_PATH: ""
-          BASH_ENV: ""
-          PRESENT_1: ${{ steps.diag_1.outputs.present }}
-          DIAG_1: ${{ steps.diag_1.outputs.diag }}
-          PRESENT_2: ${{ steps.diag_2.outputs.present }}
-          DIAG_2: ${{ steps.diag_2.outputs.diag }}
-          PRESENT_3: ${{ steps.diag_3.outputs.present }}
-          DIAG_3: ${{ steps.diag_3.outputs.diag }}
-          PRESENT_4: ${{ steps.diag_4.outputs.present }}
-          DIAG_4: ${{ steps.diag_4.outputs.diag }}
-          PRESENT_5: ${{ steps.diag_5.outputs.present }}
-          DIAG_5: ${{ steps.diag_5.outputs.diag }}
-        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
-        run: |
-          set -euo pipefail
-          echo "staged=0" >> "$GITHUB_OUTPUT"
-          echo "stage_dir=" >> "$GITHUB_OUTPUT"
-          echo "digest_manifest=" >> "$GITHUB_OUTPUT"
-          # Reap before materializing — a leftover ship child must not race
-          # the well-known-path replacement that used to live here.
-          reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
-            [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
-            esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
-            fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
-            fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
-          }
-          reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
-          reap_agent_orphans
-          # Random stage dir — never the predictable backlog-burn-agent-diag-upload/.
-          stage="$(mktemp -d "${RUNNER_TEMP}/backlog-burn-agent-diag-upload.XXXXXX")"
-          staged=0
-          manifest=""
-          for i in 1 2 3 4 5; do
-            present_var="PRESENT_${i}"
-            diag_var="DIAG_${i}"
-            present="${!present_var-}"
-            diag="${!diag_var-}"
-            if [ "$present" != "1" ] || [ -z "$diag" ]; then
-              continue
-            fi
-            mkdir -p -- "${stage}/link-${i}"
-            # Write sealed step-output bytes only; schema-check before upload.
-            printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
-            python3 -I -c "import json,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_truncated'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536, 'diag too large'; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED, 'bad keys'; assert isinstance(obj['denied_tools'], list); f=obj['final_assistant_message_truncated']; assert isinstance(f, str) and len(f)<=500" \
-              "${stage}/link-${i}/diag.json"
-            dig="$(sha256sum "${stage}/link-${i}/diag.json" | awk '{print $1}')"
-            if [ -n "$manifest" ]; then
-              manifest="${manifest},"
-            fi
-            manifest="${manifest}${i}:${dig}"
-            staged=$((staged + 1))
-          done
-          # Refuse anything that is not link-N/diag.json (no extra plantable files).
-          while IFS= read -r -d '' f; do
-            case "$f" in
-              "${stage}/link-"[1-5]/diag.json") ;;
-              *)
-                echo "::error::refusing unexpected path in diag stage tree: $f" >&2
-                exit 1
-                ;;
-            esac
-          done < <(find "$stage" -type f -print0)
-          if find "$stage" -type l | grep -q .; then
-            echo "::error::refusing symlinks in diag stage tree" >&2
-            exit 1
-          fi
-          chmod -R a-w -- "$stage" || true
-          echo "staged ${staged} diag.json file(s) from sealed step outputs"
-          echo "stage_dir=${stage}" >> "$GITHUB_OUTPUT"
-          echo "digest_manifest=${manifest}" >> "$GITHUB_OUTPUT"
-          echo "staged=${staged}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify staged diag digests
-        id: diag_verify
-        if: >-
-          always()
-          && steps.select.outputs.issue != ''
-          && steps.diag_stage.outcome == 'success'
-          && steps.diag_stage.outputs.staged != ''
-          && steps.diag_stage.outputs.staged != '0'
-        continue-on-error: true
-        env:
-          RUNNER_TEMP: ${{ runner.temp }}
-          PATH: /usr/bin:/bin
-          LD_PRELOAD: ""
-          LD_LIBRARY_PATH: ""
-          BASH_ENV: ""
-          STAGE_DIR: ${{ steps.diag_stage.outputs.stage_dir }}
-          DIGEST_MANIFEST: ${{ steps.diag_stage.outputs.digest_manifest }}
-          PRESENT_1: ${{ steps.diag_1.outputs.present }}
-          DIAG_1: ${{ steps.diag_1.outputs.diag }}
-          PRESENT_2: ${{ steps.diag_2.outputs.present }}
-          DIAG_2: ${{ steps.diag_2.outputs.diag }}
-          PRESENT_3: ${{ steps.diag_3.outputs.present }}
-          DIAG_3: ${{ steps.diag_3.outputs.diag }}
-          PRESENT_4: ${{ steps.diag_4.outputs.present }}
-          DIAG_4: ${{ steps.diag_4.outputs.diag }}
-          PRESENT_5: ${{ steps.diag_5.outputs.present }}
-          DIAG_5: ${{ steps.diag_5.outputs.diag }}
-        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
-        run: |
-          set -euo pipefail
-          echo "ok=0" >> "$GITHUB_OUTPUT"
-          echo "stage_dir=" >> "$GITHUB_OUTPUT"
-          reap_should_kill() {
-            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
-            [ -n "$pid" ] || return 1
-            [ "$pid" = "$self_pid" ] && return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
-            esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
-            esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
-            fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
-              return 0
-            fi
-            case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
-            esac
-            return 1
-          }
-          reap_agent_orphans() {
-            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
-              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
-              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
-              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
-              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
-              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
-          reap_agent_orphans
-          # Always rematerialize from sealed step outputs into a fresh mktemp —
-          # never trust the prior stage tree bytes across the step boundary.
-          stage="$(mktemp -d "${RUNNER_TEMP}/backlog-burn-agent-diag-upload.XXXXXX")"
-          declare -A want=()
-          if [ -n "${DIGEST_MANIFEST:-}" ]; then
-            IFS=',' read -r -a parts <<< "$DIGEST_MANIFEST"
-            for p in "${parts[@]}"; do
-              idx="${p%%:*}"
-              dig="${p#*:}"
-              want["$idx"]="$dig"
-            done
-          fi
-          for i in 1 2 3 4 5; do
-            present_var="PRESENT_${i}"
-            diag_var="DIAG_${i}"
-            present="${!present_var-}"
-            diag="${!diag_var-}"
-            if [ "$present" != "1" ] || [ -z "$diag" ]; then
-              continue
-            fi
-            mkdir -p -- "${stage}/link-${i}"
-            printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
-            python3 -I -c "import json,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_truncated'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED; assert isinstance(obj['denied_tools'], list); f=obj['final_assistant_message_truncated']; assert isinstance(f, str) and len(f)<=500" \
-              "${stage}/link-${i}/diag.json"
-            dig="$(sha256sum "${stage}/link-${i}/diag.json" | awk '{print $1}')"
-            if [ -n "${want[$i]-}" ] && [ "${want[$i]}" != "$dig" ]; then
-              echo "::error::sealed diag digest drift for link ${i}" >&2
-              exit 1
-            fi
-          done
-          while IFS= read -r -d '' f; do
-            case "$f" in
-              "${stage}/link-"[1-5]/diag.json") ;;
-              *)
-                echo "::error::refusing unexpected path in verified diag tree: $f" >&2
-                exit 1
-                ;;
-            esac
-          done < <(find "$stage" -type f -print0)
-          if find "$stage" -type l | grep -q .; then
-            echo "::error::refusing symlinks in verified diag tree" >&2
-            exit 1
-          fi
-          chmod -R a-w -- "$stage" || true
-          echo "stage_dir=${stage}" >> "$GITHUB_OUTPUT"
-          echo "ok=1" >> "$GITHUB_OUTPUT"
-
-      - name: Upload agent denial diagnostic
-        # Require verify success — upload only explicit link-N/diag.json paths
-        # from the rematerialized mktemp tree (never a recursive well-known dir).
-        if: >-
-          always()
-          && steps.select.outputs.issue != ''
-          && steps.diag_stage.outcome == 'success'
-          && steps.diag_stage.outputs.staged != ''
-          && steps.diag_stage.outputs.staged != '0'
-          && steps.diag_verify.outcome == 'success'
-          && steps.diag_verify.outputs.ok == '1'
-          && steps.diag_verify.outputs.stage_dir != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: backlog-burn-agent-diag-${{ github.run_id }}
-          path: |
-            ${{ steps.diag_verify.outputs.stage_dir }}/link-1/diag.json
-            ${{ steps.diag_verify.outputs.stage_dir }}/link-2/diag.json
-            ${{ steps.diag_verify.outputs.stage_dir }}/link-3/diag.json
-            ${{ steps.diag_verify.outputs.stage_dir }}/link-4/diag.json
-            ${{ steps.diag_verify.outputs.stage_dir }}/link-5/diag.json
-          if-no-files-found: ignore
-          retention-days: 14
+      # Denial diagnostic artifact upload runs on a FRESH runner (job
+      # upload-diag below) from sealed step outputs exported as job outputs.
+      # Do not stage or upload from this agent runner — a leftover ship child
+      # shares this UID and can race any on-disk tree between steps.
+      # (show_full_output stays false; the artifact is redacted denial +
+      # truncated assistant message only.)
 
       # The agent can append to GITHUB_PATH and GITHUB_ENV. Those files are
       # per-step: emptying them here would not undo PATH or BASH_ENV the
@@ -2061,8 +1802,16 @@ jobs:
             case "$cmd" in
               *backlog-burn.bundle*|*model_registry*) mentions=1 ;;
             esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
-              return 0
+            # Detached-to-init orphans: cwd in tree OR cmdline mention OR any
+            # non-system setsid session leader (cwd /tmp or / used to evade
+            # the in_tree check and still read mode-600 secrets as same UID).
+            if [ "$ppid" = "1" ]; then
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+                return 0
+              fi
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -2387,6 +2136,99 @@ jobs:
             echo ""
             echo "**Steer this routine** — comment \`/backlog-burn set <key> <value>\` (\`enabled\` · \`label\` · \`provider\` · \`cadence\`) on any issue or PR to change policy without a PR (write access required); flip the \`BACKLOG_BURN_ENABLED\` repo variable to arm or disarm it."
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+  # Fresh runner: materialize sealed diag.json from burn job outputs and
+  # upload. No ship orphan shares this filesystem, so the verify→upload
+  # race on the agent runner cannot apply. Schema-check before upload;
+  # only link-N/diag.json paths are published.
+  upload-diag:
+    name: Upload agent denial diagnostic
+    needs: burn
+    if: >-
+      always()
+      && needs.burn.result != 'skipped'
+      && needs.burn.outputs.issue != ''
+      && (
+        needs.burn.outputs.diag_present_1 == '1'
+        || needs.burn.outputs.diag_present_2 == '1'
+        || needs.burn.outputs.diag_present_3 == '1'
+        || needs.burn.outputs.diag_present_4 == '1'
+        || needs.burn.outputs.diag_present_5 == '1'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      PRESENT_1: ${{ needs.burn.outputs.diag_present_1 }}
+      DIAG_1: ${{ needs.burn.outputs.diag_1 }}
+      PRESENT_2: ${{ needs.burn.outputs.diag_present_2 }}
+      DIAG_2: ${{ needs.burn.outputs.diag_2 }}
+      PRESENT_3: ${{ needs.burn.outputs.diag_present_3 }}
+      DIAG_3: ${{ needs.burn.outputs.diag_3 }}
+      PRESENT_4: ${{ needs.burn.outputs.diag_present_4 }}
+      DIAG_4: ${{ needs.burn.outputs.diag_4 }}
+      PRESENT_5: ${{ needs.burn.outputs.diag_present_5 }}
+      DIAG_5: ${{ needs.burn.outputs.diag_5 }}
+      RUNNER_TEMP: ${{ runner.temp }}
+    steps:
+      - name: Materialize sealed diag.json
+        id: materialize
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d "${RUNNER_TEMP}/backlog-burn-agent-diag-upload.XXXXXX")"
+          staged=0
+          for i in 1 2 3 4 5; do
+            present_var="PRESENT_${i}"
+            diag_var="DIAG_${i}"
+            present="${!present_var-}"
+            diag="${!diag_var-}"
+            if [ "$present" != "1" ] || [ -z "$diag" ]; then
+              continue
+            fi
+            mkdir -p -- "${stage}/link-${i}"
+            printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
+            python3 -I -c "import json,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_truncated'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536, 'diag too large'; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED, 'bad keys'; assert isinstance(obj['denied_tools'], list); f=obj['final_assistant_message_truncated']; assert isinstance(f, str) and len(f)<=500" \
+              "${stage}/link-${i}/diag.json"
+            staged=$((staged + 1))
+          done
+          while IFS= read -r -d '' f; do
+            case "$f" in
+              "${stage}/link-"[1-5]/diag.json") ;;
+              *)
+                echo "::error::refusing unexpected path in diag upload tree: $f" >&2
+                exit 1
+                ;;
+            esac
+          done < <(find "$stage" -type f -print0)
+          if find "$stage" -type l | grep -q .; then
+            echo "::error::refusing symlinks in diag upload tree" >&2
+            exit 1
+          fi
+          if [ "$staged" -eq 0 ]; then
+            echo "::error::no sealed diag.json to upload" >&2
+            exit 1
+          fi
+          echo "stage_dir=${stage}" >> "$GITHUB_OUTPUT"
+          echo "staged=${staged}" >> "$GITHUB_OUTPUT"
+          echo "materialized ${staged} sealed diag.json file(s) on fresh runner"
+
+      - name: Upload agent denial diagnostic
+        if: steps.materialize.outputs.staged != '' && steps.materialize.outputs.staged != '0'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: backlog-burn-agent-diag-${{ github.run_id }}
+          path: |
+            ${{ steps.materialize.outputs.stage_dir }}/link-1/diag.json
+            ${{ steps.materialize.outputs.stage_dir }}/link-2/diag.json
+            ${{ steps.materialize.outputs.stage_dir }}/link-3/diag.json
+            ${{ steps.materialize.outputs.stage_dir }}/link-4/diag.json
+            ${{ steps.materialize.outputs.stage_dir }}/link-5/diag.json
+          if-no-files-found: ignore
+          retention-days: 14
+
 
   settle:
     name: Release the SHIP-LOCK on a fresh runner
