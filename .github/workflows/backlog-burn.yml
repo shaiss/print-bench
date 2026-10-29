@@ -671,6 +671,13 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
+          # Passed via env — NOT interpolated into the on-disk run script — so a
+          # leftover ship child cannot read key material from the step script
+          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
+          _BB_DIAG_TOK: ${{ github.token }}
+          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
+          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -781,25 +788,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets for exact scrub: write via Actions expressions into a
-          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
-          # not re-expose provider keys the ship subprocess scrub removed).
-          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          # Exact scrub secrets: copy from short-lived step env (not script
+          # literals) into a mode-600 mktemp, then unset from this shell so
+          # /proc/$$/environ does not keep them for the rest of the step.
+          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
+          # OPENROUTER — not ship inputs on this runner.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          # Only scrub secrets already decrypted for this job's ship steps
-          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
-          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
-          # — those are not ship inputs here; decrypting them on the agent
-          # runner would re-open the burn/deliver isolation the job header
-          # documents (push PAT only in backlog-burn-deliver.yml).
           {
-            _tok='${{ github.token }}'
-            [ -n "$_tok" ] && printf '%s\n' "$_tok"
-            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
-            [ -n "$_ant" ] && printf '%s\n' "$_ant"
-            _zai='${{ secrets.ZAI_KEY }}'
-            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
+            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
+            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -811,17 +810,24 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai || true
+          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
-          # shellcheck disable=SC2064
-          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          cleanup_capture() {
+            # Only rm paths that are still set — clearing secrets="" used to
+            # hand GNU rm an empty operand and fail the step under set -e.
+            [ -n "${blob:-}" ] && rm -f -- "$blob" || true
+            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
+            [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
+          }
+          trap cleanup_capture EXIT
           if ! env -u GITHUB_TOKEN -u GH_TOKEN \
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -830,8 +836,8 @@ jobs:
             exit 1
           fi
           # Drop the secrets file before sealing outputs — shrink the window.
+          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
           rm -f -- "$secrets"
-          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -883,6 +889,13 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
+          # Passed via env — NOT interpolated into the on-disk run script — so a
+          # leftover ship child cannot read key material from the step script
+          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
+          _BB_DIAG_TOK: ${{ github.token }}
+          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
+          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -993,25 +1006,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets for exact scrub: write via Actions expressions into a
-          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
-          # not re-expose provider keys the ship subprocess scrub removed).
-          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          # Exact scrub secrets: copy from short-lived step env (not script
+          # literals) into a mode-600 mktemp, then unset from this shell so
+          # /proc/$$/environ does not keep them for the rest of the step.
+          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
+          # OPENROUTER — not ship inputs on this runner.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          # Only scrub secrets already decrypted for this job's ship steps
-          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
-          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
-          # — those are not ship inputs here; decrypting them on the agent
-          # runner would re-open the burn/deliver isolation the job header
-          # documents (push PAT only in backlog-burn-deliver.yml).
           {
-            _tok='${{ github.token }}'
-            [ -n "$_tok" ] && printf '%s\n' "$_tok"
-            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
-            [ -n "$_ant" ] && printf '%s\n' "$_ant"
-            _zai='${{ secrets.ZAI_KEY }}'
-            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
+            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
+            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -1023,17 +1028,24 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai || true
+          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
-          # shellcheck disable=SC2064
-          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          cleanup_capture() {
+            # Only rm paths that are still set — clearing secrets="" used to
+            # hand GNU rm an empty operand and fail the step under set -e.
+            [ -n "${blob:-}" ] && rm -f -- "$blob" || true
+            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
+            [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
+          }
+          trap cleanup_capture EXIT
           if ! env -u GITHUB_TOKEN -u GH_TOKEN \
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1042,8 +1054,8 @@ jobs:
             exit 1
           fi
           # Drop the secrets file before sealing outputs — shrink the window.
+          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
           rm -f -- "$secrets"
-          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1093,6 +1105,13 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
+          # Passed via env — NOT interpolated into the on-disk run script — so a
+          # leftover ship child cannot read key material from the step script
+          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
+          _BB_DIAG_TOK: ${{ github.token }}
+          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
+          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1203,25 +1222,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets for exact scrub: write via Actions expressions into a
-          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
-          # not re-expose provider keys the ship subprocess scrub removed).
-          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          # Exact scrub secrets: copy from short-lived step env (not script
+          # literals) into a mode-600 mktemp, then unset from this shell so
+          # /proc/$$/environ does not keep them for the rest of the step.
+          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
+          # OPENROUTER — not ship inputs on this runner.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          # Only scrub secrets already decrypted for this job's ship steps
-          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
-          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
-          # — those are not ship inputs here; decrypting them on the agent
-          # runner would re-open the burn/deliver isolation the job header
-          # documents (push PAT only in backlog-burn-deliver.yml).
           {
-            _tok='${{ github.token }}'
-            [ -n "$_tok" ] && printf '%s\n' "$_tok"
-            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
-            [ -n "$_ant" ] && printf '%s\n' "$_ant"
-            _zai='${{ secrets.ZAI_KEY }}'
-            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
+            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
+            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -1233,17 +1244,24 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai || true
+          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
-          # shellcheck disable=SC2064
-          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          cleanup_capture() {
+            # Only rm paths that are still set — clearing secrets="" used to
+            # hand GNU rm an empty operand and fail the step under set -e.
+            [ -n "${blob:-}" ] && rm -f -- "$blob" || true
+            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
+            [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
+          }
+          trap cleanup_capture EXIT
           if ! env -u GITHUB_TOKEN -u GH_TOKEN \
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1252,8 +1270,8 @@ jobs:
             exit 1
           fi
           # Drop the secrets file before sealing outputs — shrink the window.
+          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
           rm -f -- "$secrets"
-          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1311,6 +1329,13 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
+          # Passed via env — NOT interpolated into the on-disk run script — so a
+          # leftover ship child cannot read key material from the step script
+          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
+          _BB_DIAG_TOK: ${{ github.token }}
+          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
+          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1421,25 +1446,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets for exact scrub: write via Actions expressions into a
-          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
-          # not re-expose provider keys the ship subprocess scrub removed).
-          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          # Exact scrub secrets: copy from short-lived step env (not script
+          # literals) into a mode-600 mktemp, then unset from this shell so
+          # /proc/$$/environ does not keep them for the rest of the step.
+          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
+          # OPENROUTER — not ship inputs on this runner.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          # Only scrub secrets already decrypted for this job's ship steps
-          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
-          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
-          # — those are not ship inputs here; decrypting them on the agent
-          # runner would re-open the burn/deliver isolation the job header
-          # documents (push PAT only in backlog-burn-deliver.yml).
           {
-            _tok='${{ github.token }}'
-            [ -n "$_tok" ] && printf '%s\n' "$_tok"
-            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
-            [ -n "$_ant" ] && printf '%s\n' "$_ant"
-            _zai='${{ secrets.ZAI_KEY }}'
-            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
+            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
+            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -1451,17 +1468,24 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai || true
+          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
-          # shellcheck disable=SC2064
-          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          cleanup_capture() {
+            # Only rm paths that are still set — clearing secrets="" used to
+            # hand GNU rm an empty operand and fail the step under set -e.
+            [ -n "${blob:-}" ] && rm -f -- "$blob" || true
+            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
+            [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
+          }
+          trap cleanup_capture EXIT
           if ! env -u GITHUB_TOKEN -u GH_TOKEN \
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1470,8 +1494,8 @@ jobs:
             exit 1
           fi
           # Drop the secrets file before sealing outputs — shrink the window.
+          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
           rm -f -- "$secrets"
-          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -1520,6 +1544,13 @@ jobs:
           CAPTURE_SHA256: ${{ steps.start_ref.outputs.capture_sha256 }}
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          # Ship-already-decrypted secrets only (no REGEN/OPENAI/OPENROUTER).
+          # Passed via env — NOT interpolated into the on-disk run script — so a
+          # leftover ship child cannot read key material from the step script
+          # file. Reaper runs before these are copied to SECRETS_FILE; then unset.
+          _BB_DIAG_TOK: ${{ github.token }}
+          _BB_DIAG_ANT: ${{ secrets.ANTHROPIC_API_KEY }}
+          _BB_DIAG_ZAI: ${{ secrets.ZAI_KEY }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
@@ -1630,25 +1661,17 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Secrets for exact scrub: write via Actions expressions into a
-          # mode-600 mktemp file, never via step env (so /proc/$$/environ does
-          # not re-expose provider keys the ship subprocess scrub removed).
-          # Inherit-only runner tokens (ACTIONS_*) are copied then unset.
+          # Exact scrub secrets: copy from short-lived step env (not script
+          # literals) into a mode-600 mktemp, then unset from this shell so
+          # /proc/$$/environ does not keep them for the rest of the step.
+          # Reaper already ran above. Do NOT touch REGEN_TOKEN / OPENAI /
+          # OPENROUTER — not ship inputs on this runner.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
-          # Only scrub secrets already decrypted for this job's ship steps
-          # (github.token, ANTHROPIC_API_KEY, ZAI_KEY) plus runner ACTIONS_*.
-          # Do NOT interpolate REGEN_TOKEN / OPENAI_API_KEY / OPENROUTER_API_KEY
-          # — those are not ship inputs here; decrypting them on the agent
-          # runner would re-open the burn/deliver isolation the job header
-          # documents (push PAT only in backlog-burn-deliver.yml).
           {
-            _tok='${{ github.token }}'
-            [ -n "$_tok" ] && printf '%s\n' "$_tok"
-            _ant='${{ secrets.ANTHROPIC_API_KEY }}'
-            [ -n "$_ant" ] && printf '%s\n' "$_ant"
-            _zai='${{ secrets.ZAI_KEY }}'
-            [ -n "$_zai" ] && printf '%s\n' "$_zai"
+            [ -n "${_BB_DIAG_TOK:-}" ] && printf '%s\n' "$_BB_DIAG_TOK"
+            [ -n "${_BB_DIAG_ANT:-}" ] && printf '%s\n' "$_BB_DIAG_ANT"
+            [ -n "${_BB_DIAG_ZAI:-}" ] && printf '%s\n' "$_BB_DIAG_ZAI"
             for key in \
               ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               ANTHROPIC_AUTH_TOKEN GITHUB_TOKEN GH_TOKEN
@@ -1660,17 +1683,24 @@ jobs:
             done
           } >"$secrets"
           chmod 600 -- "$secrets"
-          unset _tok _ant _zai || true
+          unset _BB_DIAG_TOK _BB_DIAG_ANT _BB_DIAG_ZAI || true
           unset GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
             ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
             ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
-          # shellcheck disable=SC2064
-          trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
+          cleanup_capture() {
+            # Only rm paths that are still set — clearing secrets="" used to
+            # hand GNU rm an empty operand and fail the step under set -e.
+            [ -n "${blob:-}" ] && rm -f -- "$blob" || true
+            [ -n "${secrets:-}" ] && rm -f -- "$secrets" || true
+            [ -n "${diag_out:-}" ] && rm -f -- "$diag_out" || true
+          }
+          trap cleanup_capture EXIT
           if ! env -u GITHUB_TOKEN -u GH_TOKEN \
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u _BB_DIAG_TOK -u _BB_DIAG_ANT -u _BB_DIAG_ZAI \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1679,8 +1709,8 @@ jobs:
             exit 1
           fi
           # Drop the secrets file before sealing outputs — shrink the window.
+          # Keep $secrets set so the EXIT trap's rm -f is a no-op on the path.
           rm -f -- "$secrets"
-          secrets=""
           if [ ! -f "$diag_out" ] || [ -L "$diag_out" ]; then
             echo "::error::capture helper did not produce DIAG_OUT" >&2
             exit 1
@@ -2195,8 +2225,9 @@ jobs:
             staged=$((staged + 1))
           done
           while IFS= read -r -d '' f; do
-            case "$f" in
-              "${stage}/link-"[1-5]/diag.json") ;;
+            rel="${f#"${stage}"/}"
+            case "$rel" in
+              link-[1-5]/diag.json) ;;
               *)
                 echo "::error::refusing unexpected path in diag upload tree: $f" >&2
                 exit 1
