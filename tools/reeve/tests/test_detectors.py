@@ -498,8 +498,12 @@ WRITE_SEAM = "pushthrough.py"
 # greenlight-select / greenlight-poll paths only. approval.py (#446, the
 # standing approval modes) is pure policy the write seam consumes, so it is
 # held here too — the seam may import it only because it can carry nothing.
+# provenance.py (the harvester's read lens, docs/provenance.md §Registration)
+# is held here too: detectors.py imports its pure half at module level, and its
+# GET-only gather reaches the network only through github._get, imported
+# lazily inside the gather — so it can never smuggle urllib into the core.
 _PURE_MODULES = ("detectors.py", "report.py", "config.py", "cli.py", "signals.py",
-                 "approval.py")
+                 "approval.py", "provenance.py")
 
 
 def _imports_of(path):

@@ -1,0 +1,15 @@
+{
+ "NVC-12": {
+  "derivation": [
+   "The audit's golden tuple (21, 1, 46, 33) is (noise.bugbot_limit, noise.qodo_paused, deploy.preview, noise.coderabbit_status) over every source the audit read for #636 (audits/provenance-2026-10/fixtures/bin/check_acceptance.py).",
+   "Re-baselined on the harvester's closed noise keys over what it harvests (raw-pr@1): comment.bugbot_limit = 21 issue comments whose lead line is the Bugbot usage-limit heading; comment.qodo_paused = 1 issue comment led by 'Qodo reviews are paused'; status.coderabbit = 33 commit statuses with context CodeRabbit across every PR commit and ci-run head. These three equal the golden.",
+   "The third element moves source. The golden's 46 deploy.preview rows are the Vercel commit statuses (creator vercel[bot], target_url on vercel.com); the harvester stores no Preview deployment (it reads only environment=Production) and keeps those 46 statuses as noise under status.vercel. The tuple's third element is the PR timeline's 'deployed' items, timeline.deployed = 22 (one per preview deployment GitHub linked to the PR timeline); the golden's 46 is pinned separately as status.vercel.",
+   "Per-SHA check runs are not read at all (docs/provenance.md, Capture sequences), so no key counts them."
+  ],
+  "expected": [21, 1, 22, 33],
+  "golden": [21, 1, 46, 33],
+  "keys": ["comment.bugbot_limit", "comment.qodo_paused", "timeline.deployed", "status.coderabbit"],
+  "pr": 636,
+  "same_source_as_golden_third": {"key": "status.vercel", "value": 46}
+ }
+}

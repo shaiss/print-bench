@@ -64,7 +64,15 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    over the 2×20 header), not a window — no bridging, and the wall keeps its
    bottom half for stiffness.
 5. **Fan bolts flush to the lid's outer face; the insert bosses are on the
-   inner face.** Aperture = the fan's own Ø37 bore (from `fan_bore(fan_type)`).
+   inner face.** Intake is a **co-planar grille** in the lid plate (B11): Ø5
+   holes on a 7 mm pitch (2 mm webs), clipped to the vitamin's Ø37 bore
+   (`fan_bore(fan_type)`). Plate material bounds every opening — no bar across
+   the bore span (N4 / outer-face-down print). Measured open area inside the
+   bore: **~40 %** of an unobstructed Ø37 disc (~426 mm² vs 1075 mm²); ~60 %
+   of the former free hole is now solid web closing the case ceiling over the
+   fan bore (the fan sits on the outer face; the grille is not a blade guard
+   from outside). Honesty scale: stops fingers and larger dropped objects on the
+   webs; **Ø5 mm** holes still pass M2.5/M3 screws, paperclips, and wire.
    Fan screws (M3 dome ×20, washer under each head) pass through the fan frame
    and the plate into the inner bosses — 11 + 2.5 + 5.8 = 19.3 mm of stack, so
    ×20. The bosses hang 7 mm into the cavity at the fan's corner pitch
@@ -364,6 +372,32 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
+27. **B11 — co-planar fan grille (2026-10-04).** Replaced the through-bored
+    Ø37 lid cut with `fan_grille_cut2d()` — Ø5 holes, 7 mm pitch, 2 mm webs,
+    clipped to `fan_bore(fan_type)`. Trade: ~40 % of the unobstructed bore's
+    free area retained (Monte Carlo on the parametric grid); case ceiling closed
+    over the fan bore (not a blade guard from outside); dust still enters through
+    the holes (page updated). Page honesty (Drik round 2 on #810): fingers and
+    larger objects only — not screw or wire sealing at Ø5.
+    Boss pitch and M3 fan screws unchanged; grille stays inside the bore circle,
+    clear of the corner bosses at 16 mm pitch.
+28. **B7 — occupied GPIO-notch clearance (this PR).** Measured from the
+    committed cut and lid lip, not from a page claim. The +Y notch is 55 mm
+    wide × 8.5 mm tall (`gpio_notch_w` × `base_top_z − gpio_notch_bottom`);
+    the lid register lip hangs `lip_depth` 2.5 mm into the cavity, so the
+    inner mouth is only 6.0 mm high. Pin tops at z ≈ 16.8 (`board_z` + board
+    1.4 + `2p54header` pin-above 8.4), ~0.7 mm below the 17.5 lip — jumpers
+    still clear. A typical 2×20 IDC housing (~51 × 8, vs NopSCADlib
+    `pin_socket` 51.3 × 5.0 × 8.5) **does not pass the lid-on notch**: 8 >
+    6.0 at the lip, and even the empty wall is only 0.5 mm over 8 mm. Two
+    Ø1.6 28 AWG silicone fan leads still thread the notch (`fit-gpio-leads`
+    empty) when the housing is not in it — through the **+X** leftover
+    strip; the −X leftover kisses the −X,+Y lid-screw post. Leftover width
+    beside a centred 51 mm envelope is 4 mm (2 mm/side), which is not the
+    bound. Proof:
+    `fit-gpio-occupied` (envelope + leads ∩ lid-on shell) interferes;
+    `fit-gpio-leads` empty. The notch cut is unchanged — widening it (and/or
+    notching the lid lip) is a follow-up needing PM/eng, not a silent reshape.
 
 ## Print settings
 
@@ -398,8 +432,8 @@ structure proof:
    steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
-4. Only then print `base` (~2h45m) and `lid` (~1h40m) — the head-stamped gate
-   times; your slicer and material may differ.
+4. Only then print `base` (~2h 46m 37s) and `lid` (~2h 2m 41s) — printcheck
+   sticky on PR #810 tip `4f166d50`; your slicer and material may differ.
 
 ## Derivations worth keeping
 
@@ -417,3 +451,20 @@ structure proof:
 - Fan screw length M3 × 20 = fan frame 11 + plate 2.5 + insert 5.8: the screw
   passes through the fan and the plate into the inner-face bosses (×10, the
   first draft's length, bottomed out in the plate before reaching the insert).
+- **B7 GPIO notch window** (lid on, notch occupied — ribbon envelope + fan
+  leads). Derived from the committed cut and lid lip; the cut was not
+  resized.
+
+  | quantity | mm | from |
+  |---|---|---|
+  | 2×20 header centre | (−10, 24.5) | `pcb_coord` of RPI4 `2p54header` 20×2 |
+  | pin tops z | 16.8 | `board_z` 7 + 1.4 + (11.6 − 3.2) |
+  | notch lip z | 17.5 | `gpio_notch_bottom` |
+  | wall window | 55 × 8.5 | cut `gpio_notch_w` × (`base_top_z` 26 − 17.5) |
+  | lid-lip inner height | 6.0 | 26 − `lip_depth` 2.5 − 17.5 |
+  | 2×20 IDC envelope | 51 × 8 | typical strain-relief housing (catalog socket 51.3 × 5.0 × 8.5) |
+  | leftover width | 4.0 | 55 − 51, centred |
+  | fan-lead OD | 1.6 | typical 28 AWG silicone pair |
+
+  Verdict: jumpers clear; full IDC **does not** (8 > 6.0); fan leads still
+  have a path without the housing in the notch.
