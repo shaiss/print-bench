@@ -491,6 +491,12 @@ surfaces studies awaiting a read live in
     author+suffix pattern); refuses (rather than answers `false`) on a
     typo'd reviewer or sha, and carries a `--selftest` with a negative
     control per row
+  - `resolve-trusted-base-sha.sh` — resolves the tip of the PR base branch
+    (must be the repository default branch) for `auto-review.yml` trust-script
+    restores of `reviewer-posted.sh` / `reviewer-signoff.sh` /
+    `coach-lock-check.sh`: always the server tip, never event `base.sha`;
+    forged base.ref / empty / malformed tip fail closed; `--selftest` run by
+    check.sh
   - `design-run-deliver.sh` — pushes a design-run's `claude/issue-<N>-*` branch
     and opens its draft PR after the agent step, and posts the success
     comment only once the remote tip and a same-repo draft PR at that tip

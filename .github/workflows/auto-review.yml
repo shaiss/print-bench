@@ -362,15 +362,15 @@ jobs:
           # "tip when base.sha predates it") so one path cannot fail open and
           # a race against a main push cannot restore a pre-marker checker.
           resolve_trusted_sha() {
-            local base_ref="$1" default_branch tip ref_tip
+            local want_ref="$1" default_branch tip ref_tip
             default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch)"
             default_branch="${default_branch//$'\r'/}"
             default_branch="${default_branch//$'\n'/}"
-            if [[ -z "$default_branch" || "$base_ref" != "$default_branch" ]]; then
-              echo "::error::base.ref '${base_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
+            if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
+              echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
               return 1
             fi
-            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${base_ref}" --jq -r .object.sha)"
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq -r .object.sha)"
             tip="${tip//$'\r'/}"
             tip="${tip//$'\n'/}"
             if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
@@ -383,9 +383,9 @@ jobs:
                 return 1
               }
             fi
-            ref_tip="$(git ls-remote origin "refs/heads/${base_ref}" | awk '{print $1; exit}')"
+            ref_tip="$(git ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
             if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::ls-remote tip for refs/heads/${base_ref} empty or malformed — fail closed" >&2
+              echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
               return 1
             fi
             if [[ "$tip" != "$ref_tip" ]]; then
@@ -2177,15 +2177,15 @@ jobs:
           # "tip when base.sha predates it") so one path cannot fail open and
           # a race against a main push cannot restore a pre-marker checker.
           resolve_trusted_sha() {
-            local base_ref="$1" default_branch tip ref_tip
+            local want_ref="$1" default_branch tip ref_tip
             default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch)"
             default_branch="${default_branch//$'\r'/}"
             default_branch="${default_branch//$'\n'/}"
-            if [[ -z "$default_branch" || "$base_ref" != "$default_branch" ]]; then
-              echo "::error::base.ref '${base_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
+            if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
+              echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
               return 1
             fi
-            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${base_ref}" --jq -r .object.sha)"
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq -r .object.sha)"
             tip="${tip//$'\r'/}"
             tip="${tip//$'\n'/}"
             if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
@@ -2198,9 +2198,9 @@ jobs:
                 return 1
               }
             fi
-            ref_tip="$(git ls-remote origin "refs/heads/${base_ref}" | awk '{print $1; exit}')"
+            ref_tip="$(git ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
             if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::ls-remote tip for refs/heads/${base_ref} empty or malformed — fail closed" >&2
+              echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
               return 1
             fi
             if [[ "$tip" != "$ref_tip" ]]; then
@@ -3914,15 +3914,15 @@ jobs:
           # "tip when base.sha predates it") so one path cannot fail open and
           # a race against a main push cannot restore a pre-marker checker.
           resolve_trusted_sha() {
-            local base_ref="$1" default_branch tip ref_tip
+            local want_ref="$1" default_branch tip ref_tip
             default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch)"
             default_branch="${default_branch//$'\r'/}"
             default_branch="${default_branch//$'\n'/}"
-            if [[ -z "$default_branch" || "$base_ref" != "$default_branch" ]]; then
-              echo "::error::base.ref '${base_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
+            if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
+              echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
               return 1
             fi
-            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${base_ref}" --jq -r .object.sha)"
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq -r .object.sha)"
             tip="${tip//$'\r'/}"
             tip="${tip//$'\n'/}"
             if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
@@ -3935,9 +3935,9 @@ jobs:
                 return 1
               }
             fi
-            ref_tip="$(git ls-remote origin "refs/heads/${base_ref}" | awk '{print $1; exit}')"
+            ref_tip="$(git ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
             if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::ls-remote tip for refs/heads/${base_ref} empty or malformed — fail closed" >&2
+              echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
               return 1
             fi
             if [[ "$tip" != "$ref_tip" ]]; then
