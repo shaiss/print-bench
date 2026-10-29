@@ -4272,16 +4272,17 @@ EOF
     echo "selftest: burn bundle step still executes the worktree script" >&2
     exit 1
   }
-  # Orphans are reaped per-link via systemd cgroup scopes — bundle must not
-  # call the deleted PID-snapshot reaper, and must still re-check the digest.
-  if printf '%s\n' "$burn_run" | grep 'reap_agent_orphans' >/dev/null; then
-    echo "selftest: burn bundle step still calls reap_agent_orphans (pid-snap removed)" >&2
+  # Accepted residual: backlog-burn has no orphan reaper (ppid=1 sweep,
+  # PID-snapshot, and cgroup-scope approaches were rejected). Bundle/pending
+  # still work without a re-digest race against a reaper.
+  if printf '%s\n' "$burn_run" | grep -E 'reap_agent_orphans|reap_should_kill' >/dev/null; then
+    echo "selftest: burn bundle step still defines an orphan reaper" >&2
     exit 1
   fi
-  printf '%s\n' "$burn_run" | grep 'now" != "$captured"' >/dev/null || {
-    echo "selftest: burn bundle step does not re-check the bundle digest" >&2
+  if printf '%s\n' "$burn_run" | grep 'now" != "$captured"' >/dev/null; then
+    echo "selftest: burn bundle step still re-checks digest after a removed reap" >&2
     exit 1
-  }
+  fi
   grep -q 'deliver_sha256=' "$burn" || {
     echo "selftest: the burn pre-agent pin does not record deliver_sha256" >&2
     exit 1
@@ -4575,88 +4576,22 @@ EOF
     echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
     exit 1
   }
-  # Cgroup-scope reaper: each ship link runs inside bb-agent-<run_id>-<attempt>-<link>
-  # via ./.github/actions/bb-scoped-claude; a continue-on-error reap step kills
-  # that one unit only. PID-snapshot machinery must be gone.
+  # backlog-burn ships with no orphan reaper (accepted residual). Refuse any
+  # reintroduction of ppid=1 / PID-snapshot / cgroup-scope reap machinery.
+  if grep -E 'reap_should_kill|reap_agent_orphans|pid_snap|PID_SNAP|backlog-burn-pid-snap|bb-scoped-claude|systemd-run|systemctl kill|cgroup-reap' "$burn" >/dev/null; then
+    echo "selftest: backlog-burn.yml still carries orphan-reaper / cgroup-scope machinery" >&2
+    exit 1
+  fi
   if [ -f "${repo_root}/scripts/backlog-burn-pid-snap.sh" ]; then
-    echo "selftest: scripts/backlog-burn-pid-snap.sh still present (replaced by cgroup scope)" >&2
+    echo "selftest: scripts/backlog-burn-pid-snap.sh must not exist" >&2
     exit 1
   fi
-  if grep -E 'pid_snap|PID_SNAP|backlog-burn-pid-snap|backlog_burn_rematerialize_pid_snap|_bb_reap_on_exit|reap_agent_orphans' "$burn" >/dev/null; then
-    echo "selftest: burn still references pid-snap / EXIT-trap reaper machinery" >&2
+  if [ -e "${repo_root}/.github/actions/bb-scoped-claude" ]; then
+    echo "selftest: .github/actions/bb-scoped-claude must not exist" >&2
     exit 1
   fi
-  grep -q 'uses: ./.github/actions/bb-scoped-claude' "$burn" || {
-    echo "selftest: burn ship steps do not use bb-scoped-claude" >&2
-    exit 1
-  }
-  burn_scoped_n="$(grep -c 'uses: \./\.github/actions/bb-scoped-claude' "$burn" || true)"
-  [ "$burn_scoped_n" -eq 5 ] || {
-    echo "selftest: expected 5 scoped ship links, found ${burn_scoped_n}" >&2
-    exit 1
-  }
-  burn_reap_n="$(grep -c 'Reap agent cgroup (link' "$burn" || true)"
-  [ "$burn_reap_n" -eq 5 ] || {
-    echo "selftest: expected 5 cgroup reap steps, found ${burn_reap_n}" >&2
-    exit 1
-  }
-  grep -q 'bb-agent-${{ github.run_id }}-${{ github.run_attempt }}-' "$burn" || {
-    echo "selftest: burn reap units are not derived from run_id/run_attempt/link" >&2
-    exit 1
-  }
-  bb_scoped="${repo_root}/.github/actions/bb-scoped-claude/action.yml"
-  [ -f "$bb_scoped" ] || {
-    echo "selftest: .github/actions/bb-scoped-claude/action.yml is missing" >&2
-    exit 1
-  }
-  if grep -E 'systemd-run' "$bb_scoped" | grep -E -- '--setenv|^[^-]*-E([[:space:]]|$)' >/dev/null; then
-    echo "selftest: systemd-run still passes env via --setenv/-E" >&2
-    exit 1
-  fi
-  grep -q 'sudo --preserve-env' "$bb_scoped" || {
-    echo "selftest: bb-scoped-claude does not use sudo --preserve-env" >&2
-    exit 1
-  }
-  grep -q -- '--uid=' "$bb_scoped" || {
-    echo "selftest: bb-scoped-claude does not drop to runner uid" >&2
-    exit 1
-  }
-  # Capture pins the same GIT_* list Bundle blanks (plants cannot break restore).
-  burn_capture_git_dir="$(awk '
-    /name: Capture denied tools/ { c=1; next }
-    c && /GIT_DIR: ""/ { n++; c=0 }
-    c && /^      - name:/ { c=0 }
-    END { print n+0 }
-  ' "$burn")"
-  [ "$burn_capture_git_dir" -eq 5 ] || {
-    echo "selftest: expected GIT_DIR blanked in all 5 Capture steps, found ${burn_capture_git_dir}" >&2
-    exit 1
-  }
-  # Exact-value scrub removed: unset does not clear /proc/<pid>/environ.
-  if grep -E 'SCRUB_ZAI_KEY|SCRUB_ANTHROPIC_API_KEY|SCRUB_GITHUB_TOKEN|backlog-burn-diag-secrets' "$burn" >/dev/null; then
-    echo "selftest: burn still rematerializes exact-value scrub secrets" >&2
-    exit 1
-  fi
-  # Capture steps blank LD_AUDIT the same way Bundle/settle do.
-  burn_capture_ld="$(grep -c 'Capture denied tools' "$burn" || true)"
-  [ "$burn_capture_ld" -eq 5 ] || {
-    echo "selftest: expected 5 Capture denied-tools steps, found ${burn_capture_ld}" >&2
-    exit 1
-  }
-  burn_ld_audit_n="$(awk '
-    /name: Capture denied tools/ { c=1; next }
-    c && /LD_AUDIT: ""/ { n++; c=0 }
-    c && /^      - name:/ { c=0 }
-    END { print n+0 }
-  ' "$burn")"
-  [ "$burn_ld_audit_n" -eq 5 ] || {
-    echo "selftest: expected LD_AUDIT blanked in all 5 Capture steps, found ${burn_ld_audit_n}" >&2
-    exit 1
-  }
-  # Reap must not gate delivery: Bundle has no if: on reap outcomes.
-  bundle_hdr="$(awk '/name: Bundle the ship commits/{p=1} p && /run: \|/{exit} p' "$burn")"
-  if printf '%s\n' "$bundle_hdr" | grep -E 'steps\.[^ ]*reap|Reap agent cgroup' >/dev/null; then
-    echo "selftest: Bundle step depends on reap outcome" >&2
+  if [ -f "${repo_root}/.github/workflows/backlog-burn-cgroup-reap.yml" ]; then
+    echo "selftest: backlog-burn-cgroup-reap.yml must not exist" >&2
     exit 1
   fi
   grep -q '  triage:' "$burn" || {

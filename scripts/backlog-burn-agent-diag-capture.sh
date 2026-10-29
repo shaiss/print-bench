@@ -6,21 +6,16 @@
 # CAPTURE_SHA256 before exec. This bootstrap then:
 #   1. restores scripts/backlog-burn-agent-diag.sh from the same pin (mktemp)
 #   2. archives tools/provenance/src from the same pin (the redactor)
-#   3. runs the pinned diag with credential env stripped (pattern scrub only)
+#   3. runs the pinned diag with secrets only via SECRETS_FILE (no token env)
 #   4. validates the diag.json schema, re-scrubs with patterns, writes DIAG_OUT
 #
 # The workflow step then copies DIAG_OUT into GITHUB_OUTPUT (immutable to
 # later ship links). Never rely on a shared RUNNER_TEMP path surviving until
 # a final upload — later dontAsk links can overwrite those bytes.
 #
-# Exact-value scrub via SECRETS_FILE / SCRUB_* was removed: unset does not
-# clear /proc/<pid>/environ, and rematerializing provider keys into the
-# capture step reopened a harvest window. Pattern-based scrub
-# (provenance.gitstore.scrub with an empty exact-secret list) remains.
-#
 # Usage (env-driven, called from backlog-burn.yml capture steps):
 #   START_SHA=… DIAG_SHA256=… PROV_ARCHIVE_SHA256=… RUNNER_TEMP=…
-#   DIAG_OUT=…
+#   SECRETS_FILE=… DIAG_OUT=…
 #     /tmp/XXXX-capture.sh <link>
 set -euo pipefail
 
@@ -31,6 +26,12 @@ link="${1:?usage: backlog-burn-agent-diag-capture.sh <link>}"
 : "${PROV_ARCHIVE_SHA256:?PROV_ARCHIVE_SHA256 required}"
 : "${RUNNER_TEMP:?RUNNER_TEMP required}"
 : "${DIAG_OUT:?DIAG_OUT required (path for validated diag.json)}"
+: "${SECRETS_FILE:?SECRETS_FILE required}"
+
+if [ ! -f "$SECRETS_FILE" ] || [ -L "$SECRETS_FILE" ]; then
+  echo "::error::SECRETS_FILE must be a regular file" >&2
+  exit 1
+fi
 
 git_show() {
   /usr/bin/git --no-replace-objects \
@@ -97,12 +98,14 @@ fi
 out_dir="$(mktemp -d "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
 cleanup_paths+=("$out_dir")
 
-# Strip credential env from the diag child. No SECRETS_FILE — pattern scrub only.
+# Strip credential env from the diag child: secrets reach it only via the
+# SECRETS_FILE the trusted workflow step prepared.
 env -u GITHUB_TOKEN -u GH_TOKEN \
     -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
     -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
     -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
   "$diag_blob" --link "$link" \
+    --secrets-file "$SECRETS_FILE" \
     --provenance-src "$prov_src" \
     --out-dir "$out_dir"
 
@@ -112,19 +115,19 @@ if [ ! -f "$raw_diag" ] || [ -L "$raw_diag" ]; then
   exit 1
 fi
 
-# Validate schema + re-scrub with pinned provenance (pattern-only; empty
-# exact-secret list). Refuse anything that is not our payload shape (blocks
-# planting the execution log).
+# Validate schema + re-scrub with pinned provenance (exact secrets from
+# SECRETS_FILE + credential_env forms + patterns). Refuse anything that is
+# not our payload shape (blocks planting the execution log).
 validated="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-validated.XXXXXX")"
 cleanup_paths+=("$validated")
-python3 -I - "$prov_src" "$raw_diag" "$validated" <<'PY'
+python3 -I - "$prov_src" "$raw_diag" "$validated" "$SECRETS_FILE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-prov_src, raw_path, out_path = sys.argv[1:4]
+prov_src, raw_path, out_path, secrets_path = sys.argv[1:5]
 sys.path.insert(0, prov_src)
-from provenance.gitstore import scrub  # noqa: E402
+from provenance.gitstore import credential_env, scrub  # noqa: E402
 
 ALLOWED = {
     "label",
@@ -136,8 +139,20 @@ MAX_BYTES = 64 * 1024
 MAX_FINAL = 500
 MAX_DENIALS = 40
 
-# Pattern-based scrub only — no exact-value secrets rematerialized here.
+raw_secrets = [
+    line.strip()
+    for line in Path(secrets_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    if line.strip()
+]
 secrets: list[str] = []
+for s in raw_secrets:
+    secrets.append(s)
+    try:
+        _cred, b64 = credential_env(s)
+        secrets.append(b64)
+        secrets.append(_cred.get("GIT_CONFIG_VALUE_0", ""))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def S(text: str) -> str:

@@ -1108,11 +1108,7 @@ def _ai_spend() -> re.Pattern[str]:
     return _ai_spend_regex(_provider_secret_names())
 # The agent action and the exhaustion-triage action: a job carrying either
 # reaches a provider even when the key is wired through a composite input.
-_AI_ACTIONS = (
-    "anthropics/claude-code-action",
-    "./.github/actions/provider-triage",
-    "./.github/actions/bb-scoped-claude",
-)
+_AI_ACTIONS = ("anthropics/claude-code-action", "./.github/actions/provider-triage")
 
 # Deterministic jobs with ONE AI step each: the job must keep running (CI's
 # regen still renders previews; the groomer still writes its report) so the
@@ -1724,41 +1720,19 @@ def _arg_value(argline: str, flag: str) -> str | None:
     return m.group(1) if m else None
 
 
-# Ship steps invoke either the upstream action directly, or the backlog-burn
-# cgroup-scope composite which materializes the same pinned action inside a
-# systemd scope. Both carry the same `claude_args` / secret / model wiring on
-# the caller step; the composite adds an `action_ref` pin resolved from its
-# action.yml (see `_assert_bb_scoped_claude_pins`).
-_SHIP_USES = (
-    "uses: anthropics/claude-code-action",
-    "uses: ./.github/actions/bb-scoped-claude",
-)
-BB_SCOPED_CLAUDE_ACTION = (
-    REPO_ROOT / ".github" / "actions" / "bb-scoped-claude" / "action.yml"
-)
-
-
-def _is_ship_uses(chunk: str) -> bool:
-    return any(marker in chunk for marker in _SHIP_USES)
-
-
 def _routine_ship_steps(job_text: str, resolve_id: str = "chain") -> list[dict]:
     """The routine job's claude-code-action steps, in order, as parsed wiring.
 
     `resolve_id` is the resolve step whose `link<N>_model` outputs the ship
     steps read (`chain` in every single-job routine; wright.yml's jobs read
     `propose_chain` / `signoff_chain`).
-
-    Steps that `uses: ./.github/actions/bb-scoped-claude` are ship steps too —
-    the composite wraps the same pinned claude-code-action; model / claude_args
-    / secret wiring still live on the caller step and are asserted unchanged.
     """
     steps: list[dict] = []
     model_pat = re.compile(
         r"--model \$\{\{ steps\." + re.escape(resolve_id)
         + r"\.outputs\.link(\d+)_model \}\}")
     for chunk in re.split(r"\n      - ", job_text):
-        if not _is_ship_uses(chunk):
+        if "uses: anthropics/claude-code-action" not in chunk:
             continue
         model = model_pat.search(chunk)
         secret = re.search(r"anthropic_api_key: \$\{\{ secrets\.(\w+) \}\}", chunk)
@@ -1786,45 +1760,9 @@ def _routine_ship_steps(job_text: str, resolve_id: str = "chain") -> list[dict]:
             # #544) — the provider-derived key gate.
             "key_gate_providers": set(re.findall(
                 r"steps\.policy\.outputs\.([a-z0-9]+)_key_present\s*==\s*'1'", chunk)),
-            "uses_bb_scoped": "uses: ./.github/actions/bb-scoped-claude" in chunk,
             "chunk": chunk,
         })
     return steps
-
-
-def _input_default(action_yml_text: str, name: str) -> str | None:
-    """The `default:` string for an `inputs.<name>` block in a composite
-    action.yml, or None if unset."""
-    m = re.search(
-        rf"(?m)^  {re.escape(name)}:\n(?:    .*\n)*?    default:\s*\"([^\"]*)\"",
-        action_yml_text,
-    )
-    return m.group(1) if m else None
-
-
-def _assert_bb_scoped_claude_pins(action_yml_text: str) -> None:
-    """The composite's claude-code-action `action_ref` is a full 40-hex SHA
-    and its tarball `action_sha256` is a full 64-hex digest. Fail closed on
-    a tag, short sha, or missing pin — the same bar a direct
-    `uses: anthropics/claude-code-action@<sha>` step carries."""
-    ref = _input_default(action_yml_text, "action_ref")
-    assert ref is not None, (
-        "bb-scoped-claude action.yml declares no action_ref default — the "
-        "composite must pin anthropics/claude-code-action to a full 40-hex SHA")
-    assert re.fullmatch(r"[0-9a-f]{40}", ref), (
-        f"bb-scoped-claude action_ref {ref!r} is not a full 40-hex SHA — "
-        "tags and short shas are refused")
-    sha = _input_default(action_yml_text, "action_sha256")
-    assert sha is not None, (
-        "bb-scoped-claude action.yml declares no action_sha256 default — the "
-        "tarball digest must be pinned next to action_ref")
-    assert re.fullmatch(r"[0-9a-f]{64}", sha), (
-        f"bb-scoped-claude action_sha256 {sha!r} is not a full 64-hex digest")
-    # Install must verify the digest and freeze the lockfile.
-    assert "sha256sum -c" in action_yml_text, (
-        "bb-scoped-claude must verify the tarball with sha256sum -c before extract")
-    assert "bun install --frozen-lockfile --production" in action_yml_text, (
-        "bb-scoped-claude must install with bun install --frozen-lockfile --production")
 
 
 def _step_provider(reg: Registry, step: dict, where: str) -> str:
@@ -2097,77 +2035,6 @@ def test_every_routine_ship_step_is_pinned_to_its_chain():
     reg = Registry.load(str(REGISTRY))
     for row in ROUTINES.values():
         _assert_routine_ship_steps_pinned(reg, row, _routine_text(row.workflow))
-
-
-def test_bb_scoped_claude_pins_action_ref_and_sha256():
-    # backlog-burn's ship steps `uses: ./.github/actions/bb-scoped-claude`;
-    # resolve that composite and require the same full-SHA pin a direct
-    # `uses: anthropics/claude-code-action@<sha>` step would carry, plus the
-    # tarball sha256 + frozen-lockfile supply-chain mitigations.
-    assert BB_SCOPED_CLAUDE_ACTION.is_file(), (
-        "bb-scoped-claude composite missing — backlog-burn ship steps reference it")
-    text = BB_SCOPED_CLAUDE_ACTION.read_text(encoding="utf-8")
-    _assert_bb_scoped_claude_pins(text)
-    # Every burn ship step must actually go through the composite (not a
-    # latent direct uses: that would bypass the scope + digest pin).
-    row = ROUTINES["backlog-burn"]
-    steps = _routine_ship_steps(
-        _routine_job_text(_routine_text(row.workflow), row), row.resolve_id)
-    assert steps, "backlog-burn burn job has no ship steps"
-    assert all(s["uses_bb_scoped"] for s in steps), (
-        "a backlog-burn ship step bypasses bb-scoped-claude — the cgroup "
-        "scope and tarball digest pin would not apply")
-
-
-def test_bb_scoped_claude_pin_rejects_unpinned_action_ref(tmp_path):
-    # NEGATIVE CONTROL: composite action_ref set to a tag (or short sha)
-    # must fail the pin — the same refusal a floating @v1 uses: would get.
-    live = BB_SCOPED_CLAUDE_ACTION.read_text(encoding="utf-8")
-    ref = _input_default(live, "action_ref")
-    assert ref and re.fullmatch(r"[0-9a-f]{40}", ref)
-    tampered = live.replace(
-        f'default: "{ref}"',
-        'default: "v1"',
-        1)
-    assert tampered != live, "tamper did not land — action_ref default moved"
-    with pytest.raises(AssertionError, match="full 40-hex SHA"):
-        _assert_bb_scoped_claude_pins(tampered)
-
-
-def test_bb_scoped_claude_pin_rejects_missing_sha256():
-    # NEGATIVE CONTROL: drop the action_sha256 default — digest pin gone.
-    live = BB_SCOPED_CLAUDE_ACTION.read_text(encoding="utf-8")
-    sha = _input_default(live, "action_sha256")
-    assert sha and re.fullmatch(r"[0-9a-f]{64}", sha)
-    # Remove the whole action_sha256 input block's default line.
-    tampered = re.sub(
-        r"(  action_sha256:\n(?:    .*\n)*?    default:\s*)\"[0-9a-f]{64}\"",
-        r'\1""',
-        live,
-        count=1,
-    )
-    assert tampered != live, "tamper did not land — action_sha256 default moved"
-    with pytest.raises(AssertionError, match="64-hex digest|no action_sha256"):
-        _assert_bb_scoped_claude_pins(tampered)
-
-
-def test_bb_scoped_ship_step_rejects_unregistered_model_in_claude_args():
-    # NEGATIVE CONTROL: a burn ship step whose --model no longer reads
-    # link<N>_model (hardcoded / unregistered) must fail the same ship-step
-    # pin the direct claude-code-action steps obey.
-    row = ROUTINES["backlog-burn"]
-    text = _routine_text(row.workflow)
-    chunk = _tail_step_chunk(text, row, 1)
-    assert "steps.chain.outputs.link1_model" in chunk
-    tampered_chunk = chunk.replace(
-        "--model ${{ steps.chain.outputs.link1_model }}",
-        "--model not-a-registry-model",
-        1)
-    assert tampered_chunk != chunk, "tamper did not land — claude_args shape moved"
-    tampered = text.replace(chunk, tampered_chunk, 1)
-    with pytest.raises(AssertionError, match="linkNone_model|not sourced from|link1_model"):
-        _assert_routine_ship_steps_pinned(
-            Registry.load(str(REGISTRY)), row, tampered)
 
 
 def test_ship_step_pin_rejects_tail_steps_listed_out_of_link_order():
