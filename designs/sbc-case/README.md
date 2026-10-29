@@ -87,7 +87,9 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   through-holes are normal — clear them with a needle or fingernail before
   assembly.
 - **Grille tone:** a faint blade-pass hum at full fan speed is normal for a
-  close co-planar grille — step the fan curve down if it bothers you at night.
+  close co-planar grille on a 5 V + GND hookup (constant speed) — unplug the
+  fan lead at the GPIO header when silence matters, or add a separate PWM or
+  buck controller if you want variable speed.
 
 The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
@@ -151,9 +153,10 @@ so what you feel there is what the full parts do.
   bore — not protection against small hardware: **Ø5 mm** holes still pass M2.5/M3
   screws (~2.5–3 mm shank), paperclips, and stiff wire. With the lid **off the
   case**, a **pencil tip** fits a hole where a fingertip meets the web (assembled,
-  the fan bolts to the outer face and covers the grille). Airflow is reduced
-  versus a bare bore (~38 % of the unobstructed bore at the default 5.0 / 2.0 mm
-  holes and webs — 21 full holes, no partials at the rim). Open **`sbc-case.scad`**, set **`part` to `grille-coupon`**, and
+  the fan bolts to the outer face and covers the grille). Geometric open area
+  inside the bore is ~38 % of an unobstructed Ø37 disc at the default 5.0 / 2.0 mm
+  holes and webs — 21 full holes, no partials at the rim (~62 % less open area
+  than a bare bore; not a measured airflow figure). Open **`sbc-case.scad`**, set **`part` to `grille-coupon`**, and
   tune **`grille_hole_d` / `grille_web`** in the Customizer (the wrapper
   `sbc-case-grille-coupon.scad` does not list those sliders — OpenSCAD only
   exposes variables assigned in the file you opened, not in an `include`), then

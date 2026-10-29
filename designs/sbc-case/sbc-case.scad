@@ -361,7 +361,7 @@ module grille_coupon() { //! fan-zone lid plate at print pose — same grille cu
     translate([0, 0, lid_top_z]) rotate([180, 0, 0])
         intersection() {
             lid();
-            translate([fan_center[0] - half, fan_center[1] - half, base_top_z - 0.01])
+            translate([fan_center[0] - half, fan_center[1] - half, base_top_z])
                 cube([2 * half, 2 * half, lid_t + 0.02]);
         }
 }
