@@ -84,6 +84,14 @@ reap_should_kill() {
   return 0
 }
 
+# Named kill helper so the selftest can override it in a subshell and record
+# targets without signaling. Production always calls real kill; there is no
+# environment or argument gate that skips signaling (an agent must not be
+# able to disable reaping).
+reap_kill() {
+  kill "$@" 2>/dev/null || true
+}
+
 reap_agent_orphans() {
   local d pid v pgid my_pgid
   local -a victims=()
@@ -105,31 +113,115 @@ reap_agent_orphans() {
   for v in "${victims[@]}"; do
     pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
     if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-      kill -TERM -- "-${pgid}" 2>/dev/null || true
+      reap_kill -TERM -- "-${pgid}"
     fi
-    kill -TERM "$v" 2>/dev/null || true
+    reap_kill -TERM "$v"
   done
   sleep 1
   for v in "${victims[@]}"; do
-    kill -KILL "$v" 2>/dev/null || true
+    reap_kill -KILL "$v"
   done
 }
 
 # --- selftest ---------------------------------------------------------------
-# Integrity cases stub reap_agent_orphans so an emptied spare set cannot
-# massacre the host; they still assert the call site invokes reap and that
-# the bundle path can set pending. The happy-path case uses real processes
-# and only asserts about an orphan this test spawned.
+# Kill is stubbed ONLY inside selftest scope (function override in a subshell).
+# Production reap_kill / reap_agent_orphans honor no DRY_RUN / NO_KILL switch.
+# Integrity cases run the real reap against an emptied spare set; the stub
+# records targets and never signals. Happy-path asserts selection via the
+# stub record, then cleans up only the test's own known child PIDs.
+
+# Install a recording kill stub + wrap reap so we can prove it was invoked.
+# Must be called inside the case's subshell after sourcing this file.
+_bb_pid_snap_stub_kills() {
+  local record="$1"
+  : >"$record"
+  _BB_KILL_RECORD="$record"
+  _BB_REAP_CALLED=0
+  reap_kill() {
+    local a
+    for a in "$@"; do
+      case "$a" in
+        --) continue ;;
+        -TERM|-KILL|-HUP|-INT|-PIPE|-USR1|-USR2) continue ;;
+        -[0-9]*|[0-9]*)
+          printf '%s\n' "$a" >>"$_BB_KILL_RECORD"
+          ;;
+      esac
+    done
+    # Intentionally no kill — selftest must never signal host processes.
+  }
+  # Preserve production body; wrap to mark invocation. Kill stays stubbed.
+  eval "$(declare -f reap_agent_orphans | sed '1s/^reap_agent_orphans/reap_agent_orphans_production/')"
+  reap_agent_orphans() {
+    _BB_REAP_CALLED=1
+    reap_agent_orphans_production
+  }
+}
+
+_bb_pid_snap_assert_no_disable_switch() {
+  # Production half of this file (above the selftest marker) must not gate
+  # killing on any env/flag an agent could set, and must call real kill.
+  local script="$1"
+  local prod code
+  prod="$(awk '/^# --- selftest /{exit} {print}' "$script")"
+  # Strip comments before grepping for disable-switch names (prose is free).
+  code="$(printf '%s\n' "$prod" | sed -E 's/(^|[[:space:]])#.*//')"
+  if printf '%s\n' "$code" | grep -Ei \
+    'DRY_RUN|NO_KILL|SKIP_KILL|REAP_DRY|DISABLE_KILL|KILL_DISABLED|skip[[:space:]]*kill|dry[[:space:]-]*run' \
+    >/dev/null; then
+    echo "selftest[no-disable]: production reap path mentions a kill disable switch" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$prod" | grep -E '^reap_kill\(\)' >/dev/null; then
+    echo "selftest[no-disable]: production reap_kill() missing" >&2
+    return 1
+  fi
+  # reap_kill body must invoke the real kill builtin (not a no-op / env gate).
+  if ! printf '%s\n' "$prod" | awk '
+    /^reap_kill\(\)/ {in_fn=1; next}
+    in_fn && /^[a-zA-Z_][a-zA-Z0-9_]*\(\)/ {exit}
+    in_fn && /^}/ {exit}
+    in_fn && /(^|[[:space:]])kill([[:space:]]|$)/ {found=1}
+    END {exit found ? 0 : 1}
+  '; then
+    echo "selftest[no-disable]: production reap_kill() does not call kill" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$prod" | awk '
+    /^reap_agent_orphans\(\)/ {in_fn=1; next}
+    in_fn && /^[a-zA-Z_][a-zA-Z0-9_]*\(\)/ {exit}
+    in_fn && /^}/ {exit}
+    in_fn && /(^|[[:space:]])reap_kill([[:space:]]|$)/ {found=1}
+    END {exit found ? 0 : 1}
+  '; then
+    echo "selftest[no-disable]: production reap_agent_orphans() does not call reap_kill" >&2
+    return 1
+  fi
+  # Production must not call kill directly outside reap_kill (selection stays
+  # on the overridable helper).
+  if printf '%s\n' "$code" | awk '
+    /^reap_kill\(\)/ {in_kill=1; next}
+    in_kill && /^}/ {in_kill=0; next}
+    in_kill {next}
+    /(^|[[:space:]])kill([[:space:]]|$)/ {bad=1}
+    END {exit bad ? 0 : 1}
+  '; then
+    echo "selftest[no-disable]: production calls kill outside reap_kill()" >&2
+    return 1
+  fi
+  echo "selftest[no-disable]: ok"
+}
 
 _bb_pid_snap_assert_integrity() {
   # Args: name warn_regex [rematerialize_extra_arg]
   local name="$1" warn_re="$2" dest="${3:-}"
-  local err pending_out rc=0 reap_called=0
+  local err pending_out kill_record rc=0
   err="$(mktemp "${RUNNER_TEMP}/err.XXXXXX")"
   pending_out="$(mktemp "${RUNNER_TEMP}/pending.XXXXXX")"
+  kill_record="$(mktemp "${RUNNER_TEMP}/kill-record.XXXXXX")"
 
-  # Stub: prove invoke without scanning /proc under an empty spare set.
-  reap_agent_orphans() { reap_called=1; }
+  # Real reap + stubbed kill: empty spare set may select many PIDs; never signal.
+  _bb_pid_snap_stub_kills "$kill_record"
 
   set +e
   if [ -n "$dest" ]; then
@@ -146,7 +238,7 @@ _bb_pid_snap_assert_integrity() {
     cat "$err" >&2
     return 1
   fi
-  if [ "$reap_called" -ne 1 ]; then
+  if [ "${_BB_REAP_CALLED:-0}" -ne 1 ]; then
     echo "selftest[$name]: reap_agent_orphans was not invoked" >&2
     return 1
   fi
@@ -166,17 +258,20 @@ _bb_pid_snap_assert_integrity() {
     echo "selftest[$name]: PID_SNAP not emptied after integrity failure" >&2
     return 1
   fi
-  echo "selftest[$name]: ok"
+  echo "selftest[$name]: ok (reap invoked; kill stubbed, record lines=$(wc -l <"$kill_record" | tr -d ' '))"
 }
 
 _bb_pid_snap_selftest() {
   set -euo pipefail
-  local repo_root
+  local repo_root script_path
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  script_path="${repo_root}/scripts/backlog-burn-pid-snap.sh"
   # Global (not local): EXIT trap runs after locals are unset under set -u.
   _BB_PID_SNAP_SELFTEST_RT="$(mktemp -d "${TMPDIR:-/tmp}/bb-pid-snap-selftest.XXXXXX")"
   trap 'rm -rf -- "${_BB_PID_SNAP_SELFTEST_RT:-}"' EXIT
   export RUNNER_TEMP="$_BB_PID_SNAP_SELFTEST_RT"
+
+  _bb_pid_snap_assert_no_disable_switch "$script_path"
 
   # (a) missing snapshot
   (
@@ -228,12 +323,14 @@ _bb_pid_snap_selftest() {
     _bb_pid_snap_assert_integrity tampered 'PID snapshot digest mismatch'
   )
 
-  # Happy path: spare snap PIDs; reap a post-snapshot orphan (spoofed comm).
+  # Happy path: spare snap PIDs; select a post-snapshot orphan (spoofed comm).
+  # Kill is stubbed — assert via the record, then clean up only our child.
   (
     # shellcheck disable=SC1091
     source "${repo_root}/scripts/backlog-burn-pid-snap.sh"
     snap="$(mktemp "${RUNNER_TEMP}/happy-snap.XXXXXX")"
     orphan_pid_file="$(mktemp "${RUNNER_TEMP}/happy-orphan-pid.XXXXXX")"
+    kill_record="$(mktemp "${RUNNER_TEMP}/happy-kill-record.XXXXXX")"
     : >"$orphan_pid_file"
     shopt -s nullglob
     for d in /proc/[0-9]*; do
@@ -250,6 +347,7 @@ _bb_pid_snap_selftest() {
     # Record $$ after setsid (before exec) so we know the victim pid exactly.
     setsid bash -c "echo \$\$ >'$orphan_pid_file'; exec -a Runner.Worker sleep 120" \
       </dev/null >/dev/null 2>&1 &
+    disown $! 2>/dev/null || true
     orphan=""
     for _try in $(seq 1 30); do
       sleep 0.1
@@ -268,6 +366,7 @@ _bb_pid_snap_selftest() {
       echo "selftest[happy]: could not find spawned orphan" >&2
       exit 1
     fi
+    orphan_pgid="$(ps -o pgid= -p "$orphan" 2>/dev/null | tr -d '[:space:]' || true)"
     # Confirm spoofed comm when /proc still exposes it (best-effort).
     if [ -r "/proc/$orphan/comm" ]; then
       comm="$(tr -d '\0\n' <"/proc/$orphan/comm" 2>/dev/null || true)"
@@ -322,18 +421,83 @@ _bb_pid_snap_selftest() {
       exit 1
     fi
 
+    # Stub kill before real reap — never signal host processes from check.sh/CI.
+    _bb_pid_snap_stub_kills "$kill_record"
     reap_agent_orphans
 
-    if kill -0 "$orphan" 2>/dev/null; then
-      echo "selftest[happy]: orphan $orphan still alive after reap" >&2
+    if [ "${_BB_REAP_CALLED:-0}" -ne 1 ]; then
+      echo "selftest[happy]: reap_agent_orphans was not invoked" >&2
       kill -KILL "$orphan" 2>/dev/null || true
       exit 1
+    fi
+
+    # (1) spawned orphan IS selected
+    if ! grep -qx -- "$orphan" "$kill_record"; then
+      echo "selftest[happy]: orphan pid $orphan not in kill stub record" >&2
+      echo "record was:" >&2
+      cat "$kill_record" >&2
+      kill -KILL "$orphan" 2>/dev/null || true
+      exit 1
+    fi
+
+    # (2) snapshot PIDs and the runner (self/ancestors/process group) are NOT
+    while IFS= read -r snap_pid; do
+      case "$snap_pid" in
+        ''|*[!0-9]*) continue ;;
+      esac
+      if grep -qx -- "$snap_pid" "$kill_record"; then
+        echo "selftest[happy]: snap pid $snap_pid was targeted" >&2
+        kill -KILL "$orphan" 2>/dev/null || true
+        exit 1
+      fi
+    done <"$snap"
+    walk="$$"
+    while [ -n "$walk" ] && [ "$walk" != "0" ]; do
+      if grep -qx -- "$walk" "$kill_record"; then
+        echo "selftest[happy]: runner/ancestor pid $walk was targeted" >&2
+        kill -KILL "$orphan" 2>/dev/null || true
+        exit 1
+      fi
+      walk="$(reap_ppid_of "$walk")"
+    done
+    if [ -n "$my_pgid" ] && grep -qx -- "-${my_pgid}" "$kill_record"; then
+      echo "selftest[happy]: reaper process group -$my_pgid was targeted" >&2
+      kill -KILL "$orphan" 2>/dev/null || true
+      exit 1
+    fi
+
+    # (3) every recorded target is one of this test's own children / their pgid
+    allowed_pid="$orphan"
+    allowed_pgid_neg=""
+    if [ -n "$orphan_pgid" ]; then
+      allowed_pgid_neg="-${orphan_pgid}"
+    fi
+    while IFS= read -r target; do
+      [ -n "$target" ] || continue
+      if [ "$target" = "$allowed_pid" ]; then
+        continue
+      fi
+      if [ -n "$allowed_pgid_neg" ] && [ "$target" = "$allowed_pgid_neg" ]; then
+        continue
+      fi
+      echo "selftest[happy]: unrelated host target '$target' in kill stub record" >&2
+      echo "allowed: pid=$allowed_pid pgid_neg=$allowed_pgid_neg" >&2
+      echo "record was:" >&2
+      cat "$kill_record" >&2
+      kill -KILL "$orphan" 2>/dev/null || true
+      exit 1
+    done <"$kill_record"
+
+    # Stub never signals — clean up only our known child PIDs directly.
+    kill -KILL "$orphan" 2>/dev/null || true
+    if [ -n "$orphan_pgid" ] && [ "$orphan_pgid" != "1" ] && [ "$orphan_pgid" != "0" ]; then
+      kill -KILL -- "-${orphan_pgid}" 2>/dev/null || true
     fi
 
     pending_out="$(mktemp "${RUNNER_TEMP}/happy-pending.XXXXXX")"
     echo "pending=true" >"$pending_out"
     grep -qx 'pending=true' "$pending_out"
-    echo "selftest[happy]: ok (reaped orphan pid=$orphan)"
+    echo "selftest[happy]: ok (stub-selected orphan pid=$orphan; cleaned up directly)"
   )
 
   echo "backlog-burn-pid-snap selftest: all cases passed"
