@@ -299,6 +299,22 @@ def test_ship_lock_non_allowlisted_author_is_not_a_lock():
     assert select_issue(snap([issue_]))["selected"] == 874
 
 
+@pytest.mark.parametrize("body", [
+    "\ufeff🚢 SHIP-LOCK — claim\n\n<!-- design-run-ship-lock:v1 -->",
+    "## 🚢 SHIP-LOCK — claim\n\n<!-- design-run-ship-lock:v1 -->",
+    "**🚢 SHIP-LOCK — claim**\n\n<!-- design-run-ship-lock:v1 -->",
+    "# **🚢 SHIP-LOCK — claim**\n\n<!-- design-run-ship-lock:v1 -->",
+])
+def test_ship_lock_bom_heading_bold_lead_still_locks(body):
+    # BOM / heading / bold wrappers around the lead still authenticate.
+    issue_ = issue(875, "2026-08-01T00:00:00Z", comments=[
+        {"body": body, "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "github-actions[bot]", "authorType": "Bot"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] is None
+    assert select_issue(snap([issue_]))["excluded"]["875"].startswith("an active")
+
+
 # --------------------------------------------------------------------------
 # Guard: an open PR already closes the issue
 # --------------------------------------------------------------------------

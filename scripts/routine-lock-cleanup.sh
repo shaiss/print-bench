@@ -118,19 +118,28 @@ COOLDOWN_HTML_MARKER='<!-- burn-cooldown:v1 -->'
 BURN_COOLDOWN_HOURS=24
 
 # jq prelude: first non-blank line of a body, stripped — the line
-# backlog_burn.select._first_line classifies on. is_lock is the one
-# authentic-lock rule (Cipher #864 + #872), mirrored in reeve.github and
-# backlog_burn.select: first non-blank line starts with $lock_marker
-# (LOCK_MARKER), HTML authenticity marker present, login in
+# backlog_burn.select._first_line classifies on. lock_lead additionally
+# strips a UTF-8 BOM and a bold (**…**) or markdown heading (#…) wrapper
+# so a rendered lead still authenticates. is_lock is the one authentic-
+# lock rule (Cipher #864 + #872), mirrored in reeve.github,
+# backlog_burn.select, and design-run-deliver.sh: lock_lead starts with
+# $lock_marker (LOCK_MARKER), HTML authenticity marker present, login in
 # $settle_logins (LOCK_AUTHOR_LOGINS). A backtick-quoted marker mid-body
 # is never a lock.
 JQ_FL='def fl($b): ($b // "") | split("\n")
   | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
   | map(select(length > 0)) | (.[0] // "");
+def lock_lead($b):
+  fl($b)
+  | gsub("^\ufeff"; "")
+  | gsub("^#{1,6}[[:space:]]+"; "")
+  | if startswith("**") then
+      (.[2:] | if (endswith("**") and length >= 2) then .[:-2] else . end)
+    else . end;
 def lock_logins:
   ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
 def is_lock:
-  (fl(.body) | startswith($lock_marker))
+  (lock_lead(.body) | startswith($lock_marker))
   and ((.body // "") | contains($html_marker))
   and (((.login // "") | ascii_downcase) as $l
        | (lock_logins | index($l)) != null);'
@@ -200,7 +209,7 @@ lock_state() {
     "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
     | if $l == null then "none"
-      elif ($l | fl(.body) | ascii_upcase | contains("WITHDRAWN")) then "withdrawn"
+      elif ($l | lock_lead(.body) | ascii_upcase | contains("WITHDRAWN")) then "withdrawn"
       else "active" end'
 }
 
@@ -327,7 +336,7 @@ death_marked() {
     "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
     | if $l == null then false
-      else ($l | fl(.body) | startswith($prefix))
+      else ($l | lock_lead(.body) | startswith($prefix))
       end'
 }
 
@@ -674,7 +683,29 @@ EOF
 EOF
   [ "$(lock_state < "$tmp/laterline-marked.ndjson")" = "none" ] \
     || st_fail "a marker+lead below a non-blank first line was counted as a lock"
-  echo "ok    selftest: lock classification (active / withdrawn / none / mid-line / first-non-blank / settle-login-only / #872-backtick)"
+  # BOM / markdown heading / bold wrappers around the lead still lock.
+  python3 -c '
+import json, sys
+sys.stdout.write(json.dumps({
+    "body": "\ufeff🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed",
+    "created_at": "2026-08-01T00:00:00Z",
+    "login": "github-actions[bot]",
+    "type": "Bot",
+}) + "\n")
+' > "$tmp/bom-lead.ndjson"
+  [ "$(lock_state < "$tmp/bom-lead.ndjson")" = "active" ] \
+    || st_fail "a UTF-8 BOM before the SHIP-LOCK lead was not counted as a lock"
+  cat > "$tmp/heading-lead.ndjson" <<'EOF'
+{"body": "## 🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+EOF
+  [ "$(lock_state < "$tmp/heading-lead.ndjson")" = "active" ] \
+    || st_fail "a markdown-heading-wrapped SHIP-LOCK lead was not counted as a lock"
+  cat > "$tmp/bold-lead.ndjson" <<'EOF'
+{"body": "**🚢 SHIP-LOCK — claim**\n\n<!-- design-run-ship-lock:v1 -->", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+EOF
+  [ "$(lock_state < "$tmp/bold-lead.ndjson")" = "active" ] \
+    || st_fail "a bold-wrapped SHIP-LOCK lead was not counted as a lock"
+  echo "ok    selftest: lock classification (active / withdrawn / none / mid-line / first-non-blank / settle-login-only / #872-backtick / bom-heading-bold)"
 
   # -- decline detection: the skill's §1/§8 stop markers AFTER the claim -----
   # Positive: a DECLINED or DECISION NEEDED comment strictly after the latest

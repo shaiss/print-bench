@@ -195,6 +195,12 @@ _CLOSING_KEYWORDS = (
 )
 
 
+# UTF-8 BOM tolerated before a SHIP-LOCK lead. Heading (``#``…``######``)
+# and bold (``**…**``) wrappers are stripped the same way in every reader.
+_BOM = "\ufeff"
+_LOCK_HEADING_RE = re.compile(r"^#{1,6}\s+")
+
+
 def _first_line(text: str) -> str:
     """The first non-blank line of ``text``, stripped (``""`` if none)."""
     for line in (text or "").splitlines():
@@ -202,6 +208,23 @@ def _first_line(text: str) -> str:
         if stripped:
             return stripped
     return ""
+
+
+def _lock_lead_line(text: str) -> str:
+    """First non-blank line with BOM / heading / bold wrappers stripped.
+
+    Used only for SHIP-LOCK lead matching (and WITHDRAWN on that lead).
+    Mirrored in ``reeve.github`` and the shell readers' ``lock_lead``.
+    """
+    line = _first_line(text)
+    if line.startswith(_BOM):
+        line = line[len(_BOM) :]
+    line = _LOCK_HEADING_RE.sub("", line, count=1)
+    if line.startswith("**"):
+        line = line[2:]
+        if line.endswith("**") and len(line) >= 2:
+            line = line[:-2]
+    return line
 
 
 def _parse_iso(ts: str) -> Optional[datetime]:
@@ -221,10 +244,11 @@ def _parse_iso(ts: str) -> Optional[datetime]:
 def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
     """True when ``comment`` is an authentic SHIP-LOCK (Cipher #864 + #872).
 
-    One rule, mirrored in ``reeve.github`` and
-    ``scripts/routine-lock-cleanup.sh``:
+    One rule, mirrored in ``reeve.github``,
+    ``scripts/routine-lock-cleanup.sh``, and ``scripts/design-run-deliver.sh``:
 
-    1. the first non-blank line starts with ``SHIP_LOCK_MARKER``,
+    1. the first non-blank line (BOM / heading / bold wrappers stripped)
+       starts with ``SHIP_LOCK_MARKER``,
     2. the HTML authenticity marker is present in the body, and
     3. the author login is in ``SHIP_LOCK_AUTHOR_LOGINS``.
 
@@ -234,7 +258,7 @@ def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
     here so :func:`_ship_lock_state` can release the claim.
     """
     body = comment.get("body") or ""
-    if not _first_line(body).startswith(SHIP_LOCK_MARKER):
+    if not _lock_lead_line(body).startswith(SHIP_LOCK_MARKER):
         return False
     if SHIP_LOCK_HTML_MARKER not in body:
         return False
@@ -272,7 +296,7 @@ def _ship_lock_state(
     # createdAt is ISO-8601 UTC ("2026-08-07T23:35:56Z"), which sorts
     # lexicographically in timestamp order — newest last.
     latest = max(lock_comments, key=lambda c: c.get("createdAt", ""))
-    if "WITHDRAWN" in _first_line(latest.get("body", "")).upper():
+    if "WITHDRAWN" in _lock_lead_line(latest.get("body", "")).upper():
         return "none"
     if now is None:
         return "active"

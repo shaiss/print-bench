@@ -798,9 +798,12 @@ finish() {  # delivered summary
 STOP_MARKER_DECLINED='🚢 DECLINED'
 STOP_MARKER_DECISION='🚦 DECISION NEEDED'
 STOP_MARKER_DEFERRED='🚢 DEFERRED'
-# Visible first line for humans. A comment is a lock ONLY when it also
-# carries SHIP_LOCK_HTML_MARKER and is authored by SHIP_LOCK_AUTHOR_LOGIN —
-# never because it merely starts with this string (Cipher, #864).
+# Visible first-line lead. A comment is a lock ONLY when its first
+# non-blank line (BOM / heading / bold wrappers stripped) starts with
+# STOP_LOCK_MARKER, it also carries SHIP_LOCK_HTML_MARKER, and it is
+# authored by a SHIP_LOCK_AUTHOR_LOGINS login — never because it merely
+# contains the HTML marker mid-body (Cipher #864 + #872). Mirrored in
+# reeve.github, backlog_burn.select, and routine-lock-cleanup.sh.
 STOP_LOCK_MARKER='🚢 SHIP-LOCK'
 # Hidden authenticity marker. Settle's lock writer emits it; intents reject
 # `<!--` so an applied intent can never forge a lock.
@@ -889,7 +892,8 @@ post_settle_ship_lock() {
 # SHIP-LOCK (HTML marker + trusted author) when one exists, otherwise the
 # latest comment, inside the job window, from a Bot or the repo owner.
 hard_stop_from_comments() {  # [run-started-at]
-  jq -s --arg html_marker "$SHIP_LOCK_HTML_MARKER" \
+  jq -s --arg lock_marker "$STOP_LOCK_MARKER" \
+    --arg html_marker "$SHIP_LOCK_HTML_MARKER" \
     --arg settle_logins "$SHIP_LOCK_AUTHOR_LOGINS" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" \
@@ -897,6 +901,15 @@ hard_stop_from_comments() {  # [run-started-at]
       def fl($b): ($b // "") | split("\n")
         | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
         | map(select(length > 0)) | (.[0] // "");
+      # BOM / heading / bold wrappers stripped for SHIP-LOCK lead match
+      # (same lock_lead as routine-lock-cleanup.sh / Python readers).
+      def lock_lead($b):
+        fl($b)
+        | gsub("^\ufeff"; "")
+        | gsub("^#{1,6}[[:space:]]+"; "")
+        | if startswith("**") then
+            (.[2:] | if (endswith("**") and length >= 2) then .[:-2] else . end)
+          else . end;
       # Stops may come from github-actions[bot] (settle intents) or the
       # repo owner (attended PAT). Locks use the named allowlist — see is_lock.
       def stop_trusted:
@@ -908,10 +921,11 @@ hard_stop_from_comments() {  # [run-started-at]
         );
       def lock_logins:
         ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
-      # A lock is the HTML marker PLUS an allowlisted login — never a bare
-      # SHIP-LOCK first line, never an unlisted Bot (Cipher, #864).
+      # One authentic-lock rule (Cipher #864 + #872): lock_lead starts with
+      # the SHIP-LOCK lead, HTML marker present, allowlisted login.
       def is_lock:
-        ((.body // "") | contains($html_marker))
+        (lock_lead(.body) | startswith($lock_marker))
+        and ((.body // "") | contains($html_marker))
         and (((.login // "") | ascii_downcase) as $l
              | (lock_logins | index($l)) != null);
       def latest_lock:
@@ -3257,6 +3271,40 @@ EOF
     echo "selftest: marker+untrusted-author was treated as a lock" >&2
     exit 1
   }
+  # #872: HTML marker quoted mid-body (no first-line lead) is NOT a lock —
+  # hard-stop stays claimless so a later stop still fires.
+  jq -n --arg marker "$SHIP_LOCK_HTML_MARKER" --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+    '[{body:("Scope addition\n\nA spec quotes the marker in backticks: `" + $marker + "`."),
+       created_at:"2026-10-19T00:00:00Z",login:"shaiss",type:"User"},
+      {body:$body,created_at:"2026-10-19T01:00:00Z",login:"acme",type:"User"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+    echo "selftest: claimless stop after a mid-body-quoted marker did not fire" >&2
+    exit 1
+  }
+  # Marker present but lead not on the first line → not a lock.
+  jq -n --arg body "Preamble."$'\n\n'"${STOP_LOCK_MARKER} — not first"$'\n\n'"${SHIP_LOCK_HTML_MARKER}" \
+    '[{body:$body,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
+    > "${tmp}/comments.json"
+  [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "false" ] || {
+    echo "selftest: marker with lead below the first line was treated as a lock" >&2
+    exit 1
+  }
+  # BOM / heading / bold wrappers around the lead still authenticate.
+  bom_lock="$(python3 -c 'import sys; sys.stdout.write("\ufeff🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->")')"
+  for wrapped in \
+      "$bom_lock" \
+      "## ${STOP_LOCK_MARKER}"$'\n\n'"${SHIP_LOCK_HTML_MARKER}" \
+      "**${STOP_LOCK_MARKER} — claim**"$'\n\n'"${SHIP_LOCK_HTML_MARKER}"; do
+    jq -n --arg lock "$wrapped" --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+      '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
+        {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
+      > "${tmp}/comments.json"
+    [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
+      echo "selftest: BOM/heading/bold-wrapped settle lead was not treated as a lock" >&2
+      exit 1
+    }
+  done
   # Allowlisted logins (settle + attended shaiss) count.
   for ok_login in 'github-actions[bot]' 'shaiss'; do
     jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg login "$ok_login" \

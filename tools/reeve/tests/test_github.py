@@ -246,6 +246,30 @@ def test_gather_non_allowlisted_author_is_not_a_lock(monkeypatch):
     assert not any(i["number"] == 281 for i in health["issues"])
 
 
+@pytest.mark.parametrize("wrap", [
+    # UTF-8 BOM before the lead
+    lambda lead, marker: f"\ufeff{lead}\n\n{marker}",
+    # markdown heading wrapping the lead
+    lambda lead, marker: f"## {lead}\n\n{marker}",
+    # bold wrapping the lead
+    lambda lead, marker: f"**{lead}**\n\n{marker}",
+    # heading + bold
+    lambda lead, marker: f"# **{lead}**\n\n{marker}",
+])
+def test_gather_bom_heading_bold_lead_still_locks(monkeypatch, wrap):
+    # Readers tolerate BOM / heading / bold wrappers around the lead.
+    responses = _responses()
+    lead = "🚢 SHIP-LOCK — claim"
+    body = wrap(lead, github.SHIP_LOCK_HTML_MARKER)
+    responses[f"{github.API_ROOT}/repos/{REPO}/issues/281/comments?per_page=100"] = ([
+        _lock(body, "2026-08-14T05:23:00Z"),
+    ], "")
+
+    monkeypatch.setattr(github, "_get", lambda url, token: responses[url])
+    health = github.gather_run_health(REPO, "tok")
+    assert any(i["number"] == 281 for i in health["issues"])
+
+
 def test_gather_drops_pr_entries_from_the_issues_listing(monkeypatch):
     calls: list[str] = []
     fake_get(monkeypatch, calls)
