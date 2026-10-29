@@ -695,7 +695,11 @@ jobs:
           # Secrets file prepared here; helper + diag child never inherit tokens.
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+            for key in \
+              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+            do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -705,7 +709,10 @@ jobs:
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
-          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN \
+              -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+              -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
+              -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -800,7 +807,11 @@ jobs:
           # Secrets file prepared here; helper + diag child never inherit tokens.
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+            for key in \
+              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+            do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -810,7 +821,10 @@ jobs:
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
-          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN \
+              -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+              -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
+              -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -903,7 +917,11 @@ jobs:
           # Secrets file prepared here; helper + diag child never inherit tokens.
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+            for key in \
+              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+            do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -913,7 +931,10 @@ jobs:
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
-          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN \
+              -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+              -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
+              -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1014,7 +1035,11 @@ jobs:
           # Secrets file prepared here; helper + diag child never inherit tokens.
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+            for key in \
+              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+            do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -1024,7 +1049,10 @@ jobs:
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
-          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN \
+              -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+              -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
+              -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1116,7 +1144,11 @@ jobs:
           # Secrets file prepared here; helper + diag child never inherit tokens.
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           {
-            for key in GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ZAI_KEY; do
+            for key in \
+              GITHUB_TOKEN GH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN \
+              ZAI_KEY OPENAI_API_KEY OPENROUTER_API_KEY REGEN_TOKEN \
+              ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN
+            do
               val="${!key-}"
               if [ -n "$val" ]; then
                 printf '%s\n' "$val"
@@ -1126,7 +1158,10 @@ jobs:
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           # shellcheck disable=SC2064
           trap 'rm -f -- "$blob" "$secrets" "$diag_out"' EXIT
-          if ! env -u GITHUB_TOKEN -u GH_TOKEN -u ANTHROPIC_API_KEY -u ZAI_KEY \
+          if ! env -u GITHUB_TOKEN -u GH_TOKEN \
+              -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+              -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
+              -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \

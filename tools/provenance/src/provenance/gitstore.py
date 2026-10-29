@@ -409,9 +409,12 @@ def redact(text: str, secrets: Iterable[str]) -> str:
 # patterns AFTER exact redact and BEFORE any truncation.
 _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     # GitHub fine-grained / classic / app installation / user-to-server /
-    # refresh tokens (ghp_/gho_/ghs_/ghu_/ghr_).
-    (r"gh[pousr]_[A-Za-z0-9_]{20,}", "***"),
-    (r"github_pat_[A-Za-z0-9_]{20,}", "***"),
+    # refresh tokens (ghp_/gho_/ghs_/ghu_/ghr_). Allow . and - — some
+    # server-to-server forms are not pure [A-Za-z0-9_].
+    (r"gh[pousr]_[A-Za-z0-9._\-]{20,}", "***"),
+    (r"github_pat_[A-Za-z0-9._\-]{20,}", "***"),
+    # Actions / OIDC JWTs (ACTIONS_RUNTIME_TOKEN and friends).
+    (r"eyJ[A-Za-z0-9_\-]+=*\.eyJ[A-Za-z0-9_\-]+=*\.[A-Za-z0-9_\-+/=]+", "***"),
     # OpenRouter / Anthropic API keys.
     (r"sk-or-[A-Za-z0-9_\-]{20,}", "***"),
     (r"sk-ant-[A-Za-z0-9_\-]{20,}", "***"),

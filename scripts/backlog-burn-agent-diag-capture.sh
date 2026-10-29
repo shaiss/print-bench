@@ -115,18 +115,19 @@ if [ ! -f "$raw_diag" ] || [ -L "$raw_diag" ]; then
   exit 1
 fi
 
-# Validate schema + re-scrub with pinned provenance (pattern pass). Refuse
-# anything that is not our payload shape (blocks planting the execution log).
+# Validate schema + re-scrub with pinned provenance (exact secrets from
+# SECRETS_FILE + credential_env forms + patterns). Refuse anything that is
+# not our payload shape (blocks planting the execution log).
 validated="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-validated.XXXXXX")"
 cleanup_paths+=("$validated")
-python3 -I - "$prov_src" "$raw_diag" "$validated" <<'PY'
+python3 -I - "$prov_src" "$raw_diag" "$validated" "$SECRETS_FILE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-prov_src, raw_path, out_path = sys.argv[1:4]
+prov_src, raw_path, out_path, secrets_path = sys.argv[1:5]
 sys.path.insert(0, prov_src)
-from provenance.gitstore import scrub  # noqa: E402
+from provenance.gitstore import credential_env, scrub  # noqa: E402
 
 ALLOWED = {
     "label",
@@ -137,6 +138,26 @@ ALLOWED = {
 MAX_BYTES = 64 * 1024
 MAX_FINAL = 500
 MAX_DENIALS = 40
+
+raw_secrets = [
+    line.strip()
+    for line in Path(secrets_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    if line.strip()
+]
+secrets: list[str] = []
+for s in raw_secrets:
+    secrets.append(s)
+    try:
+        _cred, b64 = credential_env(s)
+        secrets.append(b64)
+        secrets.append(_cred.get("GIT_CONFIG_VALUE_0", ""))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def S(text: str) -> str:
+    return scrub(text or "", secrets)
+
 
 raw = Path(raw_path).read_bytes()
 if len(raw) > MAX_BYTES:
@@ -172,15 +193,15 @@ for row in obj["denied_tools"]:
     if not isinstance(row, dict) or set(row.keys()) - {"tool", "reason"}:
         print("::error::diag.json denial row shape invalid", file=sys.stderr)
         sys.exit(1)
-    tool = scrub(str(row.get("tool") or ""))
-    reason = scrub(str(row.get("reason") or ""))
+    tool = S(str(row.get("tool") or ""))
+    reason = S(str(row.get("reason") or ""))
     clean_denials.append({"tool": tool[:200], "reason": reason[:300]})
 
 payload = {
-    "label": scrub(obj["label"])[:200],
-    "log_note": scrub(obj["log_note"])[:300],
+    "label": S(obj["label"])[:200],
+    "log_note": S(obj["log_note"])[:300],
     "denied_tools": clean_denials,
-    "final_assistant_message_truncated": scrub(
+    "final_assistant_message_truncated": S(
         obj["final_assistant_message_truncated"]
     )[:MAX_FINAL],
 }

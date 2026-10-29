@@ -545,6 +545,13 @@ _PATTERN_FIXTURES = [
     ("https://user:passw0rd@github.com/x", "url-userpass"),
     ("https://x-access-token:deadbeefDEADBEEFdeadbeefDE@github.com/x.git", "x-access"),
     ("AUTHORIZATION: basic " + ("YWJj" * 10) + "==", "basic-auth"),
+    (
+        "eyJhbGciOiJIUzI1NiJ9."
+        + "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+        + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+        "jwt",
+    ),
+    ("ghs_server.token-with.dots-and-dashes_ABCDEF", "ghs-dotted"),
 ]
 
 
