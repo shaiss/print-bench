@@ -326,6 +326,40 @@ def test_the_artifact_reader_exists_and_carries_its_selftest():
         assert needle in body, (
             f"scripts/reviewer-posted.sh lost its #770 vocabulary pin "
             f"({needle!r})")
+    # Issue #947: marker verb shares the trust core with check.
+    for needle in ("marker_from_comments", "REVIEWER_TRUST_MODE",
+                   "mcp_marker_exact", "--currency"):
+        assert needle in body, (
+            f"scripts/reviewer-posted.sh lost its #947 marker verb pin "
+            f"({needle!r})")
+
+
+def test_signoff_status_uses_trusted_marker_discovery():
+    """Issue #947: signoff-status must not author-blind-grep markers.
+
+    Discovers via reviewer-posted.sh `marker` restored from base.sha, reads
+    issue comments only, and never pulls review bodies or line comments.
+    """
+    text = _workflow_text()
+    blocks = _job_blocks(text)
+    assert "signoff-status" in blocks, "auto-review.yml lost signoff-status"
+    body = _without_comments(blocks["signoff-status"])
+    assert 'git show "${BASE_SHA}:scripts/reviewer-posted.sh"' in body, (
+        "signoff-status no longer restores reviewer-posted.sh from base.sha")
+    assert "marker --pr" in body or 'marker --pr "$PR_NUMBER"' in body, (
+        "signoff-status no longer calls reviewer-posted.sh marker")
+    assert "--currency" in body, (
+        "signoff-status lost --currency (tree-carry-forward needs it)")
+    assert "/issues/$PR_NUMBER/comments" in body, (
+        "signoff-status no longer reads issue comments")
+    # Author-blind discovery must stay gone.
+    assert "get_marker" not in body, (
+        "signoff-status regained author-blind get_marker")
+    assert "/pulls/" not in body, (
+        "signoff-status still reads PR review bodies or line comments "
+        "for marker discovery")
+    assert "trusted_marker" in body, (
+        "signoff-status lost its trusted_marker helper")
 
 
 # ── negative controls ─────────────────────────────────────────────────────────
