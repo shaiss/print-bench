@@ -112,14 +112,16 @@ _ROOT_FILES = (
     "printer.conf",
 )
 
-# A path token: optional backticks, a top-dir/... or root file, stopping at
-# whitespace / markdown closers. Globs (*, ?, **) are kept so we can refuse
-# them as undetermined rather than silently accepting.
+# A path token in free text: a top-dir WITH at least one slash segment, or a
+# known root file. Bare words like ``scripts`` / ``tools`` in prose must NOT
+# match — that starved design-briefs that mentioned those words (Bugbot on
+# #953). An explicit ``Touches:`` line still accepts bare tokens (below).
+# Globs (*, ?, **) are kept so we can refuse them as undetermined.
 _PATH_TOKEN = re.compile(
     r"(?i)(?<![A-Za-z0-9_./-])("
     + r"(?:(?:"
     + "|".join(re.escape(d) for d in _TOP_DIRS)
-    + r")(?:/[^\s`\"')\],:;|]+)*"
+    + r")/[^\s`\"')\],:;|]+"
     + r"|"
     + "|".join(re.escape(f) for f in _ROOT_FILES)
     + r")"

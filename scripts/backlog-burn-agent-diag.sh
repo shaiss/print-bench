@@ -74,13 +74,28 @@ from pathlib import Path
 log_path, secrets_path, out_dir, label, summary_path, repo_root = sys.argv[1:7]
 
 sys.path.insert(0, str(Path(repo_root) / "tools" / "provenance" / "src"))
-from provenance.gitstore import redact  # noqa: E402  — existing redactor
+from provenance.gitstore import (  # noqa: E402  — existing redactor + secret forms
+    credential_env,
+    redact,
+)
 
-secrets = [
+raw_secrets = [
     line.strip()
     for line in Path(secrets_path).read_text(encoding="utf-8", errors="replace").splitlines()
     if line.strip()
 ]
+# Match Git.secrets(): redact the token AND its x-access-token base64 header
+# form (and the AUTHORIZATION: basic … value). Actions masks the raw token
+# but not the base64 form that can appear in git/gh output.
+secrets: list[str] = []
+for s in raw_secrets:
+    secrets.append(s)
+    try:
+        _cred, b64 = credential_env(s)
+        secrets.append(b64)
+        secrets.append(_cred.get("GIT_CONFIG_VALUE_0", ""))
+    except Exception:  # noqa: BLE001 — never fail closed on expand
+        pass
 
 def R(text: str) -> str:
     return redact(text or "", secrets)

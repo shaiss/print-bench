@@ -782,6 +782,28 @@ def test_design_path_in_touches_is_kept():
     assert select_issue(snap([kept]))["selected"] == 200
 
 
+def test_bare_scripts_word_in_prose_does_not_skip():
+    # Bugbot on #953: bare "scripts"/"tools" in prose must not look like a
+    # protected path. design-brief briefs often say those words.
+    prose = issue(
+        201, "2026-08-01T00:00:00Z",
+        labels=["design-brief"],
+        title="Design brief: phone stand with better tools",
+        body="Ship a stand. Mention scripts only as a word, not a path.\n",
+    )
+    assert select_issue(snap([prose]), required_label="design-brief")["selected"] == 201
+    # autonomy-ok with only prose (no concrete path) still fail-closes.
+    opaque = issue(
+        202, "2026-08-01T00:00:00Z",
+        title="improve the scripts somehow",
+        body="please fix the tools we use\n",
+    )
+    r = select_issue(snap([opaque]))
+    assert r["selected"] is None
+    assert "could not be determined" in r["excluded"]["202"]
+
+
+
 def test_scripts_path_in_body_is_skipped():
     # #886 / #889 shape: body names scripts/design-run-deliver.sh.
     bad = issue(

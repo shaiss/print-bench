@@ -133,6 +133,22 @@ def test_extract_scope_paths_none_on_glob():
     assert prot.extract_scope_paths("x", "Touches: docs/**\n") is None
 
 
+def test_bare_top_dir_word_is_not_a_free_text_path():
+    # Prose "scripts" / "tools" must not extract; a real path still does.
+    assert prot.extract_scope_paths(
+        "improve the scripts", "we need better tools for this"
+    ) is None
+    assert prot.extract_scope_paths(
+        "fix", "edit scripts/design-run-deliver.sh please"
+    ) == {"scripts/design-run-deliver.sh"}
+
+
+def test_touches_bare_scripts_still_counts():
+    # An explicit Touches line may name a bare top-dir; that IS a path.
+    assert prot.extract_scope_paths("x", "Touches: scripts\n") == {"scripts"}
+
+
+
 def test_protected_scope_reason_safe():
     assert (
         prot.protected_scope_reason(
