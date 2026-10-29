@@ -421,8 +421,10 @@ _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     # Documented Z.AI API keys (32 hex + '.' + 16 alnum), including when
     # echoed as ANTHROPIC_AUTH_TOKEN=… from a ship-link env dump. Do NOT use
     # a blanket 48+ url-safe class — that redacts SHA-256 digests (64 hex).
+    # Leading lookbehind is hex-only so a non-hex letter prefix still redacts;
+    # trailing lookahead omits '.' so ``key.`` (key then a dot) still redacts.
     (r"(?i)(?:ANTHROPIC_AUTH_TOKEN|ZAI_KEY)\s*[=:]\s*[0-9a-f]{32}\.[A-Za-z0-9]{16}", "***"),
-    (r"(?<![A-Za-z0-9.])[0-9a-f]{32}\.[A-Za-z0-9]{16}(?![A-Za-z0-9.])", "***"),
+    (r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{32}\.[A-Za-z0-9]{16}(?![A-Za-z0-9])", "***"),
     # AWS secret access key sitting near an access-key id (40 chars of
     # base64-ish, within ~80 chars of AKIA/ASIA — catch both orders).
     # These MUST run before the standalone AKIA/ASIA patterns or the id

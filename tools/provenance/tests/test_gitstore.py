@@ -555,6 +555,14 @@ _PATTERN_FIXTURES = [
     # Documented Z.AI key shape: 32 hex + '.' + 16 alnum.
     ("a" * 32 + "." + "B" * 16, "zai-dotted"),
     ("ANTHROPIC_AUTH_TOKEN=" + "c" * 32 + "." + "D" * 16, "zai-auth-env"),
+    # Trailing '.' must not defeat the match (lookahead omits '.').
+    ("a" * 32 + "." + "B" * 16 + ".", "zai-followed-by-dot"),
+    # Non-hex letter prefix — old [A-Za-z0-9.] lookbehind leaked these.
+    ("z" + "a" * 32 + "." + "B" * 16, "zai-letter-prefix"),
+    # Literal backslash-n sequence (two chars), not a newline.
+    ("\\n" + "a" * 32 + "." + "B" * 16, "zai-backslash-n-prefix"),
+    # Uppercase hex id half.
+    ("A" * 32 + "." + "Bb0Cd1Ef2Gh3Ij45", "zai-uppercase-hex"),
 ]
 
 
@@ -565,6 +573,14 @@ def test_redact_patterns_keeps_sha256_and_git_sha():
     git_sha = "b" * 40
     out = gitstore.redact_patterns(f"pin {sha256} commit {git_sha}")
     assert sha256 in out and git_sha in out
+
+
+def test_redact_patterns_keeps_bare_64_hex_digest():
+    """A bare SHA-256 hex digest must not match the Z.AI dotted key pattern."""
+    digest = "0123456789abcdef" * 4  # 64 hex, no dot
+    assert len(digest) == 64
+    out = gitstore.redact_patterns(f"checksum {digest} end")
+    assert digest in out
 
 
 @pytest.mark.parametrize("secret,label", _PATTERN_FIXTURES)
@@ -581,6 +597,37 @@ def test_scrub_applies_exact_then_patterns():
     out = gitstore.scrub(f"{known} and {pat}", [known])
     assert known not in out and pat not in out
     assert out.count("***") >= 2
+
+
+def test_scrub_exact_runtime_env_shaped_values_before_truncate():
+    """Capture feeds ZAI_KEY / ANTHROPIC_API_KEY / GITHUB_TOKEN via SECRETS_FILE.
+
+    Tests use fake values only — never real credentials, never print them.
+    """
+    fake_zai = "f" * 32 + "." + "FakeZaiKey000001"
+    fake_anthropic = "sk-ant-fake-test-value-not-real-0001"
+    fake_github = "ghp_FakeGitHubTokenForUnitTest000001"
+    # Opaque runtime values that patterns alone would miss (no well-known prefix).
+    fake_opaque = "opaque-runtime-secret-value-XYZ-999"
+    text = f"zai={fake_zai} ant={fake_anthropic} gh={fake_github} op={fake_opaque} TAIL"
+    # Scrub-then-truncate must replace exact values BEFORE cutting.
+    out = gitstore.scrub_then_truncate(
+        text, limit=len(text), secrets=[fake_zai, fake_anthropic, fake_github, fake_opaque]
+    )
+    assert fake_zai not in out
+    assert fake_anthropic not in out
+    assert fake_github not in out
+    assert fake_opaque not in out
+    # Truncation boundary through an opaque secret: leading half must not leak.
+    half = len(fake_opaque) // 2
+    prefix = "p" * 100
+    straddling = prefix + fake_opaque + "END"
+    cut = len(prefix) + half
+    truncated = gitstore.scrub_then_truncate(
+        straddling, limit=cut, secrets=[fake_opaque]
+    )
+    assert fake_opaque not in truncated
+    assert fake_opaque[:half] not in truncated
 
 
 def test_scrub_then_truncate_redacts_before_cutting():

@@ -4574,12 +4574,66 @@ EOF
     exit 1
   }
   # Five Capture denied-tools steps + the Bundle step each define the
-  # predicate. The Bundle copy stays burn-scoped; Capture copies are broader.
+  # predicate. Capture always excludes Runner.*/Agent.* and only reaps
+  # init-orphans with agent-tree evidence; Bundle stays burn-scoped.
   burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
   [ "$burn_reap_n" -eq 6 ] || {
     echo "selftest: expected the reaper predicate in the burn bundle step, found ${burn_reap_n}" >&2
     exit 1
   }
+  # Capture steps blank LD_AUDIT the same way Bundle/settle do.
+  burn_capture_ld="$(grep -c 'Capture denied tools' "$burn" || true)"
+  [ "$burn_capture_ld" -eq 5 ] || {
+    echo "selftest: expected 5 Capture denied-tools steps, found ${burn_capture_ld}" >&2
+    exit 1
+  }
+  burn_ld_audit_n="$(awk '
+    /name: Capture denied tools/ { c=1; next }
+    c && /LD_AUDIT: ""/ { n++; c=0 }
+    c && /^      - name:/ { c=0 }
+    END { print n+0 }
+  ' "$burn")"
+  [ "$burn_ld_audit_n" -eq 5 ] || {
+    echo "selftest: expected LD_AUDIT blanked in all 5 Capture steps, found ${burn_ld_audit_n}" >&2
+    exit 1
+  }
+  grep -q 'SCRUB_ZAI_KEY:' "$burn" && grep -q 'SCRUB_ANTHROPIC_API_KEY:' "$burn" \
+    && grep -q 'SCRUB_GITHUB_TOKEN:' "$burn" || {
+    echo "selftest: burn Capture steps missing SCRUB_* exact-scrub env slots" >&2
+    exit 1
+  }
+  # Extract the FIRST definition (Capture step) — must keep Runner.*/Agent.*
+  # even at ppid=1, and must not kill unrelated init orphans.
+  burn_capture_reap="$(awk '
+    /reap_should_kill\(\) \{/ { c++; p=0; if (c==1) p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$burn")"
+  (
+    eval "$burn_capture_reap"
+    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
+    expect_kill() {
+      if ! reap_should_kill "$@"; then
+        echo "selftest: capture reap_should_kill kept a process it must kill: $*" >&2
+        exit 1
+      fi
+    }
+    expect_keep() {
+      if reap_should_kill "$@"; then
+        echo "selftest: capture reap_should_kill killed a process it must keep: $*" >&2
+        exit 1
+      fi
+    }
+    # Real runner host processes — always keep, even when ppid=1.
+    expect_keep 50 1 Runner.Worker /work/x runner 9 "" 99 1
+    expect_keep 51 1 Agent.Listener /work/x agent 9 "" 99 1
+    # Unrelated init orphan (no agent-tree evidence) — keep.
+    expect_keep 52 1 sleep / sleep 9 "" 99 1
+    # Agent-tree init orphans — kill.
+    expect_kill 53 1 sleep /work/x sleep 9 "" 99 1
+    expect_kill 54 1 sleep / "backlog-burn-diag capture" 9 "" 99 1
+    expect_kill 55 1 sleep / "claude-execution-output.json" 9 "" 99 1
+  )
   # Extract the LAST definition (Bundle step) for the burn-scoped contract.
   burn_reap_a="$(awk -v want="$burn_reap_n" '
     /reap_should_kill\(\) \{/ { c++; p=0; if (c==want) p=1 }
@@ -4595,6 +4649,11 @@ EOF
     fi
     if reap_should_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1; then
       echo "selftest: burn reap_should_kill killed a process outside the burn" >&2
+      exit 1
+    fi
+    # Bundle also always excludes Runner.* at ppid=1.
+    if reap_should_kill 50 1 Runner.Worker /work/x runner 9 "" 99 1; then
+      echo "selftest: burn bundle reap_should_kill killed Runner.Worker" >&2
       exit 1
     fi
   )

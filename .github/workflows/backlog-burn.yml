@@ -672,8 +672,8 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens in /proc/$$/environ for this step.
-          # Do not map secrets.* here — that is the decrypt window.
+          # cannot leave provider/job tokens under these names. Exact scrub
+          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -684,9 +684,17 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
+          # credential names stay blanked above so a GITHUB_ENV plant cannot
+          # re-fill them; these SCRUB_* slots are written to the secrets file
+          # then unset before the capture helper runs.
+          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -710,14 +718,11 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
-              # Only trust them when they are NOT init-orphans — a real
-              # Runner.Worker is not reparented to init.
-              Runner.*|Agent.*)
-                if [ "$ppid" != "1" ]; then
-                  return 1
-                fi
-                ;;
+              # Always exclude Actions Runner.*/Agent.* host processes — even
+              # when reparented to init. Spoofed /proc/self/comm alone is not
+              # enough to kill; agent-tree evidence (in_tree / mentions) is
+              # required for any other ppid=1 PID below.
+              Runner.*|Agent.*) return 1 ;;
               systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
@@ -727,11 +732,13 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
-            # ppid=1. System daemons already excluded above when not orphans.
+            # Only reap init-orphans from this burn's agent tree — never every
+            # ppid=1 process on the runner (that would include real Runner.*).
             if [ "$ppid" = "1" ]; then
-              return 0
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              return 1
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -797,15 +804,20 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt provider/job tokens into this step (env blanks
-          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
-          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
-          # never copy ACTIONS_* (JWT pattern covers them; copying would
-          # re-materialize runner tokens onto disk for a leftover ship child).
+          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
+          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
+          # covers them). Never log or echo scrub values.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           : >"$secrets"
           chmod 600 -- "$secrets"
+          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
+            val="${!scrub_var-}"
+            if [ -n "$val" ]; then
+              printf '%s\n' "$val" >>"$secrets"
+            fi
+          done
+          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -819,6 +831,7 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -881,8 +894,8 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens in /proc/$$/environ for this step.
-          # Do not map secrets.* here — that is the decrypt window.
+          # cannot leave provider/job tokens under these names. Exact scrub
+          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -893,9 +906,17 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
+          # credential names stay blanked above so a GITHUB_ENV plant cannot
+          # re-fill them; these SCRUB_* slots are written to the secrets file
+          # then unset before the capture helper runs.
+          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -919,14 +940,11 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
-              # Only trust them when they are NOT init-orphans — a real
-              # Runner.Worker is not reparented to init.
-              Runner.*|Agent.*)
-                if [ "$ppid" != "1" ]; then
-                  return 1
-                fi
-                ;;
+              # Always exclude Actions Runner.*/Agent.* host processes — even
+              # when reparented to init. Spoofed /proc/self/comm alone is not
+              # enough to kill; agent-tree evidence (in_tree / mentions) is
+              # required for any other ppid=1 PID below.
+              Runner.*|Agent.*) return 1 ;;
               systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
@@ -936,11 +954,13 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
-            # ppid=1. System daemons already excluded above when not orphans.
+            # Only reap init-orphans from this burn's agent tree — never every
+            # ppid=1 process on the runner (that would include real Runner.*).
             if [ "$ppid" = "1" ]; then
-              return 0
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              return 1
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1006,15 +1026,20 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt provider/job tokens into this step (env blanks
-          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
-          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
-          # never copy ACTIONS_* (JWT pattern covers them; copying would
-          # re-materialize runner tokens onto disk for a leftover ship child).
+          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
+          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
+          # covers them). Never log or echo scrub values.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           : >"$secrets"
           chmod 600 -- "$secrets"
+          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
+            val="${!scrub_var-}"
+            if [ -n "$val" ]; then
+              printf '%s\n' "$val" >>"$secrets"
+            fi
+          done
+          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1028,6 +1053,7 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1088,8 +1114,8 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens in /proc/$$/environ for this step.
-          # Do not map secrets.* here — that is the decrypt window.
+          # cannot leave provider/job tokens under these names. Exact scrub
+          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -1100,9 +1126,17 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
+          # credential names stay blanked above so a GITHUB_ENV plant cannot
+          # re-fill them; these SCRUB_* slots are written to the secrets file
+          # then unset before the capture helper runs.
+          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -1126,14 +1160,11 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
-              # Only trust them when they are NOT init-orphans — a real
-              # Runner.Worker is not reparented to init.
-              Runner.*|Agent.*)
-                if [ "$ppid" != "1" ]; then
-                  return 1
-                fi
-                ;;
+              # Always exclude Actions Runner.*/Agent.* host processes — even
+              # when reparented to init. Spoofed /proc/self/comm alone is not
+              # enough to kill; agent-tree evidence (in_tree / mentions) is
+              # required for any other ppid=1 PID below.
+              Runner.*|Agent.*) return 1 ;;
               systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
@@ -1143,11 +1174,13 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
-            # ppid=1. System daemons already excluded above when not orphans.
+            # Only reap init-orphans from this burn's agent tree — never every
+            # ppid=1 process on the runner (that would include real Runner.*).
             if [ "$ppid" = "1" ]; then
-              return 0
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              return 1
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1213,15 +1246,20 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt provider/job tokens into this step (env blanks
-          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
-          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
-          # never copy ACTIONS_* (JWT pattern covers them; copying would
-          # re-materialize runner tokens onto disk for a leftover ship child).
+          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
+          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
+          # covers them). Never log or echo scrub values.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           : >"$secrets"
           chmod 600 -- "$secrets"
+          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
+            val="${!scrub_var-}"
+            if [ -n "$val" ]; then
+              printf '%s\n' "$val" >>"$secrets"
+            fi
+          done
+          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1235,6 +1273,7 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1303,8 +1342,8 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens in /proc/$$/environ for this step.
-          # Do not map secrets.* here — that is the decrypt window.
+          # cannot leave provider/job tokens under these names. Exact scrub
+          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -1315,9 +1354,17 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
+          # credential names stay blanked above so a GITHUB_ENV plant cannot
+          # re-fill them; these SCRUB_* slots are written to the secrets file
+          # then unset before the capture helper runs.
+          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -1341,14 +1388,11 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
-              # Only trust them when they are NOT init-orphans — a real
-              # Runner.Worker is not reparented to init.
-              Runner.*|Agent.*)
-                if [ "$ppid" != "1" ]; then
-                  return 1
-                fi
-                ;;
+              # Always exclude Actions Runner.*/Agent.* host processes — even
+              # when reparented to init. Spoofed /proc/self/comm alone is not
+              # enough to kill; agent-tree evidence (in_tree / mentions) is
+              # required for any other ppid=1 PID below.
+              Runner.*|Agent.*) return 1 ;;
               systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
@@ -1358,11 +1402,13 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
-            # ppid=1. System daemons already excluded above when not orphans.
+            # Only reap init-orphans from this burn's agent tree — never every
+            # ppid=1 process on the runner (that would include real Runner.*).
             if [ "$ppid" = "1" ]; then
-              return 0
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              return 1
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1428,15 +1474,20 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt provider/job tokens into this step (env blanks
-          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
-          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
-          # never copy ACTIONS_* (JWT pattern covers them; copying would
-          # re-materialize runner tokens onto disk for a leftover ship child).
+          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
+          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
+          # covers them). Never log or echo scrub values.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           : >"$secrets"
           chmod 600 -- "$secrets"
+          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
+            val="${!scrub_var-}"
+            if [ -n "$val" ]; then
+              printf '%s\n' "$val" >>"$secrets"
+            fi
+          done
+          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1450,6 +1501,7 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
@@ -1509,8 +1561,8 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           # Blank credential slots so a GITHUB_ENV plant or runner default
-          # cannot leave provider/job tokens in /proc/$$/environ for this step.
-          # Do not map secrets.* here — that is the decrypt window.
+          # cannot leave provider/job tokens under these names. Exact scrub
+          # values are mapped only via SCRUB_* below (written to SECRETS_FILE).
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           ANTHROPIC_API_KEY: ""
@@ -1521,9 +1573,17 @@ jobs:
           REGEN_TOKEN: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          # Exact-scrub sources for SECRETS_FILE (never logged). Standard
+          # credential names stay blanked above so a GITHUB_ENV plant cannot
+          # re-fill them; these SCRUB_* slots are written to the secrets file
+          # then unset before the capture helper runs.
+          SCRUB_ZAI_KEY: ${{ secrets.ZAI_KEY }}
+          SCRUB_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCRUB_GITHUB_TOKEN: ${{ github.token }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
           LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -1547,14 +1607,11 @@ jobs:
               *[!0-9]*) return 1 ;;
             esac
             case "$comm" in
-              # Runner.*/Agent.* are spoofable via /proc/self/comm (15-byte).
-              # Only trust them when they are NOT init-orphans — a real
-              # Runner.Worker is not reparented to init.
-              Runner.*|Agent.*)
-                if [ "$ppid" != "1" ]; then
-                  return 1
-                fi
-                ;;
+              # Always exclude Actions Runner.*/Agent.* host processes — even
+              # when reparented to init. Spoofed /proc/self/comm alone is not
+              # enough to kill; agent-tree evidence (in_tree / mentions) is
+              # required for any other ppid=1 PID below.
+              Runner.*|Agent.*) return 1 ;;
               systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
             local in_tree=0 mentions=0
@@ -1564,11 +1621,13 @@ jobs:
             case "$cmd" in
               *backlog-burn-diag*|*backlog-burn.bundle*|*claude-execution*) mentions=1 ;;
             esac
-            # Detached-to-init orphans — including classic double-fork daemons
-            # (ppid=1, sid != pid, cwd /tmp or /) and spoofed Runner.* with
-            # ppid=1. System daemons already excluded above when not orphans.
+            # Only reap init-orphans from this burn's agent tree — never every
+            # ppid=1 process on the runner (that would include real Runner.*).
             if [ "$ppid" = "1" ]; then
-              return 0
+              if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                return 0
+              fi
+              return 1
             fi
             if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
@@ -1634,15 +1693,20 @@ jobs:
             exit 1
           fi
           chmod +x "$blob"
-          # Do NOT decrypt provider/job tokens into this step (env blanks
-          # above). Pattern scrub covers ghs_/JWT/sk-ant_/sk-or_/opaque 48+
-          # Z.AI-shaped keys/AWS/Bearer/URL-creds. SECRETS_FILE stays empty —
-          # never copy ACTIONS_* (JWT pattern covers them; copying would
-          # re-materialize runner tokens onto disk for a leftover ship child).
+          # Exact-scrub runtime values from SCRUB_* (mapped above). Standard
+          # credential names stay blanked; never copy ACTIONS_* (JWT pattern
+          # covers them). Never log or echo scrub values.
           umask 077
           secrets="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-secrets.XXXXXX")"
           : >"$secrets"
           chmod 600 -- "$secrets"
+          for scrub_var in SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN; do
+            val="${!scrub_var-}"
+            if [ -n "$val" ]; then
+              printf '%s\n' "$val" >>"$secrets"
+            fi
+          done
+          unset SCRUB_ZAI_KEY SCRUB_ANTHROPIC_API_KEY SCRUB_GITHUB_TOKEN || true
           diag_out="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
           cleanup_capture() {
             # Only rm paths that are still set — clearing secrets="" used to
@@ -1656,6 +1720,7 @@ jobs:
               -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
               -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
               -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u SCRUB_ZAI_KEY -u SCRUB_ANTHROPIC_API_KEY -u SCRUB_GITHUB_TOKEN \
               SECRETS_FILE="$secrets" DIAG_OUT="$diag_out" \
               START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
               PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" RUNNER_TEMP="$RUNNER_TEMP" \
