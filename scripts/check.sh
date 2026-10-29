@@ -748,6 +748,15 @@ if ! ./scripts/reviewer-posted.sh --selftest; then
   fail=1
 fi
 
+# Trusted-tip resolve for auto-review trust-script restores (always tip of
+# default_branch from the server — never event base.sha). Proves forged
+# base.ref / empty / malformed tip fail closed, and that auto-review.yml
+# still restores the three scripts from TRUSTED_SHA with the LOW-1/LOW-2 pins.
+echo "-- resolve-trusted-base-sha selftest: scripts/resolve-trusted-base-sha.sh --selftest"
+if ! ./scripts/resolve-trusted-base-sha.sh --selftest; then
+  fail=1
+fi
+
 # vercel-ignore-build selftest (scripts/vercel-ignore-build.sh --selftest): the
 # Vercel "Ignored Build Step" gate decides whether a preview deployment is worth
 # building from the changed-file list alone. The classifier is a pure function

@@ -66,17 +66,20 @@ STAGE_MARKER = 'git checkout "$HEAD_SHA" -- "designs/${d}"'
 HEAD_FETCH = 'fetch --no-tags origin "$HEAD_SHA"'
 BASE_REF = "${{ github.event.pull_request.base.ref }}"
 BASE_SHA = "${{ github.event.pull_request.base.sha }}"
+# Trust-script restores (reviewer-posted / coach-lock / signoff) use the
+# server tip of the default branch (TRUSTED_SHA), never event base.sha.
+TRUSTED_SHA_NAME = "TRUSTED_SHA"
 COACH_RESTORE_MARKER = 'git checkout "$BASE_SHA" --'
-COACH_POST_BLOB = '${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py'
+COACH_POST_BLOB = '${TRUSTED_SHA}:.claude/reviewer-post/reviewer_mcp.py'
 COACH_RESTORE_PATHS = (
     ".claude/reviewer-post",
     ".claude/design-coach-settings.json",
     ".claude/skills/design-coach",
     "scripts/coach-lock-check.sh",
 )
-COACH_LOCK_CHECK_BLOB = "${BASE_SHA}:scripts/coach-lock-check.sh"
+COACH_LOCK_CHECK_BLOB = "${TRUSTED_SHA}:scripts/coach-lock-check.sh"
 COACH_LOCK_CHECK_SHOW = (
-    '/usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh"'
+    '/usr/bin/git show "${TRUSTED_SHA}:scripts/coach-lock-check.sh"'
 )
 
 # FILE-half env lock (#777): named denies so the job-level GIT_* lock cannot
@@ -282,7 +285,9 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     trusted step immediately before EACH ship step (a failed first link
     with Write/Edit/Bash must not leave a rewritten MCP for the next
     spawn), and ship steps are gated on that surface existing on the
-    base (Jane's first-landing skip)."""
+    trusted tip (Jane's first-landing skip). Trust scripts restore from
+    TRUSTED_SHA (server tip of default_branch), never event base.sha.
+    """
     block = _without_comments(_job_blocks(text)["design-coach"])
     steps = _steps(block)
     ship_at = [i for i, c in enumerate(steps)
@@ -302,7 +307,7 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     ready_at = [i for i, c in enumerate(steps) if COACH_POST_BLOB in c]
     assert ready_at, (
         "auto-review.yml [design-coach] ready step no longer probes the "
-        "posting MCP blob on base.sha — a working-tree check would accept "
+        "posting MCP blob on TRUSTED_SHA — a working-tree check would accept "
         "the PR's copy")
     assert ready_at[0] < restore_at[0], (
         "auto-review.yml [design-coach] probes the base posting surface "
@@ -311,7 +316,10 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     ready_env = _env_map(ready, 8)
     assert ready_env.get("BASE_SHA") == BASE_SHA, (
         "auto-review.yml [design-coach] ready step does not take the PR "
-        "base sha")
+        "base sha (still used for the MCP overlay fetch)")
+    assert ready_env.get("BASE_REF") == BASE_REF, (
+        "auto-review.yml [design-coach] ready step does not take base.ref "
+        "for the trusted-tip resolve")
     assert ready_env.get("GH_TOKEN") == "${{ github.token }}", (
         "auto-review.yml [design-coach] ready step has no job token for "
         "the authenticated base fetch (a private-repo anonymous fetch 403s)")
@@ -325,13 +333,19 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     assert 'fetch --no-tags origin "$BASE_SHA"' in ready_run, (
         "auto-review.yml [design-coach] ready step does not fetch the base "
         "SHA when it is not already local")
+    assert TRUSTED_SHA_NAME in ready_run and "resolve_trusted_sha" in ready_run, (
+        "auto-review.yml [design-coach] ready step does not resolve "
+        "TRUSTED_SHA from the server tip of the default branch")
+    assert 'echo "TRUSTED_SHA=' in ready_run or "TRUSTED_SHA=${TRUSTED_SHA}" in ready_run, (
+        "auto-review.yml [design-coach] ready step does not export "
+        "TRUSTED_SHA to GITHUB_ENV for later restores")
     assert 'started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)' in ready_run, (
         "auto-review.yml [design-coach] ready step does not stamp "
         "started_at — the lock-check could accept a COACH-LOCK from an "
         "earlier coach run on reopened / ready_for_review")
     assert COACH_LOCK_CHECK_BLOB in ready_run, (
         "auto-review.yml [design-coach] ready step no longer probes "
-        "scripts/coach-lock-check.sh on base.sha — a missing-on-base first "
+        "scripts/coach-lock-check.sh on TRUSTED_SHA — a missing-on-tip first "
         "landing would spawn the agent then fail closed on git show, or a "
         "PR-committed stub would be the pin")
     for n, chunk in enumerate(_ship_chunks(block), 1):
@@ -366,8 +380,9 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
 
     The coach has Write/Edit/Bash, so a prompt-injected turn (or a design
     PR that commits a stub) can rewrite ``scripts/coach-lock-check.sh``
-    after the overlay. The check step extracts the blob from base.sha
-    AFTER every ship step and runs that copy under a reset PATH.
+    after the overlay. The check step extracts the blob from TRUSTED_SHA
+    (server tip of the default branch, exported by the ready step) AFTER
+    every ship step and runs that copy under a reset PATH.
     """
     block = _without_comments(_job_blocks(text)["design-coach"])
     steps = _steps(block)
@@ -376,7 +391,7 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
     show_at = [i for i, c in enumerate(steps) if COACH_LOCK_CHECK_SHOW in c]
     assert show_at, (
         "auto-review.yml [design-coach] does not extract "
-        "coach-lock-check.sh from base.sha — a workspace copy the agent "
+        "coach-lock-check.sh from TRUSTED_SHA — a workspace copy the agent "
         "can rewrite would stamp the round complete (issue #806)")
     assert show_at[0] > last_ship, (
         "auto-review.yml [design-coach] extracts coach-lock-check.sh "
@@ -390,9 +405,6 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
         "link would make the runner look up a shim bash before PATH is "
         "reset in-script")
     env = _env_map(check, 8)
-    assert env.get("BASE_SHA") == BASE_SHA, (
-        "auto-review.yml [design-coach] lock-check step does not take "
-        "the PR base sha")
     assert env.get("PR") == "${{ github.event.pull_request.number }}", (
         "auto-review.yml [design-coach] lock-check step does not take "
         "the PR number through env")
@@ -400,13 +412,19 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
         "auto-review.yml [design-coach] lock-check step does not take "
         "started_at through SINCE — a lock from an earlier coach run "
         "would satisfy the pin")
+    run = check.split("run:", 1)[1]
+    assert COACH_LOCK_CHECK_SHOW in run, (
+        "auto-review.yml [design-coach] lock-check does not git-show "
+        "coach-lock-check.sh from TRUSTED_SHA")
+    assert '[[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]' in run, (
+        "auto-review.yml [design-coach] lock-check lost the LOW-1 40-hex "
+        "guard on TRUSTED_SHA before restore")
     for key in ("LD_PRELOAD", "BASH_ENV", "ENV", "NODE_OPTIONS", "NODE_PATH"):
         assert env.get(key) == "", (
             f"auto-review.yml [design-coach] lock-check YAML env does not "
             f"pin {key} to empty — GITHUB_ENV from a Bash-capable coach is "
             "applied at process start, before the in-script unset, so "
             "LD_PRELOAD maps at exec and BASH_ENV is sourced as bash starts")
-    run = check.split("run:", 1)[1]
     assert "${{" not in run, (
         "auto-review.yml [design-coach] lock-check step interpolates an "
         "expression into its script")
@@ -739,7 +757,7 @@ def test_coach_guard_rejects_show_full_output():
 def test_coach_guard_rejects_a_working_tree_ready_check():
     tampered = _job_replace(
         _workflow_text(), "design-coach",
-        'git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py"',
+        'git cat-file -e "${TRUSTED_SHA}:.claude/reviewer-post/reviewer_mcp.py"',
         'test -f .claude/reviewer-post/reviewer_mcp.py')
     with pytest.raises(AssertionError, match="posting MCP blob"):
         _assert_coach_restores_posting_surface_from_base(tampered)

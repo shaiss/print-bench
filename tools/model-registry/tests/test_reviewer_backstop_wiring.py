@@ -52,7 +52,7 @@ POST_JOBS = {
 }
 COACH_POST_TOOL = "mcp__reviewer__post_coach"
 COACH_LOCK_CHECK_SHOW = (
-    '/usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh"'
+    '/usr/bin/git show "${TRUSTED_SHA}:scripts/coach-lock-check.sh"'
 )
 COACH_POST_JOB = "design-coach"
 COACH_ALLOWED_KEEP = ("Write", "Edit", "Bash")
@@ -237,7 +237,7 @@ def _assert_coach_steps_carry_their_post_surface(text: str) -> None:
     assert chunks, "auto-review.yml [design-coach]: no ship step found"
     assert COACH_LOCK_CHECK_SHOW in block, (
         "auto-review.yml [design-coach] does not extract coach-lock-check.sh "
-        "from base.sha — a workspace copy the agent can rewrite would stamp "
+        "from TRUSTED_SHA — a workspace copy the agent can rewrite would stamp "
         "the round complete (issue #806)")
     assert "./scripts/coach-lock-check.sh" not in block, (
         "auto-review.yml [design-coach] still runs the workspace "

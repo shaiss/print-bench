@@ -251,8 +251,10 @@ def test_pm_and_coach_tolerate_a_pre_770_base_checker():
             f"auto-review.yml [{job}] switched the checker to the PR head "
             "— that weakens the trust boundary CodeRabbit called out")
     coach = _without_comments(blocks["design-coach"])
-    assert 'git show "${BASE_SHA}:scripts/reviewer-posted.sh"' in coach, (
-        "design-coach no longer restores reviewer-posted.sh from base.sha")
+    assert 'git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh"' in coach, (
+        "design-coach no longer restores reviewer-posted.sh from TRUSTED_SHA")
+    assert "resolve_trusted_sha" in coach, (
+        "design-coach no longer resolves the trusted tip server-side")
 
 
 def _coach_lock_check_step(text: str) -> str:
@@ -337,15 +339,32 @@ def test_the_artifact_reader_exists_and_carries_its_selftest():
 def test_signoff_status_uses_trusted_marker_discovery():
     """Issue #947: signoff-status must not author-blind-grep markers.
 
-    Discovers via reviewer-posted.sh `marker` restored from base.sha, reads
-    issue comments only, and never pulls review bodies or line comments.
+    Discovers via reviewer-posted.sh `marker` restored from the trusted tip
+    of the default branch (never event base.sha), reads issue comments only,
+    and never pulls review bodies or line comments.
     """
     text = _workflow_text()
     blocks = _job_blocks(text)
     assert "signoff-status" in blocks, "auto-review.yml lost signoff-status"
     body = _without_comments(blocks["signoff-status"])
-    assert 'git show "${BASE_SHA}:scripts/reviewer-posted.sh"' in body, (
-        "signoff-status no longer restores reviewer-posted.sh from base.sha")
+    assert 'git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh"' in body, (
+        "signoff-status no longer restores reviewer-posted.sh from TRUSTED_SHA")
+    assert 'git show "${TRUSTED_SHA}:scripts/reviewer-signoff.sh"' in body, (
+        "signoff-status no longer restores reviewer-signoff.sh from TRUSTED_SHA")
+    assert "resolve_trusted_sha" in body, (
+        "signoff-status no longer resolves the trusted tip server-side")
+    assert "default_branch" in body, (
+        "signoff-status no longer validates base.ref against default_branch")
+    assert 'git show "${BASE_SHA}:scripts/reviewer-posted.sh"' not in body, (
+        "signoff-status still restores reviewer-posted.sh from event base.sha")
+    assert "predates #947 marker verb — treating" not in body, (
+        "signoff-status still silently treats exit-2 as absent marker")
+    assert "fail closed" in body and "marker verb" in body, (
+        "signoff-status lost the fail-closed exit-2 path for marker verb")
+    assert 'user.login // "") == "github-actions[bot]"' in body, (
+        "signoff-status printcheck sticky not filtered to github-actions[bot]")
+    assert 'user.type // "") == "Bot"' in body, (
+        "signoff-status printcheck sticky not filtered to type Bot")
     assert "marker --pr" in body or 'marker --pr "$PR_NUMBER"' in body, (
         "signoff-status no longer calls reviewer-posted.sh marker")
     assert "--currency" in body, (
@@ -360,6 +379,38 @@ def test_signoff_status_uses_trusted_marker_discovery():
         "for marker discovery")
     assert "trusted_marker" in body, (
         "signoff-status lost its trusted_marker helper")
+
+
+def test_signoff_status_trusted_tip_pins_fail_closed():
+    """NEGCTL: reverting to event base.sha or dropping the bot sticky filter fails."""
+    text = _workflow_text()
+    blocks = _job_blocks(text)
+    body = blocks["signoff-status"]
+
+    def _assert_tip_restore(workflow: str) -> None:
+        tbody = _without_comments(_job_blocks(workflow)["signoff-status"])
+        assert 'git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh"' in tbody, (
+            "signoff-status no longer restores reviewer-posted.sh from TRUSTED_SHA")
+        assert 'git show "${BASE_SHA}:scripts/reviewer-posted.sh"' not in tbody, (
+            "signoff-status still restores reviewer-posted.sh from event base.sha")
+        assert 'user.login // "") == "github-actions[bot]"' in tbody, (
+            "signoff-status printcheck sticky not filtered to github-actions[bot]")
+
+    _assert_tip_restore(text)
+    tampered_body = body.replace(
+        'git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh"',
+        'git show "${BASE_SHA}:scripts/reviewer-posted.sh"',
+        1)
+    assert tampered_body != body, "tamper did not land in signoff-status"
+    with pytest.raises(AssertionError, match="TRUSTED_SHA|base.sha"):
+        _assert_tip_restore(text.replace(body, tampered_body, 1))
+    no_bot = body.replace(
+        '(.user.login // "") == "github-actions[bot]" and (.user.type // "") == "Bot" and ',
+        "",
+        1)
+    assert no_bot != body, "bot-filter tamper did not land"
+    with pytest.raises(AssertionError, match="github-actions"):
+        _assert_tip_restore(text.replace(body, no_bot, 1))
 
 
 # ── negative controls ─────────────────────────────────────────────────────────
