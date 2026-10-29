@@ -219,6 +219,10 @@ jobs:
           # as the diag script (never execute/import worktree copies after Write/Edit).
           capture_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-agent-diag-capture.sh" | sha256sum | awk '{print $1}')"
           echo "capture_sha256=${capture_sha256}" >> "$GITHUB_OUTPUT"
+          # Rematerialize+reap helper — restored from this pin in capture/bundle
+          # (never source the post-agent worktree copy).
+          pid_snap_helper_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-pid-snap.sh" | sha256sum | awk '{print $1}')"
+          echo "pid_snap_helper_sha256=${pid_snap_helper_sha256}" >> "$GITHUB_OUTPUT"
           prov_archive_sha256="$(git --no-replace-objects archive HEAD tools/provenance/src | sha256sum | awk '{print $1}')"
           echo "prov_archive_sha256=${prov_archive_sha256}" >> "$GITHUB_OUTPUT"
           # Pre-agent PID snapshot for post-agent reapers. Capture/bundle kill
@@ -700,6 +704,7 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          PID_SNAP_HELPER_SHA256: ${{ steps.start_ref.outputs.pid_snap_helper_sha256 }}
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
@@ -742,87 +747,33 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
+          # Restore pid-snap helper from the pre-agent pin (worktree is
+          # agent-writable). Rematerialize from sealed step outputs; on
+          # integrity failure warn+continue with an empty spare set so reap
+          # still runs and the bundle path can still set pending.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
-          snap_ok=0
-          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
-            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
-          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
-            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
-          else
-            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
-            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
-              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
-            else
-              snap_ok=1
-            fi
+          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
+            exit 1
           fi
-          if [ "$snap_ok" -ne 1 ]; then
-            : >"$PID_SNAP"
+          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
+            exit 1
           fi
-          chmod 600 -- "$PID_SNAP"
-          reap_ppid_of() {
-            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
-          }
-          reap_should_kill() {
-            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
-            local walk pgid
-            [ -n "$pid" ] || return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            # Spare self and ancestors (the Actions runner chain).
-            walk="$self_pid"
-            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
-              [ "$walk" = "$pid" ] && return 1
-              walk="$(reap_ppid_of "$walk")"
-            done
-            # Spare our process group (reaper helpers).
-            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
-              return 1
-            fi
-            # Spare anything alive before the agent started.
-            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
-              return 1
-            fi
-            return 0
-          }
-          reap_agent_orphans() {
-            local d pid v pgid my_pgid
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
+          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
+            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC1090
+          source "$_bb_pid_helper"
+          rm -f -- "$_bb_pid_helper"
+          backlog_burn_rematerialize_pid_snap
           reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
@@ -910,6 +861,7 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          PID_SNAP_HELPER_SHA256: ${{ steps.start_ref.outputs.pid_snap_helper_sha256 }}
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
@@ -952,87 +904,33 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
+          # Restore pid-snap helper from the pre-agent pin (worktree is
+          # agent-writable). Rematerialize from sealed step outputs; on
+          # integrity failure warn+continue with an empty spare set so reap
+          # still runs and the bundle path can still set pending.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
-          snap_ok=0
-          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
-            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
-          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
-            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
-          else
-            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
-            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
-              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
-            else
-              snap_ok=1
-            fi
+          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
+            exit 1
           fi
-          if [ "$snap_ok" -ne 1 ]; then
-            : >"$PID_SNAP"
+          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
+            exit 1
           fi
-          chmod 600 -- "$PID_SNAP"
-          reap_ppid_of() {
-            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
-          }
-          reap_should_kill() {
-            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
-            local walk pgid
-            [ -n "$pid" ] || return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            # Spare self and ancestors (the Actions runner chain).
-            walk="$self_pid"
-            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
-              [ "$walk" = "$pid" ] && return 1
-              walk="$(reap_ppid_of "$walk")"
-            done
-            # Spare our process group (reaper helpers).
-            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
-              return 1
-            fi
-            # Spare anything alive before the agent started.
-            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
-              return 1
-            fi
-            return 0
-          }
-          reap_agent_orphans() {
-            local d pid v pgid my_pgid
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
+          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
+            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC1090
+          source "$_bb_pid_helper"
+          rm -f -- "$_bb_pid_helper"
+          backlog_burn_rematerialize_pid_snap
           reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
@@ -1118,6 +1016,7 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          PID_SNAP_HELPER_SHA256: ${{ steps.start_ref.outputs.pid_snap_helper_sha256 }}
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
@@ -1160,87 +1059,33 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
+          # Restore pid-snap helper from the pre-agent pin (worktree is
+          # agent-writable). Rematerialize from sealed step outputs; on
+          # integrity failure warn+continue with an empty spare set so reap
+          # still runs and the bundle path can still set pending.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
-          snap_ok=0
-          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
-            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
-          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
-            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
-          else
-            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
-            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
-              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
-            else
-              snap_ok=1
-            fi
+          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
+            exit 1
           fi
-          if [ "$snap_ok" -ne 1 ]; then
-            : >"$PID_SNAP"
+          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
+            exit 1
           fi
-          chmod 600 -- "$PID_SNAP"
-          reap_ppid_of() {
-            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
-          }
-          reap_should_kill() {
-            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
-            local walk pgid
-            [ -n "$pid" ] || return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            # Spare self and ancestors (the Actions runner chain).
-            walk="$self_pid"
-            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
-              [ "$walk" = "$pid" ] && return 1
-              walk="$(reap_ppid_of "$walk")"
-            done
-            # Spare our process group (reaper helpers).
-            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
-              return 1
-            fi
-            # Spare anything alive before the agent started.
-            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
-              return 1
-            fi
-            return 0
-          }
-          reap_agent_orphans() {
-            local d pid v pgid my_pgid
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
+          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
+            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC1090
+          source "$_bb_pid_helper"
+          rm -f -- "$_bb_pid_helper"
+          backlog_burn_rematerialize_pid_snap
           reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
@@ -1334,6 +1179,7 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          PID_SNAP_HELPER_SHA256: ${{ steps.start_ref.outputs.pid_snap_helper_sha256 }}
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
@@ -1376,87 +1222,33 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
+          # Restore pid-snap helper from the pre-agent pin (worktree is
+          # agent-writable). Rematerialize from sealed step outputs; on
+          # integrity failure warn+continue with an empty spare set so reap
+          # still runs and the bundle path can still set pending.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
-          snap_ok=0
-          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
-            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
-          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
-            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
-          else
-            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
-            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
-              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
-            else
-              snap_ok=1
-            fi
+          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
+            exit 1
           fi
-          if [ "$snap_ok" -ne 1 ]; then
-            : >"$PID_SNAP"
+          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
+            exit 1
           fi
-          chmod 600 -- "$PID_SNAP"
-          reap_ppid_of() {
-            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
-          }
-          reap_should_kill() {
-            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
-            local walk pgid
-            [ -n "$pid" ] || return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            # Spare self and ancestors (the Actions runner chain).
-            walk="$self_pid"
-            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
-              [ "$walk" = "$pid" ] && return 1
-              walk="$(reap_ppid_of "$walk")"
-            done
-            # Spare our process group (reaper helpers).
-            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
-              return 1
-            fi
-            # Spare anything alive before the agent started.
-            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
-              return 1
-            fi
-            return 0
-          }
-          reap_agent_orphans() {
-            local d pid v pgid my_pgid
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
+          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
+            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC1090
+          source "$_bb_pid_helper"
+          rm -f -- "$_bb_pid_helper"
+          backlog_burn_rematerialize_pid_snap
           reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
@@ -1541,6 +1333,7 @@ jobs:
           PROV_ARCHIVE_SHA256: ${{ steps.start_ref.outputs.prov_archive_sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          PID_SNAP_HELPER_SHA256: ${{ steps.start_ref.outputs.pid_snap_helper_sha256 }}
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
@@ -1583,87 +1376,33 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
+          # Restore pid-snap helper from the pre-agent pin (worktree is
+          # agent-writable). Rematerialize from sealed step outputs; on
+          # integrity failure warn+continue with an empty spare set so reap
+          # still runs and the bundle path can still set pending.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
-          snap_ok=0
-          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
-            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
-          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
-            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
-          else
-            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
-            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
-              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
-            else
-              snap_ok=1
-            fi
+          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
+            exit 1
           fi
-          if [ "$snap_ok" -ne 1 ]; then
-            : >"$PID_SNAP"
+          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
+            exit 1
           fi
-          chmod 600 -- "$PID_SNAP"
-          reap_ppid_of() {
-            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
-          }
-          reap_should_kill() {
-            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
-            local walk pgid
-            [ -n "$pid" ] || return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            # Spare self and ancestors (the Actions runner chain).
-            walk="$self_pid"
-            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
-              [ "$walk" = "$pid" ] && return 1
-              walk="$(reap_ppid_of "$walk")"
-            done
-            # Spare our process group (reaper helpers).
-            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
-              return 1
-            fi
-            # Spare anything alive before the agent started.
-            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
-              return 1
-            fi
-            return 0
-          }
-          reap_agent_orphans() {
-            local d pid v pgid my_pgid
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
+          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
+            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC1090
+          source "$_bb_pid_helper"
+          rm -f -- "$_bb_pid_helper"
+          backlog_burn_rematerialize_pid_snap
           reap_agent_orphans
           # Restore capture helper to a mktemp path (no predictable name) and
           # exec it in-place after the digest check — closes TOCTOU on a
@@ -1754,6 +1493,7 @@ jobs:
           START_SHA: ${{ steps.start_ref.outputs.sha }}
           DELIVER_SHA256: ${{ steps.start_ref.outputs.deliver_sha256 }}
           PID_SNAP_SHA256: ${{ steps.start_ref.outputs.pid_snap_sha256 }}
+          PID_SNAP_HELPER_SHA256: ${{ steps.start_ref.outputs.pid_snap_helper_sha256 }}
           # Snapshot body sealed at start_ref — rematerialized below; do not
           # trust $RUNNER_TEMP/backlog-burn-pre-agent-pids (agent-writable).
           PID_SNAP_B64: ${{ steps.start_ref.outputs.pid_snap_b64 }}
@@ -1810,87 +1550,34 @@ jobs:
           # here: that aborted reap (capture) and left bundle with no pending
           # (neither-delivered-nor-declined). Integrity failure → empty spare
           # set (conservative reap) and continue.
+          # Restore pid-snap helper from the pre-agent pin (worktree is
+          # agent-writable). Rematerialize from sealed step outputs; on
+          # integrity failure warn+continue with an empty spare set so reap
+          # still runs and the bundle path can still set pending.
           if [ -z "${RUNNER_TEMP:-}" ]; then
             echo "::error::RUNNER_TEMP is empty — cannot rematerialize PID snapshot" >&2
             exit 1
           fi
-          PID_SNAP="$(mktemp "${RUNNER_TEMP}/backlog-burn-pre-agent-pids.XXXXXX")"
-          snap_ok=0
-          if [ -z "${PID_SNAP_SHA256:-}" ] || [ -z "${PID_SNAP_B64:-}" ]; then
-            echo "::warning::PID snapshot outputs empty — conservative reap (no pre-agent spares)" >&2
-          elif ! printf '%s' "$PID_SNAP_B64" | base64 -d >"$PID_SNAP"; then
-            echo "::warning::PID snapshot b64 decode failed — conservative reap" >&2
-          else
-            got_snap="$(sha256sum "$PID_SNAP" | awk '{print $1}')"
-            if [ "$got_snap" != "$PID_SNAP_SHA256" ]; then
-              echo "::warning::PID snapshot digest mismatch — conservative reap" >&2
-            elif [ -L "$PID_SNAP" ] || [ ! -f "$PID_SNAP" ]; then
-              echo "::warning::PID snapshot rematerialize left non-file — conservative reap" >&2
-            else
-              snap_ok=1
-            fi
+          if [ -z "${START_SHA:-}" ] || [ -z "${PID_SNAP_HELPER_SHA256:-}" ]; then
+            echo "::error::START_SHA or PID_SNAP_HELPER_SHA256 empty — pin step did not run" >&2
+            exit 1
           fi
-          if [ "$snap_ok" -ne 1 ]; then
-            : >"$PID_SNAP"
+          _bb_pid_helper="$(mktemp "${RUNNER_TEMP}/backlog-burn-pid-snap.XXXXXX")"
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+              show "${START_SHA}:scripts/backlog-burn-pid-snap.sh" >"$_bb_pid_helper"; then
+            echo "::error::could not restore backlog-burn-pid-snap.sh from ${START_SHA}" >&2
+            exit 1
           fi
-          chmod 600 -- "$PID_SNAP"
-          reap_ppid_of() {
-            awk '/^PPid:/ { print $2; exit }' "/proc/$1/status" 2>/dev/null || echo 0
-          }
-          reap_should_kill() {
-            local pid="$1" snap_file="$2" self_pid="$3" my_pgid="$4"
-            local walk pgid
-            [ -n "$pid" ] || return 1
-            case "$pid" in
-              *[!0-9]*) return 1 ;;
-            esac
-            # Spare self and ancestors (the Actions runner chain).
-            walk="$self_pid"
-            while [ -n "$walk" ] && [ "$walk" != "0" ]; do
-              [ "$walk" = "$pid" ] && return 1
-              walk="$(reap_ppid_of "$walk")"
-            done
-            # Spare our process group (reaper helpers).
-            pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
-            if [ -n "$pgid" ] && [ "$pgid" = "$my_pgid" ]; then
-              return 1
-            fi
-            # Spare anything alive before the agent started.
-            if grep -qx -- "$pid" "$snap_file" 2>/dev/null; then
-              return 1
-            fi
-            return 0
-          }
-          reap_agent_orphans() {
-            local d pid v pgid my_pgid
-            local -a victims=()
-            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
-            shopt -s nullglob
-            for d in /proc/[0-9]*; do
-              pid="${d#/proc/}"
-              case "$pid" in
-                *[!0-9]*) continue ;;
-              esac
-              if reap_should_kill "$pid" "$PID_SNAP" "$$" "$my_pgid"; then
-                victims+=("$pid")
-              fi
-            done
-            shopt -u nullglob
-            if [ "${#victims[@]}" -eq 0 ]; then
-              return 0
-            fi
-            for v in "${victims[@]}"; do
-              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
-              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
-                kill -TERM -- "-${pgid}" 2>/dev/null || true
-              fi
-              kill -TERM "$v" 2>/dev/null || true
-            done
-            sleep 1
-            for v in "${victims[@]}"; do
-              kill -KILL "$v" 2>/dev/null || true
-            done
-          }
+          _bb_got="$(sha256sum "$_bb_pid_helper" | awk '{print $1}')"
+          if [ "$_bb_got" != "$PID_SNAP_HELPER_SHA256" ]; then
+            echo "::error::restored backlog-burn-pid-snap.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC1090
+          source "$_bb_pid_helper"
+          rm -f -- "$_bb_pid_helper"
+          backlog_burn_rematerialize_pid_snap
+          reap_agent_orphans
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1

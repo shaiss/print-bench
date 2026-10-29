@@ -4573,13 +4573,27 @@ EOF
     echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
     exit 1
   }
-  # Five Capture denied-tools steps + the Bundle step each define the
-  # snapshot-based reaper (no comm/name exemptions).
-  burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
-  [ "$burn_reap_n" -eq 6 ] || {
-    echo "selftest: expected the reaper predicate in 5 capture + bundle steps, found ${burn_reap_n}" >&2
+  # Five Capture denied-tools steps + the Bundle step each restore+source the
+  # shared pid-snap helper (snapshot-based reaper; no comm/name exemptions).
+  burn_pid_helper="${repo_root}/scripts/backlog-burn-pid-snap.sh"
+  [ -f "$burn_pid_helper" ] || {
+    echo "selftest: scripts/backlog-burn-pid-snap.sh is missing" >&2
     exit 1
   }
+  grep -q 'pid_snap_helper_sha256=' "$burn" || {
+    echo "selftest: burn start_ref does not pin backlog-burn-pid-snap.sh" >&2
+    exit 1
+  }
+  burn_reap_n="$(grep -c 'backlog_burn_rematerialize_pid_snap' "$burn" || true)"
+  [ "$burn_reap_n" -eq 6 ] || {
+    echo "selftest: expected rematerialize+reap helper in 5 capture + bundle steps, found ${burn_reap_n}" >&2
+    exit 1
+  }
+  # Predicate lives in the helper, not inlined in the workflow.
+  if grep -q 'reap_should_kill()' "$burn"; then
+    echo "selftest: burn still inlines reap_should_kill (should source pid-snap helper)" >&2
+    exit 1
+  fi
   grep -q 'pid_snap_sha256=' "$burn" || {
     echo "selftest: burn start_ref does not snapshot pre-agent PIDs" >&2
     exit 1
@@ -4603,21 +4617,29 @@ EOF
     echo "selftest: burn does not fail-safe to conservative reap on snap integrity failure" >&2
     exit 1
   }
-  # Integrity failure must warn+continue, never exit 1 before reap/pending.
+  # Integrity failure must warn+continue inside rematerialize, never exit 1 before reap.
+  # Scope to the rematerialize function — the --selftest body also mentions those
+  # warning strings next to unrelated `exit 1` lines.
   if awk '
-    /PID snapshot outputs empty|PID snapshot b64 decode failed|PID snapshot digest mismatch/ {
+    /^backlog_burn_rematerialize_pid_snap\(\)/ { in_fn=1 }
+    in_fn && /^}/ { in_fn=0 }
+    in_fn && /PID snapshot outputs empty|PID snapshot b64 decode failed|PID snapshot digest mismatch/ {
       in_fail=1; next
     }
-    in_fail && /exit 1/ { found=1; exit }
-    in_fail && /reap_agent_orphans\(\)|reap_ppid_of\(\)/ { in_fail=0 }
+    in_fn && in_fail && /exit 1/ { found=1; exit }
+    in_fn && in_fail && /snap_ok=1/ { in_fail=0 }
     END { exit !found }
-  ' "$burn"; then
-    echo "selftest: snap integrity failure still exits 1 before reap" >&2
+  ' "$burn_pid_helper"; then
+    echo "selftest: snap integrity failure still exits 1 before reap in pid-snap helper" >&2
     exit 1
   fi
   # No name-based exemptions remain (comm matching is agent-spoofable).
   if grep -E 'case "\$comm"|^\s+Runner\.\*\|Agent' "$burn" >/dev/null; then
     echo "selftest: burn reaper still has comm/name-based exemptions" >&2
+    exit 1
+  fi
+  if grep -E 'case "\$comm"|Runner\.\*\|Agent' "$burn_pid_helper" >/dev/null; then
+    echo "selftest: pid-snap helper still has comm/name-based exemptions" >&2
     exit 1
   fi
   # Exact-value scrub removed: unset does not clear /proc/<pid>/environ.
@@ -4641,18 +4663,14 @@ EOF
     echo "selftest: expected LD_AUDIT blanked in all 5 Capture steps, found ${burn_ld_audit_n}" >&2
     exit 1
   }
-  # Snapshot-based predicate: extract FIRST definition (Capture) + helpers.
+  # Snapshot-based predicate: source the shared helper (same code the workflow runs).
   # Signature: reap_should_kill pid snap_file self_pid my_pgid
-  burn_capture_reap="$(awk '
-    /reap_ppid_of\(\) \{/ { c++; p=0; if (c==1) p=1 }
-    p && /^          reap_agent_orphans\(\)/ { exit }
-    p { print }
-  ' "$burn")"
   snap_dir="$(mktemp -d)"
   snap_file="${snap_dir}/pids"
   printf '%s\n' 40 41 1 >"$snap_file"
   (
-    eval "$burn_capture_reap"
+    # shellcheck disable=SC1090
+    source "$burn_pid_helper"
     # Stub ps so pgid checks are deterministic (pid 99 = reaper pgid).
     ps() {
       if [ "$1" = "-o" ] && [ "$2" = "pgid=" ]; then
@@ -4686,17 +4704,13 @@ EOF
     expect_keep 98 "$snap_file" 99 99
   )
   rm -rf -- "$snap_dir"
-  # Bundle step uses the same snapshot predicate (last definition).
-  burn_reap_a="$(awk -v want="$burn_reap_n" '
-    /reap_ppid_of\(\) \{/ { c++; p=0; if (c==want) p=1 }
-    p && /^          reap_agent_orphans\(\)/ { exit }
-    p { print }
-  ' "$burn")"
+  # Bundle step uses the same helper predicate.
   snap_dir="$(mktemp -d)"
   snap_file="${snap_dir}/pids"
   printf '%s\n' 40 >"$snap_file"
   (
-    eval "$burn_reap_a"
+    # shellcheck disable=SC1090
+    source "$burn_pid_helper"
     ps() {
       if [ "$1" = "-o" ] && [ "$2" = "pgid=" ]; then
         case "$4" in
