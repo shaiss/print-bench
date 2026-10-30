@@ -399,7 +399,7 @@ module weld_rib(i) {
     // Liberation Sans Bold F/E mid-arm sits ~0.50–0.72 of cap_h above
     // baseline; cover that whole band.
     rib_h = 0.24 * cap_h;
-    zw = z_base + 0.58 * cap_h;
+    zw = z_base + 0.61 * cap_h;
     rotate([0, 0, amid - span_deg / 2])
         rotate_extrude(angle = span_deg)
             translate([r_si - eps, zw - rib_h / 2])
