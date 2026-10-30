@@ -109,16 +109,17 @@ whole clock would print as one fused lump):
   lattice's negative, so it seats one way only) under the PCB, with two sealed
   pockets you fill with ~55 g of Ø2 mm steel shot through the plugged ports on
   its end face. Print it in red — it is a working part.
-- `base-plug` — the tapered plug that closes each ballast port (print two).
+- `base-plug` — the tapered plug that closes each ballast port (print four —
+  two to use, two as spares; a Ø5 mm part is the one the scraper loses).
 
 The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf`
 (built by `./scripts/plate.sh ovodyo` from `ci.plate`): the eight production
 parts as eight separate objects a slicer imports as parts — duplicate `base-end`
-and `base-plug` in the slicer to print two of each. Every part's footprint clears
+in the slicer to print two, and `base-plug` to print four. Every part's footprint clears
 a **220×220 mm** bed (the seam coupon is the longest single dimension at
 164 mm); the recommended layout on a **256 mm bed** is **two plates**: the four
 ball halves alone (they pack 2×2 with shared settings — the long plate), then
-segment + both ends + core + both plugs on a second plate that packs tightly —
+segment + both ends + core + the plugs on a second plate that packs tightly —
 lay it out in the slicer first (the coffee-break plate). If your printer's
 profile greys out the front-left corner (stock X1/P1 carve an exclusion there),
 nudge the layout up-left before slicing.
@@ -150,6 +151,9 @@ the default render is the assembled clock.
   halves on a **smooth / engineering plate** if the pole numerals come out
   ragged on textured PEI — the plate grain shows in layer-1 cut edges; the
   droop band above them is the known #600 caveat, not a reason for supports.
+  Set the plate type in Bambu Studio to match the physical plate (glue stick
+  on Engineering plate for PLA). The pole face will come out glossier than
+  the other eleven numeral faces; that is normal.
 - **Infill:** 15–20 %.
 - **Supports:** none. The truss and mock drive print support-free, and the
   ball halves print **pole-down** (see Orientation), which makes the cavity an
@@ -170,8 +174,9 @@ the default render is the assembled clock.
   off. Safe on every other part if a tip lifts. No tuned fit on this design
   touches the bed (the seam rings print at the top of the pole-down halves;
   the core sockets exit vertical faces) — the only bed-face locator is the
-  Ø4.9 bumper recess on `base-end`, which forgives first-layer squish because
-  the silicone bumper is soft.
+  Ø4.9 stick-on bumper recess on `base-end`. Elephant-foot can narrow that
+  mouth; if a bumper's adhesive will not seat on the recess floor, open the
+  recess slightly by hand with a drill bit (do not change `foot_recess_d`).
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render).
   The pole face carries a numeral, so **layer 1 is the stencil itself**; the
@@ -276,25 +281,31 @@ tape or a dab of glue holds a temporary join — working order below; once taped
 lift from the centre segment so the ends don't peel).
 
 **The red core goes in before the clock stands up, and the order matters:**
-1. fill each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into
-each port → 3. slide the keel into the **bare** centre segment → 4. tape both
-wings on → 5. place the assembly where it lives. Fill and plug *on the bench
-before* you slide — a seated keel has no port access, and taped wings block the
-keel's path into the centre. Print the plugs on the coffee-break plate with the
-other base parts, never solo (a Ø5 mm part is easy to lose; a spare is cheap
-insurance). Weigh the pour first (~55 g total starting fill); pour in **~10 g
-stages and tap between stages** (tapping while pouring fights the funnel — the
-first pour is about five minutes of tapping, and that duration is normal, not a
-broken part). A folded-paper funnel with the tip cut to ~3 mm keeps shot off the
-desk — the Ø3.2 mm port is only about one and a half pellets wide, so shot will
-jam and arch. A strong magnet held against the pocket wall settles an arch and
-drags shot around through a couple of mm of plastic — worth a try (chrome-steel
-shot only; stainless bearing balls won't follow a magnet). Once the fill that
-lands STABLE is final, a few drops of CA (or epoxy) through each port before the
-plug locks the CoG you measured — loose shot can resettle and quietly eat tip
-clearance. This is permanent (you can't pour some out afterward), so do it only
-after the tip check passes. Press a Ø5 mm silicone bumper into each of the four
-foot recesses.
+
+1. Fill each ballast pocket with Ø2 mm steel shot.
+2. Wedge a `base-plug` into each port.
+3. Slide the keel into the **bare** centre segment.
+4. Tape both wings on.
+5. Place the assembly where it lives.
+
+Fill and plug *on the bench before* you slide — a seated keel has no port
+access, and taped wings block the keel's path into the centre. Print the plugs
+on the coffee-break plate with the other base parts, never solo (a Ø5 mm part
+is easy to lose; print four — two to use, two as spares). Weigh the pour first
+(~55 g total starting fill); pour in **~10 g stages and tap between stages**
+(tapping while pouring fights the funnel — the first pour is about five minutes
+of tapping, and that duration is normal, not a broken part). A folded-paper
+funnel with the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port is
+only about one and a half pellets wide, so shot will jam and arch. A strong
+magnet held against the pocket wall settles an arch and drags shot around
+through a couple of mm of plastic — worth a try (chrome-steel shot only;
+stainless bearing balls won't follow a magnet). Once the fill that lands STABLE
+is final, a few drops of CA (or epoxy) through each port before the plug locks
+the CoG you measured — loose shot can resettle and quietly eat tip clearance.
+This is permanent (you can't pour some out afterward), so do it only after the
+tip check passes. Affix a Ø5 mm × 1.5 mm hemispherical stick-on silicone bumper
+in each of the four foot recesses (adhesive on the recess floor); if
+elephant-foot narrowed the mouth, open it slightly with a drill bit first.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
