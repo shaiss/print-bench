@@ -3767,14 +3767,14 @@ EOF
     echo "selftest: settle does not download the intents with the pinned action" >&2
     exit 1
   }
-  # #895: parse the settle job as YAML and assert the apply step's
-  # timeout-minutes leaves room for the always() cleanup that follows.
-  # Mutation controls prove the check fails when the timeout is removed
-  # or raised past job − margin — not a presence grep.
+  # #895: parse the settle job from the workflow text (stdlib only — no
+  # PyYAML; scad-check's clean setup-python has printcheck only) and assert
+  # the apply step's timeout-minutes leaves room for the always() cleanup
+  # that follows. Mutation controls prove the check fails when the timeout
+  # is removed or raised past job − margin — not a presence grep.
   if ! python3 - "$workflow" <<'PY'
-import copy
+import re
 import sys
-import yaml
 
 CLEANUP_MARGIN = 4
 APPLY_NAME = "Apply the agent's issue intents"
@@ -3782,48 +3782,86 @@ CLEANUP_NAME = "Withdraw a dead run's SHIP-LOCK"
 path = sys.argv[1]
 
 
-def check(doc):
-    settle = doc["jobs"]["settle"]
-    job_timeout = settle.get("timeout-minutes")
-    if not isinstance(job_timeout, int):
+def _settle_job(text: str) -> str:
+    m = re.search(
+        r"^  settle:\n(.*?)(?=^  [A-Za-z]|\Z)",
+        text, re.MULTILINE | re.DOTALL)
+    if not m:
+        raise AssertionError("workflow has no settle job")
+    return m.group(0)
+
+
+def _step_chunk(job: str, name: str) -> str | None:
+    # Steps are `      - name: …`. Match the name, then take until the next
+    # step at the same indent (or end of job).
+    pat = (
+        r"^      - name: " + re.escape(name) + r"[ \t]*\n"
+        r"(?:.*\n)*?"
+        r"(?=^      - name: |\Z)"
+    )
+    m = re.search(pat, job, re.MULTILINE)
+    return m.group(0) if m else None
+
+
+def _job_timeout(job: str) -> int:
+    # Job-level key is 4-space indent; step timeouts sit deeper.
+    found = re.findall(r"^    timeout-minutes: (\d+)[ \t]*$", job, re.MULTILINE)
+    if len(found) != 1:
         raise AssertionError(
-            f"settle job timeout-minutes missing or not an int: {job_timeout!r}")
-    steps = settle.get("steps") or []
-    apply_i = next(
-        (i for i, s in enumerate(steps) if s.get("name") == APPLY_NAME), None)
-    if apply_i is None:
+            f"settle job timeout-minutes missing or ambiguous: {found!r}")
+    return int(found[0])
+
+
+def _step_timeout(step: str) -> int | None:
+    m = re.search(r"^        timeout-minutes: (\d+)[ \t]*$", step, re.MULTILINE)
+    return int(m.group(1)) if m else None
+
+
+def check(text: str) -> None:
+    settle = _settle_job(text)
+    job_timeout = _job_timeout(settle)
+    apply = _step_chunk(settle, APPLY_NAME)
+    if apply is None:
         raise AssertionError(f"settle has no step named {APPLY_NAME!r}")
-    apply = steps[apply_i]
-    apply_timeout = apply.get("timeout-minutes")
-    if not isinstance(apply_timeout, int):
+    apply_timeout = _step_timeout(apply)
+    if apply_timeout is None:
         raise AssertionError(
-            f"apply step has no timeout-minutes (#895): {apply_timeout!r}")
+            f"apply step has no timeout-minutes (#895)")
     ceiling = job_timeout - CLEANUP_MARGIN
     if not (apply_timeout < ceiling):
         raise AssertionError(
             f"apply timeout {apply_timeout} is not < job {job_timeout} "
-            f"− cleanup margin {CLEANUP_MARGIN} (= {ceiling})")
-    cleanup_after = [
-        s for s in steps[apply_i + 1:] if s.get("name") == CLEANUP_NAME]
-    if not cleanup_after:
+            f"- cleanup margin {CLEANUP_MARGIN} (= {ceiling})")
+    # Cleanup must appear AFTER apply in the settle job text.
+    apply_at = settle.find(f"- name: {APPLY_NAME}")
+    cleanup_at = settle.find(f"- name: {CLEANUP_NAME}")
+    if cleanup_at < 0 or cleanup_at <= apply_at:
         raise AssertionError(
             f"{CLEANUP_NAME!r} does not appear after the apply step")
-    cleanup_if = cleanup_after[0].get("if") or ""
-    if "always()" not in cleanup_if:
+    cleanup = _step_chunk(settle, CLEANUP_NAME)
+    assert cleanup is not None  # found above
+    if "always()" not in cleanup:
         raise AssertionError(
-            f"cleanup after apply is not if: always(): {cleanup_if!r}")
+            f"cleanup after apply is not if: always()")
 
 
 with open(path, encoding="utf-8") as f:
-    live = yaml.safe_load(f)
+    live = f.read()
 check(live)
 
+settle = _settle_job(live)
+job_t = _job_timeout(settle)
+apply_live = _step_chunk(settle, APPLY_NAME)
+assert apply_live is not None
+apply_t = _step_timeout(apply_live)
+assert apply_t is not None
+
 # Mutation A: strip the apply timeout — must fail.
-mut_rm = copy.deepcopy(live)
-for s in mut_rm["jobs"]["settle"]["steps"]:
-    if s.get("name") == APPLY_NAME:
-        s.pop("timeout-minutes", None)
-        break
+mut_rm = live.replace(
+    f"\n        timeout-minutes: {apply_t}\n",
+    "\n",
+    1)
+assert mut_rm != live, "removed-timeout mutation did not edit the apply step"
 try:
     check(mut_rm)
 except AssertionError as e:
@@ -3835,12 +3873,11 @@ else:
         "removed-timeout mutation did not fail — the #895 pin is inert")
 
 # Mutation B: raise apply timeout to the job budget — must fail the margin.
-mut_big = copy.deepcopy(live)
-job_t = mut_big["jobs"]["settle"]["timeout-minutes"]
-for s in mut_big["jobs"]["settle"]["steps"]:
-    if s.get("name") == APPLY_NAME:
-        s["timeout-minutes"] = job_t
-        break
+mut_big = live.replace(
+    f"\n        timeout-minutes: {apply_t}\n",
+    f"\n        timeout-minutes: {job_t}\n",
+    1)
+assert mut_big != live, "too-large-timeout mutation did not edit the apply step"
 try:
     check(mut_big)
 except AssertionError as e:
@@ -3852,14 +3889,16 @@ else:
         "too-large-timeout mutation did not fail — the #895 pin is inert")
 
 # Mutation C: cleanup loses always() — must fail.
-mut_if = copy.deepcopy(live)
-apply_i = next(
-    i for i, s in enumerate(mut_if["jobs"]["settle"]["steps"])
-    if s.get("name") == APPLY_NAME)
-for s in mut_if["jobs"]["settle"]["steps"][apply_i + 1:]:
-    if s.get("name") == CLEANUP_NAME:
-        s["if"] = "needs.run.outputs.enabled == 'true'"
-        break
+# The cleanup step's if: is a folded block starting with `always()`.
+# Replace only the first always() that appears after the apply step.
+apply_at = live.find(f"- name: {APPLY_NAME}")
+cleanup_at = live.find(f"- name: {CLEANUP_NAME}", apply_at)
+assert cleanup_at > apply_at
+head, tail = live[:cleanup_at], live[cleanup_at:]
+if "always()" not in tail:
+    raise AssertionError("fixture stale: cleanup has no always()")
+mut_if = head + tail.replace("always()", "success()", 1)
+assert mut_if != live
 try:
     check(mut_if)
 except AssertionError as e:
