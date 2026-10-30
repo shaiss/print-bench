@@ -83,22 +83,61 @@ jobs:
           fi
 
           # On a pull_request, checkout gives the MERGE ref, so the working tree
-          # carries the PR's OWN .gitleaks.toml — a PR could add a secret AND
-          # allowlist it in the same change. Load the config from the BASE
-          # revision instead (built-in rules if the base has none). On push the
-          # working-tree config already IS the merged base, so let gitleaks
-          # auto-load it.
-          config_arg=()
+          # carries the PR's OWN suppression files — a PR could add a secret
+          # AND suppress its finding in the same change. Every suppression a PR
+          # scan honours therefore comes from the BASE revision:
+          #   - .gitleaks.toml: loaded from the base (built-in rules if the
+          #     base has none).
+          #   - .gitleaksignore: gitleaks loads <source>/.gitleaksignore on its
+          #     own, on top of any -i path, so the PR's copy is removed from
+          #     this throwaway checkout and the base's (if any) is passed by -i.
+          #   - an inline `gitleaks:allow` comment is the same lever in a source
+          #     line, so --ignore-gitleaks-allow turns it off. A real exception
+          #     goes into the base's config or ignore file, through its own PR.
+          #   - .gitattributes: gitleaks reads `git log -p`, and a PR-supplied
+          #     `-diff` or `binary` attribute turns a file's diff into "Binary
+          #     files differ", hiding its content. GIT_ATTR_SOURCE (git >= 2.40)
+          #     makes git read attributes from the base tree instead.
+          #   - with no base .gitleaks.toml, gitleaks would fall back to the
+          #     checkout's (the PR's), so that file is removed too.
+          # Known residuals, not closed here: the scan reads each commit's diff,
+          # so it does not see a token added in a path the base config
+          # allowlists and then renamed out, a token in a file git treats as
+          # binary by content (a NUL byte) that a later commit makes text, or
+          # content that only a merge commit inside the PR introduces. And a PR
+          # can edit this workflow itself, since pull_request runs the PR's copy.
+          # On push the working tree already IS the merged base, so gitleaks
+          # auto-loads its config and ignore file and honours inline allows.
+          scan_args=()
           if [ "$EVENT" = "pull_request" ]; then
             if git show "${BASE_SHA}:.gitleaks.toml" > "${RUNNER_TEMP}/base-gitleaks.toml" 2>/dev/null; then
-              config_arg=(--config "${RUNNER_TEMP}/base-gitleaks.toml")
+              scan_args+=(--config "${RUNNER_TEMP}/base-gitleaks.toml")
               echo "using .gitleaks.toml from base ${BASE_SHA}"
             else
               rm -f "${RUNNER_TEMP}/base-gitleaks.toml"
+              rm -rf -- ./.gitleaks.toml
               echo "base ${BASE_SHA} has no .gitleaks.toml — using gitleaks built-in rules"
             fi
+            git_version="$(git version | sed -n 's/^git version \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p')"
+            read -r git_major git_minor <<<"${git_version:-0 0}"
+            if [ "$git_major" -lt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -lt 40 ]; }; then
+              echo "::error::git ${git_major}.${git_minor} ignores GIT_ATTR_SOURCE (needs >= 2.40): a PR's .gitattributes could hide its diff"
+              exit 1
+            fi
+            export GIT_ATTR_SOURCE="${BASE_SHA}"
+            echo "reading git attributes from base ${BASE_SHA}"
+            rm -rf -- ./.gitleaksignore
+            if git show "${BASE_SHA}:.gitleaksignore" > "${RUNNER_TEMP}/base-gitleaksignore" 2>/dev/null; then
+              scan_args+=(--gitleaks-ignore-path "${RUNNER_TEMP}/base-gitleaksignore")
+              echo "using .gitleaksignore from base ${BASE_SHA}"
+            else
+              rm -f "${RUNNER_TEMP}/base-gitleaksignore"
+              # -i defaults to ".", the checkout root, which no longer has one.
+              echo "base ${BASE_SHA} has no .gitleaksignore — no fingerprints ignored"
+            fi
+            scan_args+=(--ignore-gitleaks-allow)
           fi
 
           echo "scanning git log range: ${log_opts}"
           # --exit-code 1 (the default) fails the job on a finding.
-          gitleaks git --no-banner --redact "${config_arg[@]}" --log-opts="${log_opts}" .
+          gitleaks git --no-banner --redact "${scan_args[@]}" --log-opts="${log_opts}" .
