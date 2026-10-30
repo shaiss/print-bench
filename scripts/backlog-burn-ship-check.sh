@@ -396,10 +396,13 @@ run_check() {
       comments=""
     else
       chmod 700 "$gh_cfg" || true
+      # GH_BIN override is for --selftest only (recording fake); production
+      # pins /usr/bin/gh so a PATH plant cannot redirect the job token.
+      local gh_bin="${GH_BIN:-/usr/bin/gh}"
       if ! comments="$(
         GH_HOST=github.com GH_CONFIG_DIR="$gh_cfg" \
         GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN}}" \
-        /usr/bin/gh api --hostname github.com --paginate \
+        "$gh_bin" api --hostname github.com --paginate \
           "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
           --jq '.[] | {body,created_at,login:.user.login,type:.user.type,id}'
       )"; then
@@ -592,6 +595,62 @@ EOF
     echo "FAIL  selftest: wrong-issue branch passed"; fails=$((fails + 1))
   else
     echo "ok    selftest: wrong-issue claude/issue-* branch is refused"
+  fi
+
+  # Behavioral (not a source grep): a planted lowercase proxy must be
+  # cleared before gh runs. actionlint forbids listing http_proxy beside
+  # HTTP_PROXY in workflow env (case-insensitive keys), so the script
+  # unset is the neutralization that has to hold at the call site.
+  cat >"$tmp/fake-gh" <<'EOF'
+#!/bin/sh
+probe="${PROXY_PROBE:?PROXY_PROBE unset}"
+{
+  # POSIX parameter expansion: distinguish unset from empty.
+  if [ -n "${http_proxy+x}" ]; then printf 'http_proxy=SET\n'; else printf 'http_proxy=UNSET\n'; fi
+  if [ -n "${https_proxy+x}" ]; then printf 'https_proxy=SET\n'; else printf 'https_proxy=UNSET\n'; fi
+  if [ -n "${all_proxy+x}" ]; then printf 'all_proxy=SET\n'; else printf 'all_proxy=UNSET\n'; fi
+  if [ -n "${HTTP_PROXY+x}" ]; then printf 'HTTP_PROXY=SET\n'; else printf 'HTTP_PROXY=UNSET\n'; fi
+  if [ -n "${HTTPS_PROXY+x}" ]; then printf 'HTTPS_PROXY=SET\n'; else printf 'HTTPS_PROXY=UNSET\n'; fi
+  if [ -n "${ALL_PROXY+x}" ]; then printf 'ALL_PROXY=SET\n'; else printf 'ALL_PROXY=UNSET\n'; fi
+} > "$probe"
+# Empty comment stream — ship-branch HEAD still passes the hard check.
+exit 0
+EOF
+  chmod +x "$tmp/fake-gh"
+  : >"$tmp/proxy-probe.env"
+  if ! env \
+      GH_BIN="$tmp/fake-gh" \
+      PROXY_PROBE="$tmp/proxy-probe.env" \
+      GH_TOKEN=test-token \
+      GITHUB_REPOSITORY=acme/print-bench \
+      http_proxy='http://evil.example:1' \
+      https_proxy='http://evil.example:1' \
+      all_proxy='socks5://evil.example:1' \
+      HTTP_PROXY='http://evil.example:1' \
+      HTTPS_PROXY='http://evil.example:1' \
+      ALL_PROXY='socks5://evil.example:1' \
+      "$0" --issue 962 --head-ref claude/issue-962-proxy-clear \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/proxy.out" 2>&1; then
+    echo "FAIL  selftest: planted-proxy live-fetch path did not pass"; fails=$((fails + 1))
+    cat "$tmp/proxy.out"
+  elif [[ ! -s "$tmp/proxy-probe.env" ]]; then
+    echo "FAIL  selftest: fake gh was never invoked (proxy probe empty)"; fails=$((fails + 1))
+    cat "$tmp/proxy.out"
+  else
+    local proxy_leaks=0
+    local k
+    for k in http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY; do
+      if ! grep -qx "${k}=UNSET" "$tmp/proxy-probe.env"; then
+        echo "FAIL  selftest: planted ${k} reached gh (probe: $(tr '\n' ' ' <"$tmp/proxy-probe.env"))"
+        proxy_leaks=$((proxy_leaks + 1))
+      fi
+    done
+    if [[ "$proxy_leaks" -ne 0 ]]; then
+      fails=$((fails + proxy_leaks))
+    else
+      echo "ok    selftest: planted lowercase/uppercase proxies are cleared before gh"
+    fi
   fi
 
   if [[ "$fails" -ne 0 ]]; then

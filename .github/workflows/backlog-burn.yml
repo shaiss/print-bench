@@ -777,14 +777,15 @@ jobs:
           # the job token (Security Reviewer on #962): GH_HOST, enterprise
           # token, proxies, and SSL bundle overrides. The script also makes a
           # fresh GH_CONFIG_DIR before any gh call.
+          # Uppercase proxy keys only in env: — actionlint treats env keys
+          # case-insensitively, so listing http_proxy beside HTTP_PROXY is a
+          # duplicate. Lowercase plants are cleared by the unset below (and
+          # again in the restored ship-check script immediately before gh).
           GH_HOST: github.com
           GH_ENTERPRISE_TOKEN: ""
           HTTP_PROXY: ""
           HTTPS_PROXY: ""
           ALL_PROXY: ""
-          http_proxy: ""
-          https_proxy: ""
-          all_proxy: ""
           SSL_CERT_FILE: ""
           SSL_CERT_DIR: ""
           CURL_CA_BUNDLE: ""
