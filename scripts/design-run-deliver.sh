@@ -1597,7 +1597,9 @@ burn_preflight_pip_run_flat() {
     /^[[:space:]]*#/ { next }
     {
       line = $0
-      sub(/[[:space:]]+#.*$/, "", line)
+      # Strip shell comments after whitespace or `;` (`;# --flag` is a
+      # comment in bash; requiring only [[:space:]]+# would keep it).
+      sub(/([[:space:]]+|;[[:space:]]*)#.*$/, "", line)
       if (pending) {
         sub(/^[[:space:]]+/, "", line)
         buf = buf " " line
@@ -1616,13 +1618,15 @@ burn_preflight_pip_run_flat() {
   ' "$workflow"
 }
 
-# True when the flattened preflight_pip run has `pip install … <flag>`.
+# True when the flattened preflight_pip hashed-requirements install carries
+# `<flag>`. Only the `python3 -m pip install … -r …` lockfile line counts —
+# not an `echo` decoy, and not the separate `-e` local-tool installs.
 burn_preflight_pip_has_flag() {
   local workflow="$1"
   local flag="$2"
-  # Two greps: keep pip-install lines, then fixed-string match the flag so
-  # spaces in `--only-binary :all:` need no regex escaping.
-  burn_preflight_pip_run_flat "$workflow" | grep 'pip install' | grep -qF -- "$flag"
+  burn_preflight_pip_run_flat "$workflow" \
+    | grep -E '^[[:space:]]*python3 -m pip install .* -r ' \
+    | grep -qF -- "$flag"
 }
 
 selftest() {
