@@ -3767,6 +3767,115 @@ EOF
     echo "selftest: settle does not download the intents with the pinned action" >&2
     exit 1
   }
+  # #895: parse the settle job as YAML and assert the apply step's
+  # timeout-minutes leaves room for the always() cleanup that follows.
+  # Mutation controls prove the check fails when the timeout is removed
+  # or raised past job − margin — not a presence grep.
+  if ! python3 - "$workflow" <<'PY'
+import copy
+import sys
+import yaml
+
+CLEANUP_MARGIN = 4
+APPLY_NAME = "Apply the agent's issue intents"
+CLEANUP_NAME = "Withdraw a dead run's SHIP-LOCK"
+path = sys.argv[1]
+
+
+def check(doc):
+    settle = doc["jobs"]["settle"]
+    job_timeout = settle.get("timeout-minutes")
+    if not isinstance(job_timeout, int):
+        raise AssertionError(
+            f"settle job timeout-minutes missing or not an int: {job_timeout!r}")
+    steps = settle.get("steps") or []
+    apply_i = next(
+        (i for i, s in enumerate(steps) if s.get("name") == APPLY_NAME), None)
+    if apply_i is None:
+        raise AssertionError(f"settle has no step named {APPLY_NAME!r}")
+    apply = steps[apply_i]
+    apply_timeout = apply.get("timeout-minutes")
+    if not isinstance(apply_timeout, int):
+        raise AssertionError(
+            f"apply step has no timeout-minutes (#895): {apply_timeout!r}")
+    ceiling = job_timeout - CLEANUP_MARGIN
+    if not (apply_timeout < ceiling):
+        raise AssertionError(
+            f"apply timeout {apply_timeout} is not < job {job_timeout} "
+            f"− cleanup margin {CLEANUP_MARGIN} (= {ceiling})")
+    cleanup_after = [
+        s for s in steps[apply_i + 1:] if s.get("name") == CLEANUP_NAME]
+    if not cleanup_after:
+        raise AssertionError(
+            f"{CLEANUP_NAME!r} does not appear after the apply step")
+    cleanup_if = cleanup_after[0].get("if") or ""
+    if "always()" not in cleanup_if:
+        raise AssertionError(
+            f"cleanup after apply is not if: always(): {cleanup_if!r}")
+
+
+with open(path, encoding="utf-8") as f:
+    live = yaml.safe_load(f)
+check(live)
+
+# Mutation A: strip the apply timeout — must fail.
+mut_rm = copy.deepcopy(live)
+for s in mut_rm["jobs"]["settle"]["steps"]:
+    if s.get("name") == APPLY_NAME:
+        s.pop("timeout-minutes", None)
+        break
+try:
+    check(mut_rm)
+except AssertionError as e:
+    if "no timeout-minutes" not in str(e):
+        raise AssertionError(
+            f"removed-timeout mutation failed for the wrong reason: {e}") from e
+else:
+    raise AssertionError(
+        "removed-timeout mutation did not fail — the #895 pin is inert")
+
+# Mutation B: raise apply timeout to the job budget — must fail the margin.
+mut_big = copy.deepcopy(live)
+job_t = mut_big["jobs"]["settle"]["timeout-minutes"]
+for s in mut_big["jobs"]["settle"]["steps"]:
+    if s.get("name") == APPLY_NAME:
+        s["timeout-minutes"] = job_t
+        break
+try:
+    check(mut_big)
+except AssertionError as e:
+    if "is not < job" not in str(e):
+        raise AssertionError(
+            f"too-large-timeout mutation failed for the wrong reason: {e}") from e
+else:
+    raise AssertionError(
+        "too-large-timeout mutation did not fail — the #895 pin is inert")
+
+# Mutation C: cleanup loses always() — must fail.
+mut_if = copy.deepcopy(live)
+apply_i = next(
+    i for i, s in enumerate(mut_if["jobs"]["settle"]["steps"])
+    if s.get("name") == APPLY_NAME)
+for s in mut_if["jobs"]["settle"]["steps"][apply_i + 1:]:
+    if s.get("name") == CLEANUP_NAME:
+        s["if"] = "needs.run.outputs.enabled == 'true'"
+        break
+try:
+    check(mut_if)
+except AssertionError as e:
+    if "not if: always()" not in str(e):
+        raise AssertionError(
+            f"cleanup-if mutation failed for the wrong reason: {e}") from e
+else:
+    raise AssertionError(
+        "cleanup-if mutation did not fail — the #895 pin is inert")
+
+print("ok   [#895 apply-step timeout pin + mutations]")
+PY
+  then
+    echo "selftest: #895 apply-step timeout pin failed" >&2
+    exit 1
+  fi
   # The settle job is the one issue-writing job left in this workflow —
   # checked against its permissions stanza, not its prose (the run-job
   # rule above).
