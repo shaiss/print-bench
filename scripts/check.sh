@@ -645,6 +645,14 @@ if ! ./scripts/coach-lock-check.sh --selftest; then
   fail=1
 fi
 
+# backlog-burn post-agent outcome gate (issue #962): subtype=success with
+# HEAD still on main and no decline must fail clearly; diag redacts tokens
+# and caps the final message; show_full_output stays false on the ship steps.
+echo "-- backlog-burn-ship-check selftest: scripts/backlog-burn-ship-check.sh --selftest"
+if ! ./scripts/backlog-burn-ship-check.sh --selftest; then
+  fail=1
+fi
+
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
 # wrapper is the greenlight loop's ONE shell surface, and its --selftest is

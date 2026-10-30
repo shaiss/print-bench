@@ -392,6 +392,13 @@ surfaces studies awaiting a read live in
     the HTML does not count; those jobs share github-actions[bot];
     a lock from an earlier coach run does not either; claude-code-action
     exits 0 on a denial-only turn; issue #806)
+  - `backlog-burn-ship-check.sh` — post-agent outcome gate for
+    `backlog-burn.yml` (issue #962): fails clearly unless HEAD is on
+    `claude/issue-<N>-*` or the thread carries a trusted
+    `🚢 DECLINED` / `🚦 DECISION NEEDED` / `🚢 DEFERRED` stop, and prints
+    bounded redacted ship diag (result subtype, `permission_denials`
+    tool names only, final message capped ~1000 chars) without enabling
+    `show_full_output`; `--selftest` run by check.sh
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):

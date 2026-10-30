@@ -4501,6 +4501,24 @@ EOF
     echo "selftest: a burn agent step still uses bypassPermissions" >&2
     exit 1
   fi
+  # #962: public logs must not dump tool inputs; diag is the post-ship check.
+  burn_no_full_n="$(grep -c 'show_full_output: false' "$burn" || true)"
+  [ "$burn_no_full_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn show_full_output: false pins, found ${burn_no_full_n}" >&2
+    exit 1
+  }
+  if grep -qE 'show_full_output:\s*true' "$burn"; then
+    echo "selftest: a burn ship step enables show_full_output" >&2
+    exit 1
+  fi
+  grep -q 'name: Require ship branch or explicit decline' "$burn" || {
+    echo "selftest: burn workflow lacks the #962 post-agent ship-outcome hard check" >&2
+    exit 1
+  }
+  grep -q 'scripts/backlog-burn-ship-check.sh' "$burn" || {
+    echo "selftest: burn workflow does not invoke backlog-burn-ship-check.sh" >&2
+    exit 1
+  }
   burn_scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$burn" || true)"
   [ "$burn_scrub_n" -eq 5 ] || {
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2
