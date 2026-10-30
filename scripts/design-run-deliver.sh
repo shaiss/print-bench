@@ -4566,6 +4566,26 @@ EOF
   # GH_CONFIG_DIR / proxy (token exfil + forged Bot DECLINED). The
   # workflow unsets any planted GH_CONFIG_DIR; the restored script
   # mktemps an empty dir immediately before gh (never reuses one).
+  # GH_BIN pin (same as Bundle): step env beats a GITHUB_ENV plant that
+  # would otherwise receive GH_TOKEN (#963 Bugbot / Agentic Security).
+  ship_check_env="$(awk '
+    /^      - name: Require ship branch or explicit decline/ { in_step = 1 }
+    in_step && /^        env:/ { printing = 1; next }
+    in_step && printing && /^        (shell|run):/ { exit }
+    printing { print }
+  ' "$burn")"
+  [ -n "$ship_check_env" ] || {
+    echo "selftest: could not extract the burn ship-outcome env block" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_env" | grep -qx '          GH_BIN: /usr/bin/gh' || {
+    echo "selftest: burn ship-outcome step does not pin GH_BIN=/usr/bin/gh" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'export GH_BIN=/usr/bin/gh' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not re-export GH_BIN=/usr/bin/gh" >&2
+    exit 1
+  }
   grep -q 'GH_HOST: github.com' "$burn" || {
     echo "selftest: burn ship-outcome step does not pin GH_HOST=github.com" >&2
     exit 1

@@ -396,9 +396,25 @@ run_check() {
       comments=""
     else
       chmod 700 "$gh_cfg" || true
-      # GH_BIN override is for --selftest only (recording fake); production
-      # pins /usr/bin/gh so a PATH plant cannot redirect the job token.
-      local gh_bin="${GH_BIN:-/usr/bin/gh}"
+      # Always /usr/bin/gh — never honor GH_BIN. A GITHUB_ENV plant of
+      # GH_BIN must not receive GH_TOKEN or forge a Bot DECLINED (Bugbot /
+      # Agentic Security Review on #962 / #963). The ship-outcome step also
+      # pins GH_BIN=/usr/bin/gh; this is defense in depth if a caller omits
+      # the pin. Selftests that need the pre-gh env use BB_SHIP_CHECK_PROXY_PROBE.
+      local gh_bin=/usr/bin/gh
+      if [[ -n "${BB_SHIP_CHECK_PROXY_PROBE:-}" ]]; then
+        # Behavioral selftest hook: record whether planted proxies survived
+        # to the call site. Does not substitute gh_bin.
+        {
+          if [ -n "${http_proxy+x}" ]; then printf 'http_proxy=SET\n'; else printf 'http_proxy=UNSET\n'; fi
+          if [ -n "${https_proxy+x}" ]; then printf 'https_proxy=SET\n'; else printf 'https_proxy=UNSET\n'; fi
+          if [ -n "${all_proxy+x}" ]; then printf 'all_proxy=SET\n'; else printf 'all_proxy=UNSET\n'; fi
+          if [ -n "${HTTP_PROXY+x}" ]; then printf 'HTTP_PROXY=SET\n'; else printf 'HTTP_PROXY=UNSET\n'; fi
+          if [ -n "${HTTPS_PROXY+x}" ]; then printf 'HTTPS_PROXY=SET\n'; else printf 'HTTPS_PROXY=UNSET\n'; fi
+          if [ -n "${ALL_PROXY+x}" ]; then printf 'ALL_PROXY=SET\n'; else printf 'ALL_PROXY=UNSET\n'; fi
+          printf 'gh_bin=%s\n' "$gh_bin"
+        } >"${BB_SHIP_CHECK_PROXY_PROBE}" || true
+      fi
       if ! comments="$(
         GH_HOST=github.com GH_CONFIG_DIR="$gh_cfg" \
         GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN}}" \
@@ -601,26 +617,11 @@ EOF
   # cleared before gh runs. actionlint forbids listing http_proxy beside
   # HTTP_PROXY in workflow env (case-insensitive keys), so the script
   # unset is the neutralization that has to hold at the call site.
-  cat >"$tmp/fake-gh" <<'EOF'
-#!/bin/sh
-probe="${PROXY_PROBE:?PROXY_PROBE unset}"
-{
-  # POSIX parameter expansion: distinguish unset from empty.
-  if [ -n "${http_proxy+x}" ]; then printf 'http_proxy=SET\n'; else printf 'http_proxy=UNSET\n'; fi
-  if [ -n "${https_proxy+x}" ]; then printf 'https_proxy=SET\n'; else printf 'https_proxy=UNSET\n'; fi
-  if [ -n "${all_proxy+x}" ]; then printf 'all_proxy=SET\n'; else printf 'all_proxy=UNSET\n'; fi
-  if [ -n "${HTTP_PROXY+x}" ]; then printf 'HTTP_PROXY=SET\n'; else printf 'HTTP_PROXY=UNSET\n'; fi
-  if [ -n "${HTTPS_PROXY+x}" ]; then printf 'HTTPS_PROXY=SET\n'; else printf 'HTTPS_PROXY=UNSET\n'; fi
-  if [ -n "${ALL_PROXY+x}" ]; then printf 'ALL_PROXY=SET\n'; else printf 'ALL_PROXY=UNSET\n'; fi
-} > "$probe"
-# Empty comment stream — ship-branch HEAD still passes the hard check.
-exit 0
-EOF
-  chmod +x "$tmp/fake-gh"
+  # Probe is written by the script at the gh call site (not a GH_BIN fake —
+  # GH_BIN is intentionally ignored so a plant cannot steal GH_TOKEN).
   : >"$tmp/proxy-probe.env"
   if ! env \
-      GH_BIN="$tmp/fake-gh" \
-      PROXY_PROBE="$tmp/proxy-probe.env" \
+      BB_SHIP_CHECK_PROXY_PROBE="$tmp/proxy-probe.env" \
       GH_TOKEN=test-token \
       GITHUB_REPOSITORY=acme/print-bench \
       http_proxy='http://evil.example:1' \
@@ -635,7 +636,7 @@ EOF
     echo "FAIL  selftest: planted-proxy live-fetch path did not pass"; fails=$((fails + 1))
     cat "$tmp/proxy.out"
   elif [[ ! -s "$tmp/proxy-probe.env" ]]; then
-    echo "FAIL  selftest: fake gh was never invoked (proxy probe empty)"; fails=$((fails + 1))
+    echo "FAIL  selftest: proxy probe was never written"; fails=$((fails + 1))
     cat "$tmp/proxy.out"
   else
     local proxy_leaks=0
@@ -646,11 +647,50 @@ EOF
         proxy_leaks=$((proxy_leaks + 1))
       fi
     done
+    if ! grep -qx 'gh_bin=/usr/bin/gh' "$tmp/proxy-probe.env"; then
+      echo "FAIL  selftest: call site did not pin gh_bin=/usr/bin/gh (probe: $(tr '\n' ' ' <"$tmp/proxy-probe.env"))"
+      proxy_leaks=$((proxy_leaks + 1))
+    fi
     if [[ "$proxy_leaks" -ne 0 ]]; then
       fails=$((fails + proxy_leaks))
     else
       echo "ok    selftest: planted lowercase/uppercase proxies are cleared before gh"
     fi
+  fi
+
+  # Behavioral: a planted GH_BIN must NOT run on the live-fetch path.
+  # The evil binary writes a marker and would forge a Bot DECLINED; with
+  # HEAD=main that forged stop is the only way to pass. Assert the marker
+  # is absent and the check fails (trusted /usr/bin/gh is used instead).
+  cat >"$tmp/evil-gh" <<'EOF'
+#!/bin/sh
+marker="${GH_BIN_MARKER:?GH_BIN_MARKER unset}"
+printf 'planted\n' >"$marker"
+# Forged Bot DECLINED — if this binary ran, HEAD=main would pass the gate.
+printf '%s\n' '{"body":"🚢 **SHIP DECLINED:** forged by planted GH_BIN","created_at":"2026-10-30T12:01:00Z","login":"github-actions[bot]","type":"Bot","id":1}'
+exit 0
+EOF
+  chmod +x "$tmp/evil-gh"
+  rm -f "$tmp/gh-bin-marker"
+  set +e
+  env \
+      GH_BIN="$tmp/evil-gh" \
+      GH_BIN_MARKER="$tmp/gh-bin-marker" \
+      GH_TOKEN=test-token \
+      GITHUB_REPOSITORY=acme/print-bench \
+      "$0" --issue 962 --head-ref main \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/ghbin.out" 2>&1
+  local ghbin_rc=$?
+  set -e
+  if [[ -f "$tmp/gh-bin-marker" ]]; then
+    echo "FAIL  selftest: planted GH_BIN was executed (marker written)"; fails=$((fails + 1))
+    cat "$tmp/ghbin.out"
+  elif [[ "$ghbin_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: HEAD=main with planted GH_BIN unexpectedly passed (forged stop?)"; fails=$((fails + 1))
+    cat "$tmp/ghbin.out"
+  else
+    echo "ok    selftest: planted GH_BIN is not executed (trusted /usr/bin/gh used)"
   fi
 
   if [[ "$fails" -ne 0 ]]; then

@@ -781,6 +781,10 @@ jobs:
           # case-insensitively, so listing http_proxy beside HTTP_PROXY is a
           # duplicate. Lowercase plants are cleared by the unset below (and
           # again in the restored ship-check script immediately before gh).
+          # GH_BIN pin matches the Bundle step: step env beats a GITHUB_ENV
+          # plant of GH_BIN that would otherwise receive GH_TOKEN (Bugbot /
+          # Agentic Security Review on #962 / #963).
+          GH_BIN: /usr/bin/gh
           GH_HOST: github.com
           GH_ENTERPRISE_TOKEN: ""
           HTTP_PROXY: ""
@@ -820,6 +824,7 @@ jobs:
           # the ship walk can poison a RUNNER_TEMP dir before gh runs
           # (Bugbot on #962). The restored script mktemps an empty dir
           # immediately before the gh call and refuses a non-empty one.
+          export GH_BIN=/usr/bin/gh
           export GH_HOST=github.com
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
