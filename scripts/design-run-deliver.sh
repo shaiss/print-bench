@@ -4562,6 +4562,20 @@ EOF
     echo "selftest: burn ship-outcome step does not unset planted GIT_DIR overrides" >&2
     exit 1
   }
+  # #962 security: gh comment fetch must not follow a planted GH_HOST /
+  # GH_CONFIG_DIR / proxy (token exfil + forged Bot DECLINED).
+  grep -q 'GH_HOST: github.com' "$burn" || {
+    echo "selftest: burn ship-outcome step does not pin GH_HOST=github.com" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'export GH_CONFIG_DIR=' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not export a fresh GH_CONFIG_DIR" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'export GH_HOST=github.com' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not re-export GH_HOST=github.com" >&2
+    exit 1
+  }
   burn_scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$burn" || true)"
   [ "$burn_scrub_n" -eq 5 ] || {
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2

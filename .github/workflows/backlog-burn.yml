@@ -773,6 +773,23 @@ jobs:
           SHIP_CHECK_SHA256: ${{ steps.start_ref.outputs.ship_check_sha256 }}
           SHIP_CHECK_WORKTREE: ${{ github.workspace }}
           GH_TOKEN: ${{ github.token }}
+          # Pin gh destination / config so a GITHUB_ENV plant cannot redirect
+          # the job token (Security Reviewer on #962): GH_HOST, enterprise
+          # token, proxies, and SSL bundle overrides. The script also makes a
+          # fresh GH_CONFIG_DIR before any gh call.
+          GH_HOST: github.com
+          GH_ENTERPRISE_TOKEN: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          http_proxy: ""
+          https_proxy: ""
+          all_proxy: ""
+          SSL_CERT_FILE: ""
+          SSL_CERT_DIR: ""
+          CURL_CA_BUNDLE: ""
+          REQUESTS_CA_BUNDLE: ""
+          NODE_EXTRA_CA_CERTS: ""
           GITHUB_REPOSITORY: ${{ github.repository }}
           RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
@@ -793,7 +810,20 @@ jobs:
         run: |
           set -euo pipefail
           unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
-            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+            GH_ENTERPRISE_TOKEN HTTP_PROXY HTTPS_PROXY ALL_PROXY \
+            http_proxy https_proxy all_proxy \
+            SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
+            NODE_EXTRA_CA_CERTS || true
+          # Fresh gh config dir (poisoned ~/.config/gh cannot redirect).
+          # Export before exec so the restored script inherits it.
+          _gh_cfg="$(mktemp -d "${RUNNER_TEMP}/gh-config.XXXXXX")"
+          if [ -L "$_gh_cfg" ] || [ ! -d "$_gh_cfg" ]; then
+            echo "::error::refusing to create GH_CONFIG_DIR through a symlink" >&2
+            exit 1
+          fi
+          export GH_CONFIG_DIR="$_gh_cfg"
+          export GH_HOST=github.com
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1
