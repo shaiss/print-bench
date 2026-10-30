@@ -71,6 +71,10 @@ MSG_CAP=1000
 REDACT_PY='
 import re
 def redact_patterns(text, cap=None):
+    # Normalize CR before line-anchored escapes: a bare \r before ::error::
+    # would otherwise rewind the Actions log line and inject a workflow
+    # command (Bugbot on #962).
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     patterns = [
         (re.compile(r"(?i)\b(gh[pousr]_|github_pat_|xox[baprs]-|sk-|AKIA)[A-Za-z0-9_\-]{8,}"), r"\1[REDACTED]"),
         (re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9\-._~+/]+=*"), r"\1[REDACTED]"),
@@ -430,6 +434,14 @@ selftest() {
   printf '%s' "$out" | grep -qE '^::' \
     && { echo "FAIL  selftest: bare :: line survived redact"; fails=$((fails + 1)); } \
     || echo "ok    selftest: :: workflow-command prefixes are escaped"
+
+  # CR before :: must not leave a bare workflow command after log rewind.
+  out="$(BB_IN="$(printf 'pre\r::error::planted')" diag_redact 1000)"
+  printf '%s' "$out" | grep -q $'\r::' \
+    && { echo "FAIL  selftest: CR-prefixed :: survived (got: $(printf '%q' "$out"))"; fails=$((fails + 1)); }
+  printf '%s' "$out" | grep -qE '(^|[^\\])::error::' \
+    && { echo "FAIL  selftest: unescaped ::error after CR normalize (got: $(printf '%q' "$out"))"; fails=$((fails + 1)); } \
+    || echo "ok    selftest: CR-prefixed :: workflow commands are escaped"
 
   out="$(BB_IN="$(printf 'x%.0s' {1..1500})" diag_redact 1000)"
   local len=${#out}
