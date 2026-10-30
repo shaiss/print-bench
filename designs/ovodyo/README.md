@@ -267,7 +267,9 @@ coupon flange** (the thread sits ~1.5 mm above the bed), not the fit — don't
 loosen `seam_tol` for it. If the **thread lead-in itself binds** through the
 first half-turn, that *is* the fit — raise `seam_tol` by 0.05. If a seam
 threads on but won't seat flat, it's **cross-threaded** — back it all the way
-off and restart; don't loosen `seam_tol` for that either.
+off and restart; don't loosen `seam_tol` for that either. Print one ball's two
+halves first, screw that pair together and check the fit, before batching the
+second ball's halves with the same `seam_tol`.
 
 **Stalks (v0 display):** trial-fit the rod dry in the `base-end` boss before
 final assembly, then seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
