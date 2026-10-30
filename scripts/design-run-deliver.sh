@@ -4558,6 +4558,10 @@ EOF
     echo "selftest: burn ship-outcome step does not exec the restored RUNNER_TEMP copy" >&2
     exit 1
   }
+  printf '%s\n' "$ship_check_run" | grep 'unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not unset planted GIT_DIR overrides" >&2
+    exit 1
+  }
   burn_scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$burn" || true)"
   [ "$burn_scrub_n" -eq 5 ] || {
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2

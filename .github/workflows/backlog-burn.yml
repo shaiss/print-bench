@@ -784,9 +784,16 @@ jobs:
           NODE_OPTIONS: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
+          # Blank then unset: an empty GIT_DIR is still set, and git treats
+          # that as the git dir (same discipline as the bundle step).
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_CONFIG_PARAMETERS: ""
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1

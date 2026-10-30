@@ -24,7 +24,9 @@ set -euo pipefail
 
 unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
       PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
-      DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
+      DYLD_INSERT_LIBRARIES BASH_ENV ENV \
+      GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
 export PYTHONNOUSERSITE=1
 
 # Workflow restores this script into $RUNNER_TEMP (issue #962 security: the
@@ -57,7 +59,36 @@ fi
 DECLINE_MARKER_1='🚢 DECLINED'
 DECLINE_MARKER_2='🚦 DECISION NEEDED'
 DEFER_MARKER='🚢 DEFERRED'
+# Same authenticity marker + allowlist as design-run-deliver / settle
+# (Cipher #864): HTML marker + named logins only — never a bare SHIP-LOCK
+# first line, never an unlisted Bot.
+SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
+SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss'
 MSG_CAP=1000
+
+# Shared redaction patterns (diag_redact + print_ship_diag must stay in sync).
+# Cap is applied by the caller after substitution when needed.
+REDACT_PY='
+import re
+def redact_patterns(text, cap=None):
+    patterns = [
+        (re.compile(r"(?i)\b(gh[pousr]_|github_pat_|xox[baprs]-|sk-|AKIA)[A-Za-z0-9_\-]{8,}"), r"\1[REDACTED]"),
+        (re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9\-._~+/]+=*"), r"\1[REDACTED]"),
+        (re.compile(r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY|AUTH)=)(\S+)"), r"\1[REDACTED]"),
+        (re.compile(r"(?i)([\"'\'']?[A-Za-z0-9_\-]*(?:token|secret|password|api[_-]?key|auth)[A-Za-z0-9_\-]*[\"'\'']?\s*[:=]\s*[\"'\'']?)[^\s\"'\'',;]+"), r"\1[REDACTED]"),
+        (re.compile(r"(?i)\b(Basic\s+)[A-Za-z0-9+/=]{8,}"), r"\1[REDACTED]"),
+        (re.compile(r"(?i)(authorization:\s*\S+\s+)\S+"), r"\1[REDACTED]"),
+        (re.compile(r"(?i)\b(bundle contents?|git bundle)[:\s].{0,200}"), r"\1 [REDACTED]"),
+        # Escape workflow-command prefixes so model output cannot inject ::error:: etc.
+        (re.compile(r"(?m)^::"), r"\\::"),
+    ]
+    for rx, repl in patterns:
+        text = rx.sub(repl, text)
+    text = text.replace("\x00", "")
+    if cap is not None and len(text) > cap:
+        text = text[:cap] + "…[truncated]"
+    return text
+'
 
 usage() {
   echo "usage: $0 --issue <N> [--run-started-at ISO8601Z] [--execution-log path] [--head-ref name] [--comments-file ndjson]" >&2
@@ -68,26 +99,15 @@ usage() {
 
 # Env BB_IN or stdin → redacted + length-capped stdout.
 diag_redact() {
-  BB_CAP="${1:-$MSG_CAP}" "$PYTHON3" -I -c '
-import os, re, sys
-cap = int(os.environ.get("BB_CAP", "1000"))
-text = os.environ.get("BB_IN")
+  BB_CAP="${1:-$MSG_CAP}" "$PYTHON3" -I -c "
+${REDACT_PY}
+import os, sys
+cap = int(os.environ.get('BB_CAP', '1000'))
+text = os.environ.get('BB_IN')
 if text is None:
     text = sys.stdin.read()
-patterns = [
-    (re.compile(r"(?i)\b(gh[pousr]_|github_pat_|xox[baprs]-|sk-|AKIA)[A-Za-z0-9_\-]{8,}"), r"\1[REDACTED]"),
-    (re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9\-._~+/]+=*"), r"\1[REDACTED]"),
-    (re.compile(r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY|AUTH)=)(\S+)"), r"\1[REDACTED]"),
-    (re.compile(r"(?i)(authorization:\s*\S+\s+)\S+"), r"\1[REDACTED]"),
-    (re.compile(r"(?i)\b(bundle contents?|git bundle)[:\s].{0,200}"), r"\1 [REDACTED]"),
-]
-for rx, repl in patterns:
-    text = rx.sub(repl, text)
-text = text.replace("\x00", "")
-if len(text) > cap:
-    text = text[:cap] + "…[truncated]"
-sys.stdout.write(text)
-'
+sys.stdout.write(redact_patterns(text, cap))
+"
 }
 
 # Extract subtype, denial tool names ONLY, and capped final message from an
@@ -99,40 +119,29 @@ print_ship_diag() {
     echo "ship-diag: execution-log not found${log:+ at $log}"
     return 0
   fi
-  BB_LOG="$log" BB_CAP="$MSG_CAP" "$PYTHON3" -I -c '
+  BB_LOG="$log" BB_CAP="$MSG_CAP" "$PYTHON3" -I -c "
+${REDACT_PY}
 import json, os, re, sys
 
-path = os.environ["BB_LOG"]
-cap = int(os.environ.get("BB_CAP", "1000"))
+path = os.environ['BB_LOG']
+cap = int(os.environ.get('BB_CAP', '1000'))
 try:
-    raw = open(path, encoding="utf-8", errors="replace").read()
+    raw = open(path, encoding='utf-8', errors='replace').read()
 except OSError as e:
-    print("ship-diag: execution-log unreadable (%s)" % e)
+    print('ship-diag: execution-log unreadable (%s)' % e)
     raise SystemExit(0)
 
 def redact(text: str) -> str:
-    patterns = [
-        (re.compile(r"(?i)\b(gh[pousr]_|github_pat_|xox[baprs]-|sk-|AKIA)[A-Za-z0-9_\-]{8,}"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9\-._~+/]+=*"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY|AUTH)=)(\S+)"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)(authorization:\s*\S+\s+)\S+"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)\b(bundle contents?|git bundle)[:\s].{0,200}"), r"\1 [REDACTED]"),
-    ]
-    for rx, repl in patterns:
-        text = rx.sub(repl, text)
-    text = text.replace("\x00", "")
-    if len(text) > cap:
-        text = text[:cap] + "…[truncated]"
-    return text
+    return redact_patterns(text, cap)
 
 objs = []
 raw_s = raw.strip()
-if raw_s.startswith("["):
+if raw_s.startswith('['):
     try:
         objs = json.loads(raw_s)
     except json.JSONDecodeError:
         objs = []
-elif raw_s.startswith("{"):
+elif raw_s.startswith('{'):
     try:
         objs = [json.loads(raw_s)]
     except json.JSONDecodeError:
@@ -154,21 +163,21 @@ if not objs:
 
 subtype = None
 denials = []
-final_msg = ""
+final_msg = ''
 for obj in objs:
     if not isinstance(obj, dict):
         continue
-    if obj.get("type") == "result":
-        subtype = obj.get("subtype")
-        dens = obj.get("permission_denials") or obj.get("permissionDenials") or []
+    if obj.get('type') == 'result':
+        subtype = obj.get('subtype')
+        dens = obj.get('permission_denials') or obj.get('permissionDenials') or []
         if isinstance(dens, list):
             denials.extend(dens)
-        res = obj.get("result") or ""
+        res = obj.get('result') or ''
         if isinstance(res, str) and res.strip():
             final_msg = res.strip()
         elif isinstance(res, list):
-            final_msg = "; ".join(str(x) for x in res[:5])
-    for key in ("permission_denials", "permissionDenials"):
+            final_msg = '; '.join(str(x) for x in res[:5])
+    for key in ('permission_denials', 'permissionDenials'):
         if isinstance(obj.get(key), list):
             denials.extend(obj[key])
 
@@ -176,12 +185,12 @@ names = []
 for d in denials:
     if isinstance(d, dict):
         # Tool name ONLY — never input / args / command text.
-        n = d.get("tool_name") or d.get("toolName") or d.get("name") or d.get("tool")
+        n = d.get('tool_name') or d.get('toolName') or d.get('name') or d.get('tool')
         if n:
             names.append(str(n))
     elif isinstance(d, str) and d.strip():
         # Bare string: keep only a Bash(...) / tool-shaped token, drop args.
-        m = re.match(r"(Bash\([^):\s]+|Write|Edit|Skill|mcp__\w+|NotebookEdit|Agent)", d.strip())
+        m = re.match(r'(Bash\([^):\s]+|Write|Edit|Skill|mcp__\w+|NotebookEdit|Agent)', d.strip())
         names.append(m.group(1) if m else d.strip().split()[0][:80])
 
 # Dedup preserving order
@@ -192,28 +201,30 @@ for n in names:
         seen.add(n)
         uniq.append(n)
 
-print("ship-diag: result subtype=%s" % (subtype if subtype is not None else "(missing)"))
+print('ship-diag: result subtype=%s' % (subtype if subtype is not None else '(missing)'))
 if uniq:
-    print("ship-diag: permission_denials tools: %s" % "; ".join(uniq[:20]))
+    print('ship-diag: permission_denials tools: %s' % redact('; '.join(uniq[:20])))
 else:
     print(
-        "ship-diag: permission_denials tools: (none listed in execution log; "
-        "count may still be >0 when show_full_output is false)"
+        'ship-diag: permission_denials tools: (none listed in execution log; '
+        'count may still be >0 when show_full_output is false)'
     )
 if final_msg:
-    print("ship-diag: final message (redacted, capped ~%d chars):" % cap)
+    print('ship-diag: final message (redacted, capped ~%d chars):' % cap)
     print(redact(final_msg))
 else:
-    print("ship-diag: final message: (empty or not present in execution log)")
-'
+    print('ship-diag: final message: (empty or not present in execution log)')
+"
 }
 
-# NDJSON comments {body, created_at, login?, type?} on stdin.
+# NDJSON comments {body, created_at, login?, type?, id?} on stdin.
 # Optional $1 = run-started-at. Prints true/false.
-# Claimless shape: latest comment is a stop, trusted author (Bot or matching
-# owner login when set), strictly after the window when a window is given —
-# mirrors routine-lock-cleanup's claimless stop rule enough for the early
-# gate (settle still does the authoritative read).
+# Mirrors design-run-deliver hard_stop_from_comments / settle:
+#   - With an authentic SHIP-LOCK (HTML marker + allowlisted login): any
+#     trusted stop after the latest lock inside the run window counts —
+#     a later non-stop comment does not invalidate it.
+#   - Claimless (no authentic lock): only the latest comment may be a stop.
+# Settle still does the authoritative read; this is the early gate.
 stop_indicated_from_ndjson() {
   local since="${1:-}"
   local owner="${REPO_OWNER:-}"
@@ -222,6 +233,8 @@ stop_indicated_from_ndjson() {
   fi
   BB_SINCE="$since" BB_OWNER="$owner" \
   BB_D1="$DECLINE_MARKER_1" BB_D2="$DECLINE_MARKER_2" BB_DF="$DEFER_MARKER" \
+  BB_LOCK_HTML="$SHIP_LOCK_HTML_MARKER" \
+  BB_LOCK_LOGINS="$SHIP_LOCK_AUTHOR_LOGINS" \
   "$PYTHON3" -I -c '
 import json, os, sys
 
@@ -230,26 +243,38 @@ owner = (os.environ.get("BB_OWNER") or "").strip().lower()
 d1 = os.environ["BB_D1"]
 d2 = os.environ["BB_D2"]
 df = os.environ["BB_DF"]
+html_marker = os.environ["BB_LOCK_HTML"]
+lock_logins = {
+    x.strip().lower()
+    for x in os.environ.get("BB_LOCK_LOGINS", "").split()
+    if x.strip()
+}
 
 def fl(body: str) -> str:
     if not body:
         return ""
-    return body.replace("\r\n", "\n").replace("\r", "\n").split("\n", 1)[0]
+    for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        s = line.strip()
+        if s:
+            return s
+    return ""
 
 def is_stop(body: str) -> bool:
     first = fl(body)
     return first.startswith(d1) or first.startswith(d2) or first.startswith(df)
 
-def trusted(c: dict) -> bool:
+def stop_trusted(c: dict) -> bool:
     typ = (c.get("type") or "").strip()
     login = (c.get("login") or "").strip().lower()
-    if login.endswith("[bot]"):
-        login = login[:-5]
-    if typ == "Bot" or login in ("github-actions", "shaiss"):
+    if typ == "Bot":
         return True
     if owner and login == owner:
         return True
     return False
+
+def is_lock(c: dict) -> bool:
+    login = (c.get("login") or "").strip().lower()
+    return html_marker in (c.get("body") or "") and login in lock_logins
 
 rows = []
 for line in sys.stdin:
@@ -268,12 +293,36 @@ def sort_key(c):
     return (c.get("created_at") or "", int(c.get("id") or 0))
 
 rows.sort(key=sort_key)
-latest = rows[-1]
-body = latest.get("body") or ""
-created = latest.get("created_at") or ""
-ok = is_stop(body) and trusted(latest)
-if since:
-    ok = ok and created > since
+
+latest_lock = None
+for c in rows:
+    if not isinstance(c, dict) or not is_lock(c):
+        continue
+    if latest_lock is None or sort_key(c) > sort_key(latest_lock):
+        latest_lock = c
+
+if latest_lock is None:
+    # Claimless: only the latest comment may be a this-run stop.
+    if not since:
+        print("false")
+        raise SystemExit(0)
+    latest = rows[-1]
+    created = latest.get("created_at") or ""
+    ok = (
+        is_stop(latest.get("body") or "")
+        and stop_trusted(latest)
+        and created > since
+    )
+else:
+    lock_created = latest_lock.get("created_at") or ""
+    ok = any(
+        isinstance(c, dict)
+        and (c.get("created_at") or "") > lock_created
+        and (not since or (c.get("created_at") or "") > since)
+        and is_stop(c.get("body") or "")
+        and stop_trusted(c)
+        for c in rows
+    )
 print("true" if ok else "false")
 '
 }
@@ -368,6 +417,20 @@ selftest() {
     && { echo "FAIL  selftest: raw token leaked after redact"; fails=$((fails + 1)); } \
     || echo "ok    selftest: token-like string is redacted"
 
+  out="$(BB_IN='"authToken": "sekritVALUE123" ANTHROPIC_API_KEY: abcdefghijklmnop Basic YWJjZGVmZ2hpams=' diag_redact 1000)"
+  printf '%s' "$out" | grep -q '\[REDACTED\]' \
+    || { echo "FAIL  selftest: quoted/colon/Basic secrets not redacted (got: $out)"; fails=$((fails + 1)); }
+  printf '%s' "$out" | grep -q 'sekritVALUE' \
+    && { echo "FAIL  selftest: quoted secret leaked (got: $out)"; fails=$((fails + 1)); } \
+    || echo "ok    selftest: quoted/colon/Basic secret shapes are redacted"
+
+  out="$(BB_IN="$(printf '::error::planted\nx%.0s' {1..20})" diag_redact 1000)"
+  printf '%s' "$out" | grep -q '^\\::' \
+    || { echo "FAIL  selftest: :: workflow-command prefix not escaped (got: $out)"; fails=$((fails + 1)); }
+  printf '%s' "$out" | grep -qE '^::' \
+    && { echo "FAIL  selftest: bare :: line survived redact"; fails=$((fails + 1)); } \
+    || echo "ok    selftest: :: workflow-command prefixes are escaped"
+
   out="$(BB_IN="$(printf 'x%.0s' {1..1500})" diag_redact 1000)"
   local len=${#out}
   # 1000 + len("…[truncated]") = 1012
@@ -416,6 +479,36 @@ EOF
     echo "ok    selftest: explicit DECLINED stop passes the hard check"
   fi
 
+  # --- claimed thread: lock + DECLINED + later non-stop still passes ---
+  cat >"$tmp/claimed.ndjson" <<'EOF'
+{"body":"🚢 SHIP-LOCK — claim\n\n<!-- design-run-ship-lock:v1 -->\n","created_at":"2026-10-30T12:00:01Z","login":"github-actions[bot]","type":"Bot","id":10}
+{"body":"🚢 DECLINED — too big\n","created_at":"2026-10-30T12:00:05Z","login":"github-actions[bot]","type":"Bot","id":11}
+{"body":"unrelated follow-up","created_at":"2026-10-30T12:00:09Z","login":"github-actions[bot]","type":"Bot","id":12}
+EOF
+  if ! "$0" --issue 962 --head-ref main --comments-file "$tmp/claimed.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/pass-claimed.out" 2>&1; then
+    echo "FAIL  selftest: claimed-thread stop+later-nonstop did not pass"; fails=$((fails + 1))
+    cat "$tmp/pass-claimed.out"
+  else
+    echo "ok    selftest: claimed-thread stop survives a later non-stop comment"
+  fi
+
+  # Bare SHIP-LOCK first line (no HTML marker) must not open claimed mode
+  # and a later DECLINED still works as claimless latest.
+  cat >"$tmp/fake-lock.ndjson" <<'EOF'
+{"body":"🚢 SHIP-LOCK — forged without html\n","created_at":"2026-10-30T12:00:01Z","login":"github-actions[bot]","type":"Bot","id":20}
+{"body":"🚢 DECLINED — real stop\n","created_at":"2026-10-30T12:00:05Z","login":"github-actions[bot]","type":"Bot","id":21}
+EOF
+  if ! "$0" --issue 962 --head-ref main --comments-file "$tmp/fake-lock.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/pass-fake-lock.out" 2>&1; then
+    echo "FAIL  selftest: claimless DECLINED after bare SHIP-LOCK did not pass"; fails=$((fails + 1))
+    cat "$tmp/pass-fake-lock.out"
+  else
+    echo "ok    selftest: bare SHIP-LOCK does not forge a claimed lock"
+  fi
+
   # --- diag extracts subtype + tool names only; redacts message ---
   cat >"$tmp/exec.json" <<'EOF'
 {
@@ -426,7 +519,7 @@ EOF
   "permission_denials": [
     {"tool_name": "Bash", "tool_input": {"command": "git push origin main TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWX"}}
   ],
-  "result": "done; export GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWX and push"
+  "result": "done; export GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWX and push\n::warning::planted"
 }
 EOF
   print_ship_diag "$tmp/exec.json" >"$tmp/diag.out"
@@ -444,6 +537,11 @@ EOF
     echo "FAIL  selftest: token leaked in diag final message"; fails=$((fails + 1))
   else
     echo "ok    selftest: diag redacts token-like strings in the final message"
+  fi
+  if grep -qE '^::warning::' "$tmp/diag.out"; then
+    echo "FAIL  selftest: bare :: workflow command in diag final message"; fails=$((fails + 1))
+  else
+    echo "ok    selftest: diag escapes :: workflow-command lines in the final message"
   fi
   grep -q 'subtype=success' "$tmp/diag.out" && echo "ok    selftest: diag reports result subtype"
 
