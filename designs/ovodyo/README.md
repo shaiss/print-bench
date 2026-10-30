@@ -70,9 +70,9 @@ crossing story is in `slot-path` above.*
 
 ![Helical window broadside](previews/slot-window.png)
 
-*Numeral close-up — "08" fills the frame; the 10 mm helical slot is the green
-cut at the edge. Preview red is the core; any green on the cut walls is a
-preview artifact, not your filament.*
+*Numeral close-up — "08" sits on its face (about a fifth of the frame) while
+the 10 mm helical slot cuts across the lower half. Preview red is the core;
+any green on the cut walls is a preview artifact, not your filament.*
 
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
 
@@ -315,19 +315,31 @@ wrapped in felt (or similar) inside the halves before you screw them shut is a
 fine interim heft hack — start around **~20 g per ball** (unmeasured first guess;
 you may need to adjust), split across **both halves** or centred on the seam
 plane (not one-sided), kept against the seam and away from the numeral faces
-(the cuts are windows; a dark wrap shows less). A one-sided lump doesn't just
-bias parking — in v0 it changes how many tumbles it takes to set a reading.
-**Loose shot is forbidden** — it rattles against the numeral voids, and on this
-page rattle reads as broken. The heft arrives properly with the drive.
+(the cuts are windows; a dark wrap shows less). **Red** felt reads through the
+numeral cuts as an honest interim v0 two-tone — material behind a window, not
+paint, and **not** the committed two-tone ([#599](https://github.com/shaiss/print-bench/issues/599) insert /
+[#600](https://github.com/shaiss/print-bench/issues/600) render keep their rank). After opening a ball (dusting,
+etc.), re-centre the wrap on the seam plane before you close it. A one-sided
+lump doesn't just bias parking — in v0 it changes how many tumbles it takes to
+set a reading. **Loose shot is forbidden** — it rattles against the numeral
+voids, and on this page rattle reads as broken. The heft arrives properly with
+the drive.
 
 **Care:** cut-through numerals, the 10 mm slot, and the airy truss collect desk
 dust — unscrew a ball (one full turn) and wipe the cavity when it looks dull;
-dust the lattice with a soft brush. Rotate which numeral faces the desk under
-the putty dab so wear doesn't pick one face forever. A knock should prefer the
-one-turn seam over cracking a shell — unscrew fully and re-seat (expectation,
-not a guarantee). Low side light through the cut numerals is this clock's best look —
-near a window, out of direct afternoon sun (PLA can soften and fade on a
-hot sill; PETG/ASA tolerate it better). Ambient light only; no built-in LEDs.
+dust the lattice with a soft brush. Where the helical slot crosses the seam,
+the threaded seam ring shows through the window — prints clean, it's expected
+(no committed render shows it; `hours-ball` is the seamless preview). A few
+wisps across the numeral voids are normal with dry PLA; clear with a knife tip
+through the slot or the unscrew-and-wipe — print PLA dry. Rotate which numeral
+faces the desk under the putty dab so wear doesn't pick one face forever.
+Museum putty is consumable (rated hundreds of peel-stick cycles, not thousands);
+a felt pad or leather coaster under each ball is the re-set-friendly interim
+display. A knock should prefer the one-turn seam over cracking a shell —
+unscrew fully and re-seat (expectation, not a guarantee). Low side light
+through the cut numerals is this clock's best look — near a window, out of
+direct afternoon sun (PLA can soften and fade on a hot sill; PETG/ASA tolerate
+it better). Ambient light only; no built-in LEDs.
 
 The real
 clock is driven by a geared stepper through a bevel differential and homed with a

@@ -482,10 +482,32 @@ print, same material and profile as the halves.
     raise `seam_tol` by 0.05 and reprint the coupon — that is the fit the
     halves will get.
   Prefer the looser-feeling end of a clean seat before locking the value for
-  the halves. (Printing the coupon male top-down like the half is a
-  coupon-fidelity follow-up.)
+  the halves.
+- **Coupon fidelity (priority follow-up):** print the coupon male **top-down**
+  like the production half (ring ~35 mm up), not flange-on-bed (~1.5 mm up).
+  That deletes the flange-foot hard-start branch instead of documenting it —
+  Jane/PM triage on #961.
 - Then render the four halves with the winning value and print them
   pole-down (see Key decisions: Ball seam).
+
+## Page-intent notes
+
+- **"parks on a flat pentagon"** (README minutes bullet) means the ball rests
+  stably on the pentagon once set down — not that it self-stops mid-tumble. In
+  v0 the user is the escapement; the mid-tumble "wait a beat" sentence is that
+  beat of the hand, not a mechanism.
+
+## Follow-ups / queue (PM triage #961)
+
+- **#601 eyetest** (when a printed half exists): reading-distance photo (~60 cm,
+  desk lamp); showroom squint; slot-rim polish/patina + thumb-drag after a month;
+  dust-in-the-cuts look; **foreshortened-glance legibility** (shallow desk angle,
+  ~45° from above — stencil bridges that read fine head-on can vanish); **one-turn
+  close-by-palm feel** (Ø78 shell closed by flat palms at the slot, not the
+  coupon's 15–20 mm hand lever — seat should stop on the flats, not wind out slop).
+- **Render one-looks** (next render touch / #601 new-camera round; camera freeze
+  holds — one look for the owner, not a reframe): `hours-ball` pole parting line;
+  `slot-corner` hairlines.
 
 ## Resume context
 
