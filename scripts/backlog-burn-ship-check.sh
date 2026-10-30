@@ -26,7 +26,8 @@ unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
       PYTHONEXECUTABLE LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT \
       DYLD_INSERT_LIBRARIES BASH_ENV ENV \
       GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
-      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY || true
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+      GIT_EXEC_PATH || true
 export PYTHONNOUSERSITE=1
 
 # Workflow restores this script into $RUNNER_TEMP (issue #962 security: the
@@ -691,6 +692,53 @@ EOF
     cat "$tmp/ghbin.out"
   else
     echo "ok    selftest: planted GH_BIN is not executed (trusted /usr/bin/gh used)"
+  fi
+
+  # Behavioral: a planted GIT_EXEC_PATH must NOT supply git helpers.
+  # /usr/bin/git still execs git-symbolic-ref from GIT_EXEC_PATH; a plant
+  # can forge a ship-branch HEAD. Without --head-ref the script reads HEAD
+  # via git; assert the helper marker is absent and a forged branch name
+  # does not pass the gate.
+  mkdir -p "$tmp/evil-git-exec"
+  cat >"$tmp/evil-git-exec/git-symbolic-ref" <<'EOF'
+#!/bin/sh
+marker="${GIT_EXEC_MARKER:?GIT_EXEC_MARKER unset}"
+printf 'planted\n' >"$marker"
+# Forge a ship-branch name — if this helper ran, the gate would pass.
+printf '%s\n' 'claude/issue-962-forged-via-git-exec-path'
+exit 0
+EOF
+  chmod +x "$tmp/evil-git-exec/git-symbolic-ref"
+  # Also plant rev-parse in case symbolic-ref is skipped.
+  cat >"$tmp/evil-git-exec/git-rev-parse" <<'EOF'
+#!/bin/sh
+marker="${GIT_EXEC_MARKER:?GIT_EXEC_MARKER unset}"
+printf 'planted\n' >"$marker"
+printf '%s\n' 'claude/issue-962-forged-via-git-exec-path'
+exit 0
+EOF
+  chmod +x "$tmp/evil-git-exec/git-rev-parse"
+  rm -f "$tmp/git-exec-marker"
+  set +e
+  env \
+      GIT_EXEC_PATH="$tmp/evil-git-exec" \
+      GIT_EXEC_MARKER="$tmp/git-exec-marker" \
+      GH_TOKEN= \
+      GITHUB_TOKEN= \
+      "$0" --issue 962 \
+      --comments-file /dev/null \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/gitexec.out" 2>&1
+  local gitexec_rc=$?
+  set -e
+  if [[ -f "$tmp/git-exec-marker" ]]; then
+    echo "FAIL  selftest: planted GIT_EXEC_PATH helper was executed"; fails=$((fails + 1))
+    cat "$tmp/gitexec.out"
+  elif [[ "$gitexec_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: planted GIT_EXEC_PATH unexpectedly passed the gate"; fails=$((fails + 1))
+    cat "$tmp/gitexec.out"
+  else
+    echo "ok    selftest: planted GIT_EXEC_PATH is cleared (trusted git helpers used)"
   fi
 
   if [[ "$fails" -ne 0 ]]; then

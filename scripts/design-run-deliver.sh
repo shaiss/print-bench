@@ -4562,6 +4562,11 @@ EOF
     echo "selftest: burn ship-outcome step does not unset planted GIT_DIR overrides" >&2
     exit 1
   }
+  # GIT_EXEC_PATH: /usr/bin/git still runs helpers from that dir (#963).
+  printf '%s\n' "$ship_check_run" | tr '\\' ' ' | tr '\n' ' ' | grep -E 'unset[[:space:]]+[^;]*GIT_EXEC_PATH' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not unset planted GIT_EXEC_PATH" >&2
+    exit 1
+  }
   # #962 security: gh comment fetch must not follow a planted GH_HOST /
   # GH_CONFIG_DIR / proxy (token exfil + forged Bot DECLINED). The
   # workflow unsets any planted GH_CONFIG_DIR; the restored script
@@ -4576,6 +4581,10 @@ EOF
   ' "$burn")"
   [ -n "$ship_check_env" ] || {
     echo "selftest: could not extract the burn ship-outcome env block" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_env" | grep -qx '          GIT_EXEC_PATH: ""' || {
+    echo "selftest: burn ship-outcome step does not blank GIT_EXEC_PATH in env" >&2
     exit 1
   }
   printf '%s\n' "$ship_check_env" | grep -qx '          GH_BIN: /usr/bin/gh' || {
@@ -4603,6 +4612,10 @@ EOF
     exit 1
   fi
   ship_check_src="$repo_root/scripts/backlog-burn-ship-check.sh"
+  grep -q 'GIT_EXEC_PATH' "$ship_check_src" || {
+    echo "selftest: ship-check does not clear planted GIT_EXEC_PATH" >&2
+    exit 1
+  }
   grep -q 'bb-gh-config' "$ship_check_src" || {
     echo "selftest: ship-check does not mktemp a fresh empty GH_CONFIG_DIR at call site" >&2
     exit 1
