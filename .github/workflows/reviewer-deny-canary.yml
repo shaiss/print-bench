@@ -4,7 +4,7 @@ name: Reviewer deny-rule canary
 # actually installs still refuses the three syntax families the reviewer/
 # coach backstops spell (issue #776 / #763 item 2). scripts/reviewer-perms-check.sh
 # checks those rules against a Python MODEL of the matcher; this workflow
-# installs the SAME CLI the action installs (2.1.301, hardcoded in the SHA)
+# installs the SAME CLI the action installs (2.1.309, hardcoded in the SHA)
 # and runs the REAL matcher extracted from that binary.
 #
 # Modeled on model-smoke.yml: dispatchable, may run on a PR that touches the
@@ -20,7 +20,7 @@ name: Reviewer deny-rule canary
 #     when a Claude Code release is suspected of changing match semantics.
 #
 # Fail-loud: a denied probe that is not refused exits 1. A build whose
-# binary no longer contains qMe / yNo / Kte / YMe also exits 1 (pin bump).
+# binary no longer contains dNe / c3o / Uoe / cNe also exits 1 (pin bump).
 
 on:
   workflow_dispatch:
@@ -55,7 +55,7 @@ jobs:
       - name: Install the CLI version the pinned action SHA installs
         run: |
           set -euo pipefail
-          curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.301
+          curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.309
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Exercise the real matcher under the committed backstops

@@ -3600,12 +3600,12 @@ EOF
     echo "selftest: delivery workflow_run does not name the design-run workflow" >&2
     exit 1
   }
-  grep -q 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' "$deliver_workflow" || {
-    echo "selftest: the deliver workflow does not download the bundle from the pinned v7 action" >&2
+  grep -q 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' "$deliver_workflow" || {
+    echo "selftest: the deliver workflow does not download the bundle from the pinned download-artifact action" >&2
     exit 1
   }
-  if grep -q 'actions/download-artifact@v7' "$deliver_workflow" || grep 'actions/checkout@v7' "$deliver_workflow" >/dev/null; then
-    echo "selftest: design-run-deliver.yml still uses a floating v7 action tag" >&2
+  if grep -qE 'actions/download-artifact@v[0-9]+' "$deliver_workflow" || grep -qE 'actions/checkout@v[0-9]+' "$deliver_workflow"; then
+    echo "selftest: design-run-deliver.yml still uses a floating action tag" >&2
     exit 1
   fi
   grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$deliver_workflow" || {
@@ -3763,7 +3763,7 @@ EOF
     echo "selftest: the settle applier does not verify the pinned script hash" >&2
     exit 1
   }
-  grep -q 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' <<<"$settle_job" || {
+  grep -q 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' <<<"$settle_job" || {
     echo "selftest: settle does not download the intents with the pinned action" >&2
     exit 1
   }
@@ -4784,12 +4784,12 @@ EOF
     echo "selftest: burn delivery workflow_run does not name the burn workflow" >&2
     exit 1
   }
-  grep -q 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' "$burn_deliver" || {
-    echo "selftest: the burn deliver workflow does not download the bundle from the pinned v7 action" >&2
+  grep -q 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333' "$burn_deliver" || {
+    echo "selftest: the burn deliver workflow does not download the bundle from the pinned download-artifact action" >&2
     exit 1
   }
-  if grep -q 'actions/download-artifact@v7' "$burn_deliver" || grep 'actions/checkout@v7' "$burn_deliver" >/dev/null; then
-    echo "selftest: backlog-burn-deliver.yml still uses a floating v7 action tag" >&2
+  if grep -qE 'actions/download-artifact@v[0-9]+' "$burn_deliver" || grep -qE 'actions/checkout@v[0-9]+' "$burn_deliver"; then
+    echo "selftest: backlog-burn-deliver.yml still uses a floating action tag" >&2
     exit 1
   fi
   grep -q '\$GITHUB_WORKSPACE/scripts/design-run-deliver.sh' "$burn_deliver" || {
