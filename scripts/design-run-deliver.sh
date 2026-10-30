@@ -4515,8 +4515,47 @@ EOF
     echo "selftest: burn workflow lacks the #962 post-agent ship-outcome hard check" >&2
     exit 1
   }
-  grep -q 'scripts/backlog-burn-ship-check.sh' "$burn" || {
-    echo "selftest: burn workflow does not invoke backlog-burn-ship-check.sh" >&2
+  grep -q 'ship_check_sha256=' "$burn" || {
+    echo "selftest: burn pin step does not hash backlog-burn-ship-check.sh" >&2
+    exit 1
+  }
+  # #962 security: the post-agent gate must restore from START_SHA into
+  # RUNNER_TEMP (same discipline as design-run-deliver). A worktree exec
+  # after Write/Edit would let prompt-injected issue text rewrite the gate
+  # that then runs with GH_TOKEN.
+  ship_check_run="$(awk '
+    /^      - name: Require ship branch or explicit decline/ { in_step = 1 }
+    in_step && /^        run: \|/ { printing = 1; next }
+    in_step && printing && /^      - name:/ { exit }
+    printing { print }
+  ' "$burn")"
+  [ -n "$ship_check_run" ] || {
+    echo "selftest: could not extract the burn ship-outcome run block" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/backlog-burn-ship-check.sh"' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not git-show the pinned script" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'SHIP_CHECK_SHA256' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not check the pre-agent sha256" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'objects/info/alternates' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not refuse object alternates" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'refusing to restore backlog-burn-ship-check' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not refuse a symlink restore" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep './scripts/backlog-burn-ship-check.sh' >/dev/null && {
+    echo "selftest: burn ship-outcome step still executes the worktree script" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep '"${RUNNER_TEMP}/backlog-burn-ship-check.sh"' >/dev/null \
+    || printf '%s\n' "$ship_check_run" | grep 'RUNNER_TEMP}/backlog-burn-ship-check.sh' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not exec the restored RUNNER_TEMP copy" >&2
     exit 1
   }
   burn_scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$burn" || true)"

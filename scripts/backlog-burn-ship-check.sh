@@ -27,7 +27,25 @@ unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
       DYLD_INSERT_LIBRARIES BASH_ENV ENV || true
 export PYTHONNOUSERSITE=1
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Workflow restores this script into $RUNNER_TEMP (issue #962 security: the
+# agent may rewrite the worktree copy). Prefer SHIP_CHECK_WORKTREE for the
+# checkout; fall back to dirname($0)/.. for local / --selftest runs.
+if [[ -n "${SHIP_CHECK_WORKTREE:-}" ]]; then
+  case "${SHIP_CHECK_WORKTREE}" in
+    /*) ;;
+    *)
+      echo "backlog-burn-ship-check: SHIP_CHECK_WORKTREE must be an absolute path" >&2
+      exit 2
+      ;;
+  esac
+  if [[ ! -d "${SHIP_CHECK_WORKTREE}" ]]; then
+    echo "backlog-burn-ship-check: SHIP_CHECK_WORKTREE is not a directory" >&2
+    exit 2
+  fi
+  ROOT="${SHIP_CHECK_WORKTREE}"
+else
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+fi
 cd "$ROOT"
 
 if [[ -x /usr/bin/python3 ]]; then

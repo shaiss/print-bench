@@ -198,6 +198,12 @@ jobs:
           # --routine; backlog-burn hashes the same file.
           deliver_sha256="$(git --no-replace-objects show "HEAD:scripts/design-run-deliver.sh" | sha256sum | awk '{print $1}')"
           echo "deliver_sha256=${deliver_sha256}" >> "$GITHUB_OUTPUT"
+          # Same pin for the #962 post-agent ship-outcome gate: that step
+          # restores scripts/backlog-burn-ship-check.sh from START_SHA into
+          # RUNNER_TEMP and refuses a digest mismatch (dontAsk cannot stop
+          # the agent rewriting the worktree copy before the gate runs).
+          ship_check_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-ship-check.sh" | sha256sum | awk '{print $1}')"
+          echo "ship_check_sha256=${ship_check_sha256}" >> "$GITHUB_OUTPUT"
 
       - name: Prove lock-cleanup restore leaves a regular file
         # #923: fail loudly BEFORE any agent work if the settle job's
@@ -730,9 +736,15 @@ jobs:
       # here — after the walk, before the bundle — unless HEAD is on
       # claude/issue-<N>-* or the thread carries an explicit stop marker
       # settle already recognizes. Also print bounded redacted diag
-      # (subtype, denial tool names only, capped final message). continue-
-      # on-error so the bundle / settle path stays reachable for cleanup;
-      # the step outcome still reds the burn job when the gate fires.
+      # (subtype, denial tool names only, capped final message).
+      #
+      # The script is NOT the worktree copy. Write/Edit are allowed in the
+      # ship steps, and dontAsk denies cannot stop the agent rewriting
+      # scripts/backlog-burn-ship-check.sh (or replacing it with a symlink)
+      # before this step runs with GH_TOKEN. Same restore discipline as the
+      # design-run-deliver / routine-lock-cleanup pins: read the blob from
+      # START_SHA, refuse a symlink / alternates, hash-pin against the
+      # pre-agent digest, execute a regular file in $RUNNER_TEMP.
       - name: Require ship branch or explicit decline
         id: ship_outcome
         if: >-
@@ -757,6 +769,9 @@ jobs:
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
           JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
+          SHIP_CHECK_SHA256: ${{ steps.start_ref.outputs.ship_check_sha256 }}
+          SHIP_CHECK_WORKTREE: ${{ github.workspace }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           RUNNER_TEMP: ${{ runner.temp }}
@@ -767,10 +782,66 @@ jobs:
           BASH_ENV: ""
           ENV: ""
           NODE_OPTIONS: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
-          exec ./scripts/backlog-burn-ship-check.sh \
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${SHIP_CHECK_SHA256:-}" ]; then
+            echo "::error::SHIP_CHECK_SHA256 is empty — the pin step did not hash the script" >&2
+            exit 1
+          fi
+          if [ -z "${SHIP_CHECK_WORKTREE:-}" ]; then
+            echo "::error::SHIP_CHECK_WORKTREE is empty" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore backlog-burn-ship-check: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/backlog-burn-ship-check.sh ]; then
+            echo "::error::refusing to restore backlog-burn-ship-check: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/backlog-burn-ship-check-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore backlog-burn-ship-check through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/backlog-burn-ship-check.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore backlog-burn-ship-check.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::backlog-burn-ship-check restore did not leave a regular file" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/backlog-burn-ship-check.sh"
+          if [ -L "$restore_tmp" ]; then
+            rm -f "$restore_tmp"
+          fi
+          mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::backlog-burn-ship-check restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x "$restore_tmp"
+          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
+            echo "::error::restored backlog-burn-ship-check.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          exec "$restore_tmp" \
             --issue "$ISSUE" \
             --run-started-at "$JOB_WINDOW_START" \
             --execution-log "${RUNNER_TEMP}/claude-execution-output.json"
