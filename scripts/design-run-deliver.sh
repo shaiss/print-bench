@@ -4563,17 +4563,36 @@ EOF
     exit 1
   }
   # #962 security: gh comment fetch must not follow a planted GH_HOST /
-  # GH_CONFIG_DIR / proxy (token exfil + forged Bot DECLINED).
+  # GH_CONFIG_DIR / proxy (token exfil + forged Bot DECLINED). The
+  # workflow unsets any planted GH_CONFIG_DIR; the restored script
+  # mktemps an empty dir immediately before gh (never reuses one).
   grep -q 'GH_HOST: github.com' "$burn" || {
     echo "selftest: burn ship-outcome step does not pin GH_HOST=github.com" >&2
     exit 1
   }
-  printf '%s\n' "$ship_check_run" | grep 'export GH_CONFIG_DIR=' >/dev/null || {
-    echo "selftest: burn ship-outcome step does not export a fresh GH_CONFIG_DIR" >&2
-    exit 1
-  }
   printf '%s\n' "$ship_check_run" | grep 'export GH_HOST=github.com' >/dev/null || {
     echo "selftest: burn ship-outcome step does not re-export GH_HOST=github.com" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | tr '\\' ' ' | tr '\n' ' ' | grep -E 'unset[[:space:]]+[^;]*GH_CONFIG_DIR' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not unset planted GH_CONFIG_DIR" >&2
+    exit 1
+  }
+  if printf '%s\n' "$ship_check_run" | grep 'export GH_CONFIG_DIR=' >/dev/null; then
+    echo "selftest: burn ship-outcome step still pre-creates GH_CONFIG_DIR (poison window)" >&2
+    exit 1
+  fi
+  ship_check_src="$repo_root/scripts/backlog-burn-ship-check.sh"
+  grep -q 'bb-gh-config' "$ship_check_src" || {
+    echo "selftest: ship-check does not mktemp a fresh empty GH_CONFIG_DIR at call site" >&2
+    exit 1
+  }
+  grep -qF -- '--hostname github.com' "$ship_check_src" || {
+    echo "selftest: ship-check gh call does not pass --hostname github.com" >&2
+    exit 1
+  }
+  grep -q 'refusing non-empty GH_CONFIG_DIR' "$ship_check_src" || {
+    echo "selftest: ship-check does not refuse a poisoned non-empty GH_CONFIG_DIR" >&2
     exit 1
   }
   burn_scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$burn" || true)"

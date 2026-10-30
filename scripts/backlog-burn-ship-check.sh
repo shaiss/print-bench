@@ -376,27 +376,37 @@ run_check() {
     comments="$(cat -- "$comments_file")"
   elif [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
     # Live: fetch issue comments as NDJSON {body,created_at,login,type,id}.
-    # Pin gh destination/config so a planted GH_HOST / ~/.config/gh / proxy
-    # cannot exfiltrate GH_TOKEN or forge a Bot DECLINED (Security Reviewer
-    # on #962). Fail closed on fetch error — never treat attacker NDJSON
-    # or a silenced failure as "no stop".
-    local gh_cfg="${GH_CONFIG_DIR:-}"
-    if [[ -z "$gh_cfg" || ! -d "$gh_cfg" ]]; then
-      gh_cfg="$(mktemp -d "${TMPDIR:-/tmp}/bb-gh-config.XXXXXX")"
-    fi
+    # ALWAYS mktemp a fresh empty GH_CONFIG_DIR immediately before gh —
+    # never reuse an incoming GH_CONFIG_DIR (a same-uid leftover can plant
+    # http_unix_socket / api_host into a RUNNER_TEMP dir created earlier;
+    # Bugbot on #962). --hostname pins the host even if hosts.yml exists.
+    # Fail closed on fetch error — never treat attacker NDJSON as "no stop".
     unset GH_ENTERPRISE_TOKEN HTTP_PROXY HTTPS_PROXY ALL_PROXY \
       http_proxy https_proxy all_proxy \
       SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
       NODE_EXTRA_CA_CERTS || true
-    if ! comments="$(
-      GH_HOST=github.com GH_CONFIG_DIR="$gh_cfg" \
-      GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN}}" \
-      /usr/bin/gh api --paginate \
-        "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
-        --jq '.[] | {body,created_at,login:.user.login,type:.user.type,id}'
-    )"; then
-      echo "ship-check: gh comment fetch failed — stop-marker path unavailable" >&2
+    local gh_cfg
+    gh_cfg="$(mktemp -d "${TMPDIR:-/tmp}/bb-gh-config.XXXXXX")"
+    if [[ -L "$gh_cfg" || ! -d "$gh_cfg" ]]; then
+      echo "ship-check: refusing GH_CONFIG_DIR through a symlink" >&2
       comments=""
+    elif [[ -n "$(ls -A -- "$gh_cfg" 2>/dev/null || true)" ]]; then
+      echo "ship-check: refusing non-empty GH_CONFIG_DIR (possible poison)" >&2
+      rm -rf -- "$gh_cfg"
+      comments=""
+    else
+      chmod 700 "$gh_cfg" || true
+      if ! comments="$(
+        GH_HOST=github.com GH_CONFIG_DIR="$gh_cfg" \
+        GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN}}" \
+        /usr/bin/gh api --hostname github.com --paginate \
+          "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+          --jq '.[] | {body,created_at,login:.user.login,type:.user.type,id}'
+      )"; then
+        echo "ship-check: gh comment fetch failed — stop-marker path unavailable" >&2
+        comments=""
+      fi
+      rm -rf -- "$gh_cfg"
     fi
   fi
 
