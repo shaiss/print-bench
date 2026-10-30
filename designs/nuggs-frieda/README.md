@@ -74,7 +74,7 @@ as the bore wall itself — was considered and refused; the reasoning is in
   wall-arc under a ~65 mm part.
 - **Seam:** Back (or scarfed) — a default Aligned seam stacks a ridge the
   full 180 mm height and can land on the word or a port sector. Rotate the
-  part so the plain rail span (D→A, no letters) faces the back.
+  part so the plain rail span (A→F, the gap with no letters) faces the back.
 - **Brim:** Outer, 5 mm — don't leave it on Auto. Print it on the bridge (it
   stands 180 mm tall on three small sector tips) and on the wordpair coupon
   (one curved wall-arc under a 65 mm part). Bambu's Auto heuristic can skip
