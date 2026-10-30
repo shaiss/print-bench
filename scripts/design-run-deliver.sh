@@ -1583,6 +1583,48 @@ run_live() {
   finish true "delivered ${BRANCH} as ${pr_url}"
 }
 
+# Flatten backlog-burn.yml's preflight_pip `run: |` block: drop full-line and
+# trailing `#` comments, join backslash-continued lines. Used by the hashed-
+# lockfile flag guards so a comment mentioning `--require-hashes` cannot
+# satisfy them (issue #890 / Cipher re-pin of #876).
+burn_preflight_pip_run_flat() {
+  local workflow="$1"
+  awk '
+    /^      - name: Install preflight Python tools after disabling sudo/ { in_step = 1 }
+    in_step && /^        run: \|/ { printing = 1; next }
+    in_step && printing && /^      - / { exit }
+    !printing { next }
+    /^[[:space:]]*#/ { next }
+    {
+      line = $0
+      sub(/[[:space:]]+#.*$/, "", line)
+      if (pending) {
+        sub(/^[[:space:]]+/, "", line)
+        buf = buf " " line
+      } else {
+        if (length(buf)) print buf
+        buf = line
+      }
+      if (line ~ /\\[[:space:]]*$/) {
+        sub(/[[:space:]]*\\[[:space:]]*$/, "", buf)
+        pending = 1
+      } else {
+        pending = 0
+      }
+    }
+    END { if (length(buf)) print buf }
+  ' "$workflow"
+}
+
+# True when the flattened preflight_pip run has `pip install … <flag>`.
+burn_preflight_pip_has_flag() {
+  local workflow="$1"
+  local flag="$2"
+  # Two greps: keep pip-install lines, then fixed-string match the flag so
+  # spaces in `--only-binary :all:` need no regex escaping.
+  burn_preflight_pip_run_flat "$workflow" | grep 'pip install' | grep -qF -- "$flag"
+}
+
 selftest() {
   local repo_root="$1"
   local tmp root bare base
@@ -4380,8 +4422,12 @@ EOF
     echo "selftest: burn pip installs of printcheck/stylelift must run after disable-sudo" >&2
     exit 1
   }
-  # Hashed lockfile install (Cipher HOLD on #878): fail-closed PyPI pins.
-  grep -q -- '--require-hashes' "$burn" || {
+  # Hashed lockfile install (Cipher HOLD on #878 / issue #890): fail-closed
+  # PyPI pins. Match the flag on the actual preflight_pip pip install only —
+  # a plain `grep --require-hashes` is satisfied by the comment above the
+  # step (Cipher re-pin of #876). Same for --only-binary :all: (identical
+  # comment-satisfiable grep).
+  burn_preflight_pip_has_flag "$burn" '--require-hashes' || {
     echo "selftest: burn preflight_pip must pip install --require-hashes" >&2
     exit 1
   }
@@ -4412,9 +4458,27 @@ EOF
     echo "selftest: burn must not pip install printcheck/stylelift[test] (unpinned extras)" >&2
     exit 1
   fi
-  grep -q -- '--only-binary :all:' "$burn" || {
+  burn_preflight_pip_has_flag "$burn" '--only-binary :all:' || {
     echo "selftest: burn preflight_pip must pip install --only-binary :all:" >&2
     exit 1
+  }
+  # Mutation (#890): real --require-hashes removed, comment mention kept —
+  # the guard must fail. Unmodified file already passed above.
+  {
+    mut="${tmp}/burn-require-hashes-mut.yml"
+    awk '
+      /^[[:space:]]*#/ { print; next }
+      /pip install/ { gsub(/ --require-hashes/, ""); print; next }
+      { print }
+    ' "$burn" > "$mut"
+    grep -q -- '--require-hashes' "$mut" || {
+      echo "selftest: mutation fixture lost its comment mention of --require-hashes" >&2
+      exit 1
+    }
+    if burn_preflight_pip_has_flag "$mut" '--require-hashes'; then
+      echo "selftest: --require-hashes guard accepted a comment-only mention (#890)" >&2
+      exit 1
+    fi
   }
   # tools/backlog-burn is stdlib-only: run via PYTHONPATH, never pip install
   # before disable-sudo (Cipher HOLD on #878 — unhashed setuptools via -e).
