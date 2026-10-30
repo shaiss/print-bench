@@ -70,8 +70,9 @@ crossing story is in `slot-path` above.*
 
 ![Helical window broadside](previews/slot-window.png)
 
-*Looking into the 10 mm helical window — preview red reads through the cut;
-any green on the cut walls is a preview artifact, not your filament.*
+*Numeral close-up — "08" fills the frame; the 10 mm helical slot is the green
+cut at the edge. Preview red is the core; any green on the cut walls is a
+preview artifact, not your filament.*
 
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
 
@@ -97,8 +98,9 @@ whole clock would print as one fused lump):
   35, 25, 45, 55, 15**, bottom **30, 05, 40, 20, 00, 50** (00–55 in 5s). Until
   the drive lands ([#604](https://github.com/shaiss/print-bench/issues/604)), it's a **desk die you set by hand** —
   tumble until the face you want parks on a flat pentagon — not yet a running
-  clock face. The 10 mm helical slot is also where you grip the ball to tumble
-  it (fingernail or fingertip in the window).
+  clock face. Mid-tumble there is no reading yet — wait a beat for the face to
+  park. The 10 mm helical slot is also where you grip the ball to tumble it
+  (fingernail or fingertip in the window).
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
   (a Ø5.6 mm round nose) and carry a bored stalk boss over the motor pod, with
