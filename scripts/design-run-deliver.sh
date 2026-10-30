@@ -4092,10 +4092,62 @@ EOF
       && [ "$sudo_line" -lt "$pip_line" ] \
       && [ "$pip_line" -lt "$agent_line" ]
   }
+  # Flatten every `run: |` block that ends before disable-sudo (CodeRabbit on
+  # #960): step-header order alone cannot see a hashed pip smuggled into the
+  # apt step. Returns 0 when no pre-sudo hashed/lockfile pip install exists.
+  dr_preflight_no_hashed_pip_before_sudo() {
+    local wf="$1"
+    local sudo_ln hit
+    sudo_ln="$(grep -n 'name: Disable sudo before the agent' "$wf" | head -1 | cut -d: -f1)"
+    [ -n "$sudo_ln" ] || return 1
+    hit="$(
+      awk -v sudo="$sudo_ln" '
+        NR >= sudo { exit }
+        /^      - / { printing = 0; pending = 0; buf = ""; next }
+        /^        run: \|/ { printing = 1; next }
+        !printing { next }
+        /^[[:space:]]*#/ { next }
+        {
+          line = $0
+          sub(/([[:space:]]+|;[[:space:]]*)#.*$/, "", line)
+          if (pending) {
+            sub(/^[[:space:]]+/, "", line)
+            buf = buf " " line
+          } else {
+            if (length(buf)) {
+              if (buf ~ /python3 -m pip install/ &&
+                  (buf ~ /--require-hashes/ || buf ~ /--only-binary/ || buf ~ / -r /)) {
+                print NR
+                exit
+              }
+            }
+            buf = line
+          }
+          if (line ~ /\\[[:space:]]*$/) {
+            sub(/[[:space:]]*\\[[:space:]]*$/, "", buf)
+            pending = 1
+          } else {
+            pending = 0
+            if (buf ~ /python3 -m pip install/ &&
+                (buf ~ /--require-hashes/ || buf ~ /--only-binary/ || buf ~ / -r /)) {
+              print NR
+              exit
+            }
+            buf = ""
+          }
+        }
+      ' "$wf"
+    )"
+    [ -z "$hit" ]
+  }
   sudo_line="$(grep -n 'name: Disable sudo before the agent' "$workflow" | head -1 | cut -d: -f1)"
   agent_line="$(grep -n 'name: Run via Z.AI (GLM, chain link 1)' "$workflow" | head -1 | cut -d: -f1)"
   dr_preflight_order_ok "$workflow" || {
     echo "selftest: design-run apt preflight must precede disable-sudo, which must precede pip, which must precede the agent (#891)" >&2
+    exit 1
+  }
+  dr_preflight_no_hashed_pip_before_sudo "$workflow" || {
+    echo "selftest: design-run must not run a hashed/lockfile pip install before disable-sudo (#891)" >&2
     exit 1
   }
   dr_printcheck_pip_line="$(grep -n 'pip install .*tools/printcheck' "$workflow" | head -1 | cut -d: -f1)"
@@ -4238,6 +4290,30 @@ EOF
     fi
     if dr_preflight_pip_has_flag "$mut_bin" '--only-binary :all:'; then
       echo "selftest: --only-binary :all: guard accepted a comment-only mention (#891/#890)" >&2
+      exit 1
+    fi
+  }
+  # Mutation D (CodeRabbit on #960): smuggle a hashed lockfile pip into the
+  # apt step before disable-sudo — step-header order still looks fine, so the
+  # pre-sudo hashed-pip scan must be what fails.
+  {
+    mut_early="${tmp}/design-run-early-hashed-pip-mut.yml"
+    awk '
+      /name: Install preflight toolchain before disabling sudo/ { in_apt = 1 }
+      in_apt && /^        run: \|/ {
+        print
+        print "          python3 -m pip install --require-hashes --only-binary :all: -r .github/backlog-burn-preflight-requirements.txt"
+        next
+      }
+      in_apt && /^      - name: Disable sudo before the agent/ { in_apt = 0 }
+      { print }
+    ' "$workflow" > "$mut_early"
+    dr_preflight_order_ok "$mut_early" || {
+      echo "selftest: early-hashed-pip mutation unexpectedly broke step-header order" >&2
+      exit 1
+    }
+    if dr_preflight_no_hashed_pip_before_sudo "$mut_early"; then
+      echo "selftest: pre-sudo hashed-pip guard accepted a lockfile install in the apt step (#891)" >&2
       exit 1
     fi
   }
