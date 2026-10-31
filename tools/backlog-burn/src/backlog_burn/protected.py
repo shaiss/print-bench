@@ -92,10 +92,15 @@ def is_protected_path(path: str) -> bool:
 # Path-like tokens the selector can recognize in an issue title/body.
 # Leading top-level dirs the deliverer (or a design PR) commonly names, plus
 # the agent-instruction filenames the deliverer refuses at any depth.
-_TOP_DIRS = (
+# Any-depth dirs/files (.github / .claude / .cursor / CLAUDE.md …) may sit
+# under a parent segment (``sub/.github/x``); root-only dirs (scripts/tools/…)
+# only match at the repo root (optional ``./`` prefix allowed — Bugbot on #953).
+_ANY_DEPTH_DIRS = (
     ".github",
     ".claude",
     ".cursor",
+)
+_ROOT_ONLY_DIRS = (
     "scripts",
     "tools",
     "designs",
@@ -108,6 +113,7 @@ _TOP_DIRS = (
     "telemetry",
     "build",
 )
+_TOP_DIRS = _ANY_DEPTH_DIRS + _ROOT_ONLY_DIRS
 _ROOT_FILES = (
     "CLAUDE.md",
     "CLAUDE.local.md",
@@ -119,20 +125,40 @@ _ROOT_FILES = (
     "README.md",
     "printer.conf",
 )
+# Agent-instruction filenames the deliverer refuses at any depth (same set
+# is_protected_path keys on), so ``sub/CLAUDE.md`` extracts.
+_ANY_DEPTH_FILES = (
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+    "AGENTS.md",
+    ".mcp.json",
+    ".cursorrules",
+)
 
 # A path token in free text: a top-dir WITH at least one slash segment, or a
 # known root file. Bare words like ``scripts`` / ``tools`` in prose must NOT
 # match — that starved design-briefs that mentioned those words (Bugbot on
 # #953). An explicit ``Touches:`` line still accepts bare tokens (below).
+# Optional ``./`` and parent segments for any-depth protected names so
+# ``./scripts/...``, ``./CLAUDE.md``, and ``sub/.github/...`` extract (Bugbot
+# on #953: the old lookbehind treated ``/`` as a path char and missed them).
 # Globs (*, ?, **) are kept so we can refuse them as undetermined.
+_SEG = r"[^\s`\"')\],:;|/]+"
+_PATH_REST = r"[^\s`\"')\],:;|]+"
+_ROOT_ONLY_ALT = "|".join(re.escape(d) for d in _ROOT_ONLY_DIRS)
+_ANY_DEPTH_DIR_ALT = "|".join(re.escape(d) for d in _ANY_DEPTH_DIRS)
+_ROOT_FILE_ALT = "|".join(re.escape(f) for f in _ROOT_FILES)
+_ANY_DEPTH_FILE_ALT = "|".join(re.escape(f) for f in _ANY_DEPTH_FILES)
 _PATH_TOKEN = re.compile(
     r"(?i)(?<![A-Za-z0-9_./-])("
-    + r"(?:(?:"
-    + "|".join(re.escape(d) for d in _TOP_DIRS)
-    + r")/[^\s`\"')\],:;|]+"
-    + r"|"
-    + "|".join(re.escape(f) for f in _ROOT_FILES)
-    + r")"
+    # ./scripts/foo or scripts/foo (repo-root prefixes only)
+    + rf"(?:\./)?(?:{_ROOT_ONLY_ALT})/{_PATH_REST}"
+    # ./CLAUDE.md or CLAUDE.md at repo root
+    + rf"|(?:\./)?(?:{_ROOT_FILE_ALT})"
+    # sub/.github/x or .github/x (any depth; parent segments optional)
+    + rf"|(?:\./)?(?:{_SEG}/)*(?:{_ANY_DEPTH_DIR_ALT})/{_PATH_REST}"
+    # sub/CLAUDE.md (any-depth instruction files; at least one parent)
+    + rf"|(?:\./)?(?:{_SEG}/)+(?:{_ANY_DEPTH_FILE_ALT})"
     + r")(?![A-Za-z0-9_./-])"
 )
 

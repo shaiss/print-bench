@@ -4517,6 +4517,30 @@ EOF
     echo "selftest: a burn ship step enables show_full_output" >&2
     exit 1
   fi
+  # Capture steps run post-agent git show — same GIT_* blank+unset as
+  # ship_outcome / Bundle, or a GITHUB_ENV plant wraps the restore (Bugbot).
+  burn_capture_n="$(grep -c 'name: Capture denied tools (link' "$burn" || true)"
+  [ "$burn_capture_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn Capture denied tools steps, found ${burn_capture_n}" >&2
+    exit 1
+  }
+  burn_cap_git_n="$(awk '
+    function flush() {
+      if (in_step && has_dir && has_exec && has_unset_dir && has_unset_exec) ok++
+      in_step = 0; has_dir = 0; has_exec = 0; has_unset_dir = 0; has_unset_exec = 0
+    }
+    /^      - name: Capture denied tools \(link/ { flush(); in_step = 1; next }
+    in_step && /^      - name:/ { flush(); next }
+    in_step && /GIT_DIR: ""/ { has_dir = 1 }
+    in_step && /GIT_EXEC_PATH: ""/ { has_exec = 1 }
+    in_step && /unset GIT_DIR GIT_WORK_TREE/ { has_unset_dir = 1 }
+    in_step && /GIT_EXEC_PATH \|\| true/ { has_unset_exec = 1 }
+    END { flush(); print ok+0 }
+  ' "$burn")"
+  [ "$burn_cap_git_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn Capture steps with GIT_DIR/GIT_EXEC_PATH blank+unset, found ${burn_cap_git_n}" >&2
+    exit 1
+  }
   grep -q 'name: Require ship branch or explicit decline' "$burn" || {
     echo "selftest: burn workflow lacks the #962 post-agent ship-outcome hard check" >&2
     exit 1

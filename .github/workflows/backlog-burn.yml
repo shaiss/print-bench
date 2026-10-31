@@ -703,9 +703,21 @@ jobs:
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
+          # Blank then unset (below): same plant defense as ship_outcome /
+          # Bundle — /usr/bin/git still honors GIT_DIR / GIT_EXEC_PATH /
+          # GIT_OBJECT_DIRECTORY from a GITHUB_ENV plant (Bugbot on #953).
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_EXEC_PATH: ""
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+            GIT_EXEC_PATH || true
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -833,9 +845,21 @@ jobs:
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
+          # Blank then unset (below): same plant defense as ship_outcome /
+          # Bundle — /usr/bin/git still honors GIT_DIR / GIT_EXEC_PATH /
+          # GIT_OBJECT_DIRECTORY from a GITHUB_ENV plant (Bugbot on #953).
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_EXEC_PATH: ""
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+            GIT_EXEC_PATH || true
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -961,9 +985,21 @@ jobs:
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
+          # Blank then unset (below): same plant defense as ship_outcome /
+          # Bundle — /usr/bin/git still honors GIT_DIR / GIT_EXEC_PATH /
+          # GIT_OBJECT_DIRECTORY from a GITHUB_ENV plant (Bugbot on #953).
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_EXEC_PATH: ""
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+            GIT_EXEC_PATH || true
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -1097,9 +1133,21 @@ jobs:
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
+          # Blank then unset (below): same plant defense as ship_outcome /
+          # Bundle — /usr/bin/git still honors GIT_DIR / GIT_EXEC_PATH /
+          # GIT_OBJECT_DIRECTORY from a GITHUB_ENV plant (Bugbot on #953).
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_EXEC_PATH: ""
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+            GIT_EXEC_PATH || true
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then
@@ -1224,9 +1272,21 @@ jobs:
           BASH_ENV: ""
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
+          # Blank then unset (below): same plant defense as ship_outcome /
+          # Bundle — /usr/bin/git still honors GIT_DIR / GIT_EXEC_PATH /
+          # GIT_OBJECT_DIRECTORY from a GITHUB_ENV plant (Bugbot on #953).
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_OBJECT_DIRECTORY: ""
+          GIT_ALTERNATE_OBJECT_DIRECTORIES: ""
+          GIT_EXEC_PATH: ""
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+            GIT_EXEC_PATH || true
           echo "present=0" >> "$GITHUB_OUTPUT"
           if [ -z "${START_SHA:-}" ] || [ -z "${CAPTURE_SHA256:-}" ] \
               || [ -z "${DIAG_SHA256:-}" ] || [ -z "${PROV_ARCHIVE_SHA256:-}" ]; then

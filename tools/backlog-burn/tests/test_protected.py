@@ -146,6 +146,36 @@ def test_bare_top_dir_word_is_not_a_free_text_path():
     ) == {"scripts/design-run-deliver.sh"}
 
 
+def test_dotted_and_nested_protected_prefixes_extract():
+    # Bugbot on #953: lookbehind used to treat ``/`` as a path char, so
+    # ``./scripts/...``, ``./CLAUDE.md``, and ``sub/.github/...`` never
+    # extracted — a safe Touches line plus one of those still selected.
+    assert prot.extract_scope_paths("x", "edit ./scripts/gate.sh") == {
+        "./scripts/gate.sh"
+    }
+    assert prot.extract_scope_paths("x", "see ./CLAUDE.md") == {"./CLAUDE.md"}
+    assert prot.extract_scope_paths(
+        "x", "also sub/.github/workflows/ci.yml"
+    ) == {"sub/.github/workflows/ci.yml"}
+    assert prot.extract_scope_paths("x", "nested sub/CLAUDE.md") == {
+        "sub/CLAUDE.md"
+    }
+    # Nested ``foo/scripts/bar`` must NOT look like a repo-root scripts/ path.
+    assert (
+        prot.extract_scope_paths("x", "mention foo/scripts/bar casually")
+        is None
+    )
+
+
+def test_safe_touches_plus_dotted_protected_still_skips():
+    reason = prot.protected_scope_reason(
+        "docs fix",
+        "Touches: docs/licensing.md\nPlease also update ./scripts/check.sh\n",
+    )
+    assert reason is not None
+    assert "protected path" in reason
+
+
 def test_touches_bare_scripts_still_counts():
     # An explicit Touches line may name a bare top-dir; that IS a path.
     assert prot.extract_scope_paths("x", "Touches: scripts\n") == {"scripts"}
