@@ -3770,6 +3770,154 @@ EOF
     echo "selftest: settle does not download the intents with the pinned action" >&2
     exit 1
   }
+  # #895: parse the settle job from the workflow text (stdlib only — no
+  # PyYAML; scad-check's clean setup-python has printcheck only) and assert
+  # the apply step's timeout-minutes leaves room for the always() cleanup
+  # that follows. Mutation controls prove the check fails when the timeout
+  # is removed or raised past job − margin — not a presence grep.
+  if ! python3 - "$workflow" <<'PY'
+import re
+import sys
+
+CLEANUP_MARGIN = 4
+APPLY_NAME = "Apply the agent's issue intents"
+CLEANUP_NAME = "Withdraw a dead run's SHIP-LOCK"
+path = sys.argv[1]
+
+
+def _settle_job(text: str) -> str:
+    m = re.search(
+        r"^  settle:\n(.*?)(?=^  [A-Za-z]|\Z)",
+        text, re.MULTILINE | re.DOTALL)
+    if not m:
+        raise AssertionError("workflow has no settle job")
+    return m.group(0)
+
+
+def _step_chunk(job: str, name: str) -> str | None:
+    # Steps are `      - name: …`. Match the name, then take until the next
+    # step at the same indent (or end of job).
+    pat = (
+        r"^      - name: " + re.escape(name) + r"[ \t]*\n"
+        r"(?:.*\n)*?"
+        r"(?=^      - name: |\Z)"
+    )
+    m = re.search(pat, job, re.MULTILINE)
+    return m.group(0) if m else None
+
+
+def _job_timeout(job: str) -> int:
+    # Job-level key is 4-space indent; step timeouts sit deeper.
+    found = re.findall(r"^    timeout-minutes: (\d+)[ \t]*$", job, re.MULTILINE)
+    if len(found) != 1:
+        raise AssertionError(
+            f"settle job timeout-minutes missing or ambiguous: {found!r}")
+    return int(found[0])
+
+
+def _step_timeout(step: str) -> int | None:
+    m = re.search(r"^        timeout-minutes: (\d+)[ \t]*$", step, re.MULTILINE)
+    return int(m.group(1)) if m else None
+
+
+def check(text: str) -> None:
+    settle = _settle_job(text)
+    job_timeout = _job_timeout(settle)
+    apply = _step_chunk(settle, APPLY_NAME)
+    if apply is None:
+        raise AssertionError(f"settle has no step named {APPLY_NAME!r}")
+    apply_timeout = _step_timeout(apply)
+    if apply_timeout is None:
+        raise AssertionError(
+            f"apply step has no timeout-minutes (#895)")
+    ceiling = job_timeout - CLEANUP_MARGIN
+    if not (apply_timeout < ceiling):
+        raise AssertionError(
+            f"apply timeout {apply_timeout} is not < job {job_timeout} "
+            f"- cleanup margin {CLEANUP_MARGIN} (= {ceiling})")
+    # Cleanup must appear AFTER apply in the settle job text.
+    apply_at = settle.find(f"- name: {APPLY_NAME}")
+    cleanup_at = settle.find(f"- name: {CLEANUP_NAME}")
+    if cleanup_at < 0 or cleanup_at <= apply_at:
+        raise AssertionError(
+            f"{CLEANUP_NAME!r} does not appear after the apply step")
+    cleanup = _step_chunk(settle, CLEANUP_NAME)
+    assert cleanup is not None  # found above
+    if "always()" not in cleanup:
+        raise AssertionError(
+            f"cleanup after apply is not if: always()")
+
+
+with open(path, encoding="utf-8") as f:
+    live = f.read()
+check(live)
+
+settle = _settle_job(live)
+job_t = _job_timeout(settle)
+apply_live = _step_chunk(settle, APPLY_NAME)
+assert apply_live is not None
+apply_t = _step_timeout(apply_live)
+assert apply_t is not None
+
+# Mutation A: strip the apply timeout — must fail.
+mut_rm = live.replace(
+    f"\n        timeout-minutes: {apply_t}\n",
+    "\n",
+    1)
+assert mut_rm != live, "removed-timeout mutation did not edit the apply step"
+try:
+    check(mut_rm)
+except AssertionError as e:
+    if "no timeout-minutes" not in str(e):
+        raise AssertionError(
+            f"removed-timeout mutation failed for the wrong reason: {e}") from e
+else:
+    raise AssertionError(
+        "removed-timeout mutation did not fail — the #895 pin is inert")
+
+# Mutation B: raise apply timeout to the job budget — must fail the margin.
+mut_big = live.replace(
+    f"\n        timeout-minutes: {apply_t}\n",
+    f"\n        timeout-minutes: {job_t}\n",
+    1)
+assert mut_big != live, "too-large-timeout mutation did not edit the apply step"
+try:
+    check(mut_big)
+except AssertionError as e:
+    if "is not < job" not in str(e):
+        raise AssertionError(
+            f"too-large-timeout mutation failed for the wrong reason: {e}") from e
+else:
+    raise AssertionError(
+        "too-large-timeout mutation did not fail — the #895 pin is inert")
+
+# Mutation C: cleanup loses always() — must fail.
+# The cleanup step's if: is a folded block starting with `always()`.
+# Replace only the first always() that appears after the apply step.
+apply_at = live.find(f"- name: {APPLY_NAME}")
+cleanup_at = live.find(f"- name: {CLEANUP_NAME}", apply_at)
+assert cleanup_at > apply_at
+head, tail = live[:cleanup_at], live[cleanup_at:]
+if "always()" not in tail:
+    raise AssertionError("fixture stale: cleanup has no always()")
+mut_if = head + tail.replace("always()", "success()", 1)
+assert mut_if != live
+try:
+    check(mut_if)
+except AssertionError as e:
+    if "not if: always()" not in str(e):
+        raise AssertionError(
+            f"cleanup-if mutation failed for the wrong reason: {e}") from e
+else:
+    raise AssertionError(
+        "cleanup-if mutation did not fail — the #895 pin is inert")
+
+print("ok   [#895 apply-step timeout pin + mutations]")
+PY
+  then
+    echo "selftest: #895 apply-step timeout pin failed" >&2
+    exit 1
+  fi
   # The settle job is the one issue-writing job left in this workflow —
   # checked against its permissions stanza, not its prose (the run-job
   # rule above).
@@ -4272,9 +4420,9 @@ EOF
     echo "selftest: burn bundle step still executes the worktree script" >&2
     exit 1
   }
-  # Accepted residual: backlog-burn has no orphan reaper (ppid=1 sweep,
-  # PID-snapshot, and cgroup-scope approaches were rejected). Bundle/pending
-  # still work without a re-digest race against a reaper.
+  # Accepted residual (#964): the Bundle step has no orphan reaper.
+  # Ship-outcome (#963) still reaps before exec; Bundle/pending must not
+  # reintroduce a re-digest race against a Bundle-step reaper.
   if printf '%s\n' "$burn_run" | grep -E 'reap_agent_orphans|reap_should_kill' >/dev/null; then
     echo "selftest: burn bundle step still defines an orphan reaper" >&2
     exit 1
@@ -4359,6 +4507,150 @@ EOF
     echo "selftest: a burn agent step still uses bypassPermissions" >&2
     exit 1
   fi
+  # #962: public logs must not dump tool inputs; diag is the post-ship check.
+  burn_no_full_n="$(grep -c 'show_full_output: false' "$burn" || true)"
+  [ "$burn_no_full_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn show_full_output: false pins, found ${burn_no_full_n}" >&2
+    exit 1
+  }
+  if grep -qE 'show_full_output:\s*true' "$burn"; then
+    echo "selftest: a burn ship step enables show_full_output" >&2
+    exit 1
+  fi
+  grep -q 'name: Require ship branch or explicit decline' "$burn" || {
+    echo "selftest: burn workflow lacks the #962 post-agent ship-outcome hard check" >&2
+    exit 1
+  }
+  grep -q 'ship_check_sha256=' "$burn" || {
+    echo "selftest: burn pin step does not hash backlog-burn-ship-check.sh" >&2
+    exit 1
+  }
+  # #962 security: the post-agent gate must restore from START_SHA into
+  # RUNNER_TEMP (same discipline as design-run-deliver). A worktree exec
+  # after Write/Edit would let prompt-injected issue text rewrite the gate
+  # that then runs with GH_TOKEN.
+  ship_check_run="$(awk '
+    /^      - name: Require ship branch or explicit decline/ { in_step = 1 }
+    in_step && /^        run: \|/ { printing = 1; next }
+    in_step && printing && /^      - name:/ { exit }
+    printing { print }
+  ' "$burn")"
+  [ -n "$ship_check_run" ] || {
+    echo "selftest: could not extract the burn ship-outcome run block" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep '/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/backlog-burn-ship-check.sh"' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not git-show the pinned script" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'SHIP_CHECK_SHA256' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not check the pre-agent sha256" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'objects/info/alternates' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not refuse object alternates" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'refusing to restore backlog-burn-ship-check' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not refuse a symlink restore" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep './scripts/backlog-burn-ship-check.sh' >/dev/null && {
+    echo "selftest: burn ship-outcome step still executes the worktree script" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep '"${RUNNER_TEMP}/backlog-burn-ship-check.sh"' >/dev/null \
+    || printf '%s\n' "$ship_check_run" | grep 'RUNNER_TEMP}/backlog-burn-ship-check.sh' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not exec the restored RUNNER_TEMP copy" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not unset planted GIT_DIR overrides" >&2
+    exit 1
+  }
+  # GIT_EXEC_PATH: /usr/bin/git still runs helpers from that dir (#963).
+  printf '%s\n' "$ship_check_run" | tr '\\' ' ' | tr '\n' ' ' | grep -E 'unset[[:space:]]+[^;]*GIT_EXEC_PATH' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not unset planted GIT_EXEC_PATH" >&2
+    exit 1
+  }
+  # Same orphan reap as Bundle before exec (#963 Security Reviewer).
+  printf '%s\n' "$ship_check_run" | grep 'reap_agent_orphans' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not reap agent orphans before exec" >&2
+    exit 1
+  }
+  # #962 security: gh comment fetch must not follow a planted GH_HOST /
+  # GH_CONFIG_DIR / proxy (token exfil + forged Bot DECLINED). The
+  # workflow unsets any planted GH_CONFIG_DIR; the restored script
+  # mktemps an empty dir immediately before gh (never reuses one).
+  # GH_BIN pin (same as Bundle): step env beats a GITHUB_ENV plant that
+  # would otherwise receive GH_TOKEN (#963 Bugbot / Agentic Security).
+  ship_check_env="$(awk '
+    /^      - name: Require ship branch or explicit decline/ { in_step = 1 }
+    in_step && /^        env:/ { printing = 1; next }
+    in_step && printing && /^        (shell|run):/ { exit }
+    printing { print }
+  ' "$burn")"
+  [ -n "$ship_check_env" ] || {
+    echo "selftest: could not extract the burn ship-outcome env block" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_env" | grep -qx '          GIT_EXEC_PATH: ""' || {
+    echo "selftest: burn ship-outcome step does not blank GIT_EXEC_PATH in env" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_env" | grep -qx '          GH_BIN: /usr/bin/gh' || {
+    echo "selftest: burn ship-outcome step does not pin GH_BIN=/usr/bin/gh" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'export GH_BIN=/usr/bin/gh' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not re-export GH_BIN=/usr/bin/gh" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_env" | grep -qx '          GH_PAGER: cat' || {
+    echo "selftest: burn ship-outcome step does not pin GH_PAGER=cat" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'export GH_PAGER=cat' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not re-export GH_PAGER=cat" >&2
+    exit 1
+  }
+  grep -q 'GH_HOST: github.com' "$burn" || {
+    echo "selftest: burn ship-outcome step does not pin GH_HOST=github.com" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'export GH_HOST=github.com' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not re-export GH_HOST=github.com" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | tr '\\' ' ' | tr '\n' ' ' | grep -E 'unset[[:space:]]+[^;]*GH_CONFIG_DIR' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not unset planted GH_CONFIG_DIR" >&2
+    exit 1
+  }
+  if printf '%s\n' "$ship_check_run" | grep 'export GH_CONFIG_DIR=' >/dev/null; then
+    echo "selftest: burn ship-outcome step still pre-creates GH_CONFIG_DIR (poison window)" >&2
+    exit 1
+  fi
+  ship_check_src="$repo_root/scripts/backlog-burn-ship-check.sh"
+  grep -q 'GIT_EXEC_PATH' "$ship_check_src" || {
+    echo "selftest: ship-check does not clear planted GIT_EXEC_PATH" >&2
+    exit 1
+  }
+  grep -q 'GH_PAGER=cat' "$ship_check_src" || {
+    echo "selftest: ship-check does not force GH_PAGER=cat before gh" >&2
+    exit 1
+  }
+  grep -q 'bb-gh-config' "$ship_check_src" || {
+    echo "selftest: ship-check does not mktemp a fresh empty GH_CONFIG_DIR at call site" >&2
+    exit 1
+  }
+  grep -qF -- '--hostname github.com' "$ship_check_src" || {
+    echo "selftest: ship-check gh call does not pass --hostname github.com" >&2
+    exit 1
+  }
+  grep -q 'refusing non-empty GH_CONFIG_DIR' "$ship_check_src" || {
+    echo "selftest: ship-check does not refuse a poisoned non-empty GH_CONFIG_DIR" >&2
+    exit 1
+  }
   burn_scrub_n="$(grep -c 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"' "$burn" || true)"
   [ "$burn_scrub_n" -eq 5 ] || {
     echo "selftest: expected 5 burn subprocess env scrubs, found ${burn_scrub_n}" >&2
@@ -4576,12 +4868,98 @@ EOF
     echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
     exit 1
   }
-  # backlog-burn ships with no orphan reaper (accepted residual). Refuse any
-  # reintroduction of ppid=1 / PID-snapshot / cgroup-scope reap machinery.
-  if grep -E 'reap_should_kill|reap_agent_orphans|pid_snap|PID_SNAP|backlog-burn-pid-snap|bb-scoped-claude|systemd-run|systemctl kill|cgroup-reap' "$burn" >/dev/null; then
-    echo "selftest: backlog-burn.yml still carries orphan-reaper / cgroup-scope machinery" >&2
+  # Exactly one reaper: ship-outcome (before exec). Bundle must not define one
+  # (#964 tracks Bundle reaper looping separately; #953 removed it).
+  burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
+  [ "$burn_reap_n" -eq 1 ] || {
+    echo "selftest: expected the reaper predicate only in the burn ship-outcome step, found ${burn_reap_n}" >&2
     exit 1
-  fi
+  }
+  burn_reap_a="$(awk '
+    /reap_should_kill\(\) \{/ { c++; if (c==1) p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$burn")"
+  (
+    eval "$burn_reap_a"
+    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
+    # ship-outcome reaper: ppid=1 dies even with cwd outside the tree.
+    # 10th arg is exe path. /home/runner/... is NOT a keep path (writable).
+    if reap_should_kill 55 1 sleep /tmp "harmless-argv" 3 "" 99 1 /tmp/evil-watch; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept a ppid=1 process outside the tree" >&2
+      exit 1
+    fi
+    if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1 /usr/lib/systemd/systemd; then
+      echo "selftest: burn ship-outcome reap_should_kill killed root-owned systemd exe" >&2
+      exit 1
+    fi
+    # Planted runner-path binary must be killed (home is writable).
+    if reap_should_kill 55 1 Runner.Worker /tmp "x" 3 "" 99 1 /home/runner/runners/2.0.0/bin/Runner.Worker; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept planted /home/runner Runner.Worker" >&2
+      exit 1
+    fi
+    # Spoofed comm with evil exe must still be killed.
+    if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1 /tmp/evil-watch; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept comm=systemd with evil exe" >&2
+      exit 1
+    fi
+    # Foreign setsid leader, cwd outside tree.
+    if reap_should_kill 77 42 sleep /tmp "x" 77 "" 99 1 /tmp/evil-watch; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept a foreign session leader" >&2
+      exit 1
+    fi
+  )
+  # ship-outcome must pin GITHUB_WORKSPACE and exec via a held fd.
+  printf '%s\n' "$ship_check_env" | grep -qx '          GITHUB_WORKSPACE: ${{ github.workspace }}' || {
+    echo "selftest: burn ship-outcome step does not pin GITHUB_WORKSPACE" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep '/proc/self/fd/3' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not exec the pinned inode via /proc/self/fd" >&2
+    exit 1
+  }
+  # Must not reopen the path after the fd pin (Bugbot / Security Reviewer).
+  reopen_n="$(printf '%s\n' "$ship_check_run" | grep -v '^[[:space:]]*#' | grep -c 'exec 3<' || true)"
+  [ "$reopen_n" -eq 1 ] || {
+    echo "selftest: burn ship-outcome must open fd 3 exactly once (found ${reopen_n})" >&2
+    exit 1
+  }
+  # Sealed unlinked inode: copy → open → rm before exec (in-place overwrite).
+  printf '%s\n' "$ship_check_run" | grep 'ship-check-sealed' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not seal the script to a private inode" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | tr '\\' ' ' | tr '\n' ' ' | grep -E 'exec 3<"\$sealed".*rm -f -- "\$sealed"' >/dev/null \
+    || printf '%s\n' "$ship_check_run" | grep -A2 'exec 3<"\$sealed"' | grep 'rm -f -- "\$sealed"' >/dev/null || {
+    echo "selftest: burn ship-outcome does not unlink the sealed path before exec" >&2
+    exit 1
+  }
+  # Allowlist must key on /proc/pid/exe, not spoofable/truncated comm.
+  ship_reap_body="$(awk '
+    /^      - name: Require ship branch or explicit decline/ { in_step=1 }
+    in_step && /reap_should_kill\(\) \{/ { p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$burn")"
+  printf '%s\n' "$ship_reap_body" | grep -v '^[[:space:]]*#' | grep -E 'Agent\.\*(\||\))|systemd\*(\||\))' >/dev/null && {
+    echo "selftest: burn ship-outcome reap still uses spoofable Agent.*/systemd* globs" >&2
+    exit 1
+  }
+  # Must NOT keep job-writable /home/runner/runners paths.
+  printf '%s\n' "$ship_reap_body" | grep -v '^[[:space:]]*#' | grep -F '/home/runner/runners' >/dev/null && {
+    echo "selftest: burn ship-outcome reap still allowlists writable /home/runner/runners paths" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_reap_body" | grep -F '/usr/lib/systemd/' >/dev/null || {
+    echo "selftest: burn ship-outcome reap does not keep root-owned systemd exe paths" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_reap_body" | grep -F 'anc="$self_pid"' >/dev/null || {
+    echo "selftest: burn ship-outcome reap does not protect process ancestors" >&2
+    exit 1
+  }
+  # Narrow ban: refuse reintroduction of PID-snapshot / cgroup-scope Bundle
+  # machinery only (ship-outcome reaper above is intentional).
   if [ -f "${repo_root}/scripts/backlog-burn-pid-snap.sh" ]; then
     echo "selftest: scripts/backlog-burn-pid-snap.sh must not exist" >&2
     exit 1

@@ -221,6 +221,12 @@ jobs:
           echo "capture_sha256=${capture_sha256}" >> "$GITHUB_OUTPUT"
           prov_archive_sha256="$(git --no-replace-objects archive HEAD tools/provenance/src | sha256sum | awk '{print $1}')"
           echo "prov_archive_sha256=${prov_archive_sha256}" >> "$GITHUB_OUTPUT"
+          # Same pin for the #962 post-agent ship-outcome gate: that step
+          # restores scripts/backlog-burn-ship-check.sh from START_SHA into
+          # RUNNER_TEMP and refuses a digest mismatch (dontAsk cannot stop
+          # the agent rewriting the worktree copy before the gate runs).
+          ship_check_sha256="$(git --no-replace-objects show "HEAD:scripts/backlog-burn-ship-check.sh" | sha256sum | awk '{print $1}')"
+          echo "ship_check_sha256=${ship_check_sha256}" >> "$GITHUB_OUTPUT"
 
       - name: Prove lock-cleanup restore leaves a regular file
         # #923: fail loudly BEFORE any agent work if the settle job's
@@ -654,10 +660,16 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link1_model }} --effort max
-          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
           # Transcript stays hidden (issue #885 spin diagnosis). Do not flip
           # this on — the capture step below reads the execution log only.
-          show_full_output: "false"
+          # show_full_output stays false (#962): public logs must not dump
+          # tool inputs. Bounded subtype / denial-tool / len+sha256 diag
+          # is printed by the post-ship hard check instead.
+          show_full_output: false
+          prompt: |
+            /ship-issue ${{ steps.select.outputs.issue }}
+
+            Unattended backlog-burn hard stop (issue #962): before ending your turn you MUST either (1) have checked out `claude/issue-${{ steps.select.outputs.issue }}-<slug>` (create it with `git checkout -b` / `git switch -c` — local only) and committed the work, OR (2) have posted an explicit stop whose first line is `🚢 DECLINED`, `🚦 DECISION NEEDED`, or `🚢 DEFERRED`. Ending on `main` with no stop is a failed ship, not a success. Do not `git push` and do not `gh pr create` — delivery does both.
 
       # Sanitized denial capture. if: always() so a failed/cancelled link
       # still leaves a diagnostic. show_full_output stays false above.
@@ -785,8 +797,11 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link2_model }} --effort max
-          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
-          show_full_output: "false"
+          show_full_output: false
+          prompt: |
+            /ship-issue ${{ steps.select.outputs.issue }}
+
+            Unattended backlog-burn hard stop (issue #962): before ending your turn you MUST either (1) have checked out `claude/issue-${{ steps.select.outputs.issue }}-<slug>` (create it with `git checkout -b` / `git switch -c` — local only) and committed the work, OR (2) have posted an explicit stop whose first line is `🚢 DECLINED`, `🚦 DECISION NEEDED`, or `🚢 DEFERRED`. Ending on `main` with no stop is a failed ship, not a success. Do not `git push` and do not `gh pr create` — delivery does both.
 
       - name: Capture denied tools (link 2)
         id: diag_2
@@ -910,8 +925,11 @@ jobs:
           anthropic_api_key: ${{ secrets.ZAI_KEY }}
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link3_model }} --effort max
-          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
-          show_full_output: "false"
+          show_full_output: false
+          prompt: |
+            /ship-issue ${{ steps.select.outputs.issue }}
+
+            Unattended backlog-burn hard stop (issue #962): before ending your turn you MUST either (1) have checked out `claude/issue-${{ steps.select.outputs.issue }}-<slug>` (create it with `git checkout -b` / `git switch -c` — local only) and committed the work, OR (2) have posted an explicit stop whose first line is `🚢 DECLINED`, `🚦 DECISION NEEDED`, or `🚢 DEFERRED`. Ending on `main` with no stop is a failed ship, not a success. Do not `git push` and do not `gh pr create` — delivery does both.
 
       - name: Capture denied tools (link 3)
         id: diag_3
@@ -1043,8 +1061,11 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link4_model }} --effort max
-          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
-          show_full_output: "false"
+          show_full_output: false
+          prompt: |
+            /ship-issue ${{ steps.select.outputs.issue }}
+
+            Unattended backlog-burn hard stop (issue #962): before ending your turn you MUST either (1) have checked out `claude/issue-${{ steps.select.outputs.issue }}-<slug>` (create it with `git checkout -b` / `git switch -c` — local only) and committed the work, OR (2) have posted an explicit stop whose first line is `🚢 DECLINED`, `🚦 DECISION NEEDED`, or `🚢 DEFERRED`. Ending on `main` with no stop is a failed ship, not a success. Do not `git push` and do not `gh pr create` — delivery does both.
 
       - name: Capture denied tools (link 4)
         id: diag_4
@@ -1167,8 +1188,11 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link5_model }} --effort max
-          prompt: "/ship-issue ${{ steps.select.outputs.issue }}"
-          show_full_output: "false"
+          show_full_output: false
+          prompt: |
+            /ship-issue ${{ steps.select.outputs.issue }}
+
+            Unattended backlog-burn hard stop (issue #962): before ending your turn you MUST either (1) have checked out `claude/issue-${{ steps.select.outputs.issue }}-<slug>` (create it with `git checkout -b` / `git switch -c` — local only) and committed the work, OR (2) have posted an explicit stop whose first line is `🚢 DECLINED`, `🚦 DECISION NEEDED`, or `🚢 DEFERRED`. Ending on `main` with no stop is a failed ship, not a success. Do not `git push` and do not `gh pr create` — delivery does both.
 
       - name: Capture denied tools (link 5)
         id: diag_5
@@ -1275,6 +1299,302 @@ jobs:
       # shares this UID and can race any on-disk tree between steps.
       # (show_full_output stays false; the artifact is redacted denial +
       # truncated assistant message only.)
+
+      # #962: claude-code-action exits 0 with subtype=success whenever the
+      # model ends its turn without an API error (#538). A green ship step
+      # with HEAD still on main and no decline used to reach settle, which
+      # then redded with "neither delivered nor declined". Fail clearly
+      # here — after the walk, before the bundle — unless HEAD is on
+      # claude/issue-<N>-* or the thread carries an explicit stop marker
+      # settle already recognizes. Also print bounded redacted diag
+      # (subtype, denial tool names only, final-message len+sha256 — no text).
+      #
+      # The script is NOT the worktree copy. Write/Edit are allowed in the
+      # ship steps, and dontAsk denies cannot stop the agent rewriting
+      # scripts/backlog-burn-ship-check.sh (or replacing it with a symlink)
+      # before this step runs with GH_TOKEN. Same restore discipline as the
+      # design-run-deliver / routine-lock-cleanup pins: read the blob from
+      # START_SHA, refuse a symlink / alternates, hash-pin against the
+      # pre-agent digest, execute a regular file in $RUNNER_TEMP.
+      - name: Require ship branch or explicit decline
+        id: ship_outcome
+        # Bound the gate (incl. diag redact): pathological eyJ input was
+        # quadratic in the #953 JWT pattern (MED-B on #963). 10 min leaves
+        # room for gh comment fetch + reaper; the script also hard-caps
+        # redact input at ~20 KiB before any regex.
+        timeout-minutes: 10
+        if: >-
+          always()
+          && steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && (steps.ship_zai_1.outcome == 'success'
+              || steps.ship_zai_2.outcome == 'success'
+              || steps.ship_zai_3.outcome == 'success'
+              || steps.ship_anthropic_4.outcome == 'success'
+              || steps.ship_anthropic_5.outcome == 'success'
+              || steps.ship_zai_1.outcome == 'failure'
+              || steps.ship_zai_2.outcome == 'failure'
+              || steps.ship_zai_3.outcome == 'failure'
+              || steps.ship_anthropic_4.outcome == 'failure'
+              || steps.ship_anthropic_5.outcome == 'failure')
+        # No continue-on-error: a missing branch/decline must red the burn
+        # job itself (settle still runs via always() for lock cleanup).
+        # Bundle below also uses always(), so cleanup stays reachable.
+        env:
+          ISSUE: ${{ steps.select.outputs.issue }}
+          JOB_WINDOW_START: ${{ steps.job_window.outputs.start }}
+          START_SHA: ${{ steps.start_ref.outputs.sha }}
+          SHIP_CHECK_SHA256: ${{ steps.start_ref.outputs.ship_check_sha256 }}
+          SHIP_CHECK_WORKTREE: ${{ github.workspace }}
+          GH_TOKEN: ${{ github.token }}
+          # Pin gh destination / config so a GITHUB_ENV plant cannot redirect
+          # the job token (Security Reviewer on #962): GH_HOST, enterprise
+          # token, proxies, and SSL bundle overrides. The script also makes a
+          # fresh GH_CONFIG_DIR before any gh call.
+          # Uppercase proxy keys only in env: — actionlint treats env keys
+          # case-insensitively, so listing http_proxy beside HTTP_PROXY is a
+          # duplicate. Lowercase plants are cleared by the unset below (and
+          # again in the restored ship-check script immediately before gh).
+          # GH_BIN pin matches the Bundle step: step env beats a GITHUB_ENV
+          # plant of GH_BIN that would otherwise receive GH_TOKEN (Bugbot /
+          # Agentic Security Review on #962 / #963).
+          GH_BIN: /usr/bin/gh
+          GH_HOST: github.com
+          GH_ENTERPRISE_TOKEN: ""
+          # Disable planted pagers: with GH_FORCE_TTY, gh api --paginate still
+          # execs GH_PAGER/PAGER and that child inherits GH_TOKEN (Security
+          # Reviewer on #963). Pin to cat; script also unsets before gh.
+          GH_PAGER: cat
+          PAGER: cat
+          GH_FORCE_TTY: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          SSL_CERT_FILE: ""
+          SSL_CERT_DIR: ""
+          CURL_CA_BUNDLE: ""
+          REQUESTS_CA_BUNDLE: ""
+          NODE_EXTRA_CA_CERTS: ""
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # Blank REPO_OWNER: stop_trusted must not honor a GITHUB_ENV plant
+          # of an attacker login (Agentic Security Review on #963). The
+          # restored script also unsets it and derives owner only from
+          # GITHUB_REPOSITORY.
+          REPO_OWNER: ""
+          # Pin workspace: the reaper's cwd match must not follow a planted
+          # GITHUB_WORKSPACE (Security Reviewer on #963).
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+          NODE_OPTIONS: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          # Blank then unset: an empty GIT_DIR is still set, and git treats
+          # that as the git dir (same discipline as the bundle step).
+          # GIT_EXEC_PATH too: /usr/bin/git still execs helpers from that
+          # dir, so a GITHUB_ENV plant can wrap git-show / git-symbolic-ref
+          # and steal GH_TOKEN (Agentic Security Review on #963).
+          GIT_DIR: ""
+          GIT_WORK_TREE: ""
+          GIT_CONFIG_PARAMETERS: ""
+          GIT_EXEC_PATH: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
+            GIT_EXEC_PATH \
+            GH_ENTERPRISE_TOKEN GH_CONFIG_DIR GH_FORCE_TTY \
+            HTTP_PROXY HTTPS_PROXY ALL_PROXY \
+            http_proxy https_proxy all_proxy \
+            SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
+            NODE_EXTRA_CA_CERTS \
+            REPO_OWNER || true
+          # Do NOT pre-create GH_CONFIG_DIR here: a same-uid leftover from
+          # the ship walk can poison a RUNNER_TEMP dir before gh runs
+          # (Bugbot on #962). The restored script mktemps an empty dir
+          # immediately before the gh call and refuses a non-empty one.
+          export GH_BIN=/usr/bin/gh
+          export GH_HOST=github.com
+          export GH_PAGER=cat
+          export PAGER=cat
+          unset GH_FORCE_TTY || true
+          # Reap dontAsk orphans before exec. Stricter than Bundle: a walk
+          # can cd /tmp so cwd/argv filters alone miss the watcher
+          # (Security Reviewer on #963). Kill ppid=1 / foreign session
+          # leaders / run-*.scope after keep rules that do NOT trust:
+          #   - comm (PR_SET_NAME / argv0 — spoofable, 15-byte truncated)
+          #   - /home/runner/runners/*/bin/* (job-writable — plantable)
+          # Keep only our process ancestors (the real Runner.Worker) and
+          # root-owned system paths. Then seal + exec via unlinked O_RDONLY fd.
+          # Optional 10th arg is exe path for selftests (no live /proc).
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            local exe="${10:-}" anc
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            # Never kill ancestors of this shell (protects the real runner).
+            anc="$self_pid"
+            while [ -n "$anc" ] && [ "$anc" != "0" ] && [ "$anc" != "1" ]; do
+              [ "$anc" = "$pid" ] && return 1
+              anc="$(awk '/^PPid:/ { print $2; exit }' "/proc/${anc}/status" 2>/dev/null || true)"
+            done
+            if [ -z "$exe" ]; then
+              exe="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
+            fi
+            # Root-owned system paths only — never /home/runner (writable).
+            case "$exe" in
+              /usr/lib/systemd/*|/lib/systemd/*|/usr/lib/snapd/snapd)
+                return 1 ;;
+              /usr/bin/containerd|/usr/bin/containerd-shim*|/usr/bin/dockerd|\
+              /usr/bin/dbus-daemon|/usr/sbin/dbus-daemon)
+                return 1 ;;
+            esac
+            # ppid=1 orphan: kill even when cwd is outside workspace/temp
+            # (a walk can cd /tmp and still rewrite RUNNER_TEMP by path).
+            if [ "$ppid" = "1" ]; then
+              return 0
+            fi
+            # Foreign session leader (setsid), regardless of cwd.
+            if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*) return 0 ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup exe
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              exe="$(readlink -f "$d/exe" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$" "$exe"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
+          if [ -z "${START_SHA:-}" ]; then
+            echo "::error::START_SHA is empty — the pin step did not run" >&2
+            exit 1
+          fi
+          if [ -z "${SHIP_CHECK_SHA256:-}" ]; then
+            echo "::error::SHIP_CHECK_SHA256 is empty — the pin step did not hash the script" >&2
+            exit 1
+          fi
+          if [ -z "${SHIP_CHECK_WORKTREE:-}" ]; then
+            echo "::error::SHIP_CHECK_WORKTREE is empty" >&2
+            exit 1
+          fi
+          if [ -z "${RUNNER_TEMP:-}" ]; then
+            echo "::error::RUNNER_TEMP is empty" >&2
+            exit 1
+          fi
+          git_dir="$(/usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= rev-parse --git-dir)"
+          if [ -e "${git_dir}/objects/info/alternates" ] || [ -L "${git_dir}/objects/info/alternates" ]; then
+            echo "::error::refusing to restore backlog-burn-ship-check: git object alternates are present" >&2
+            exit 1
+          fi
+          if [ -L scripts ] || [ -L scripts/backlog-burn-ship-check.sh ]; then
+            echo "::error::refusing to restore backlog-burn-ship-check: scripts/ or the script is a symlink" >&2
+            exit 1
+          fi
+          blob_tmp="$(mktemp "${RUNNER_TEMP}/backlog-burn-ship-check-blob.XXXXXX")"
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::refusing to restore backlog-burn-ship-check through a symlink" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= show "$START_SHA:scripts/backlog-burn-ship-check.sh" > "$blob_tmp"; then
+            rm -f "$blob_tmp"
+            echo "::error::could not restore backlog-burn-ship-check.sh from ${START_SHA}" >&2
+            exit 1
+          fi
+          if [ -L "$blob_tmp" ] || [ ! -f "$blob_tmp" ]; then
+            echo "::error::backlog-burn-ship-check restore did not leave a regular file" >&2
+            exit 1
+          fi
+          restore_tmp="${RUNNER_TEMP}/backlog-burn-ship-check.sh"
+          if [ -L "$restore_tmp" ]; then
+            rm -f "$restore_tmp"
+          fi
+          mv -f "$blob_tmp" "$restore_tmp"
+          if [ -L "$restore_tmp" ] || [ ! -f "$restore_tmp" ]; then
+            echo "::error::backlog-burn-ship-check restore did not leave a regular file" >&2
+            exit 1
+          fi
+          chmod +x "$restore_tmp"
+          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
+            echo "::error::restored backlog-burn-ship-check.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          reap_agent_orphans
+          # Seal onto a private inode, open O_RDONLY, unlink the path, then
+          # exec via the held fd. A path rewrite of restore_tmp cannot
+          # redirect us; an in-place overwrite of a still-linked path also
+          # cannot (Security Reviewer: /proc/self/fd/N tracks a live path
+          # until unlinked). O_RDONLY so a peer opening our fd cannot write.
+          sealed="$(mktemp "${RUNNER_TEMP}/backlog-burn-ship-check-sealed.XXXXXX")"
+          if [ -L "$sealed" ] || [ ! -f "$sealed" ]; then
+            echo "::error::refusing sealed ship-check through a symlink" >&2
+            exit 1
+          fi
+          cp -f -- "$restore_tmp" "$sealed"
+          chmod 400 "$sealed"
+          got="$(sha256sum "$sealed" | awk '{print $1}')"
+          if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
+            rm -f -- "$sealed"
+            echo "::error::sealed backlog-burn-ship-check.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          exec 3<"$sealed"
+          rm -f -- "$sealed"
+          got="$(sha256sum /proc/self/fd/3 | awk '{print $1}')"
+          if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
+            echo "::error::sealed ship-check sha256 changed after unlink (possible orphan rewrite)" >&2
+            exit 1
+          fi
+          exec /usr/bin/bash --noprofile --norc /proc/self/fd/3 \
+            --issue "$ISSUE" \
+            --run-started-at "$JOB_WINDOW_START" \
+            --execution-log "${RUNNER_TEMP}/claude-execution-output.json"
 
       # The agent can append to GITHUB_PATH and GITHUB_ENV. Those files are
       # per-step: emptying them here would not undo PATH or BASH_ENV the
