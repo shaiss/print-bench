@@ -4906,6 +4906,12 @@ EOF
     echo "selftest: burn ship-outcome step does not exec the pinned inode via /proc/self/fd" >&2
     exit 1
   }
+  # Must not reopen the path after the fd pin (Bugbot / Security Reviewer).
+  reopen_n="$(printf '%s\n' "$ship_check_run" | grep -c 'exec 3<' || true)"
+  [ "$reopen_n" -eq 1 ] || {
+    echo "selftest: burn ship-outcome must open fd 3 exactly once (found ${reopen_n})" >&2
+    exit 1
+  }
   grep -q '  triage:' "$burn" || {
     echo "selftest: burn provider-triage is not a separate job" >&2
     exit 1

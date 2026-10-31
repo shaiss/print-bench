@@ -957,15 +957,16 @@ jobs:
           reap_agent_orphans
           # Hold an open fd to the pinned inode, then re-hash and exec via
           # that fd. A path rewrite of $restore_tmp after the digest check
-          # cannot redirect what we run (Security Reviewer on #963).
+          # cannot redirect what we run (Security Reviewer / Bugbot on #963).
+          # Do NOT reopen by path after the hash: sha256sum opens its own
+          # description and leaves our fd at offset 0 — a second
+          # exec 3<"$restore_tmp" would throw away the inode pin.
           exec 3<"$restore_tmp"
           got="$(sha256sum /proc/self/fd/3 | awk '{print $1}')"
           if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
             echo "::error::backlog-burn-ship-check.sh sha256 changed after reap (possible orphan rewrite)" >&2
             exit 1
           fi
-          # Reopen so bash reads from offset 0 (sha256sum consumed the fd).
-          exec 3<"$restore_tmp"
           exec /usr/bin/bash --noprofile --norc /proc/self/fd/3 \
             --issue "$ISSUE" \
             --run-started-at "$JOB_WINDOW_START" \
