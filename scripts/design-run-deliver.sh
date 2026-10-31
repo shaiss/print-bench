@@ -275,7 +275,10 @@ is_protected_path() {
   local norm
   norm="$(normalize_repo_path "$1")" || return 0
   case "$norm" in
-    .github|.github/*|scripts|scripts/*|tools|tools/*) return 0 ;;
+    # .github at any depth (leading ./ stripped by normalize; sub/.github/x
+    # is as dangerous as the root tree — Security on #953). scripts/tools
+    # stay repo-root prefixes (a designs/.../scripts/ path is a design asset).
+    .github|.github/*|*/.github|*/.github/*|scripts|scripts/*|tools|tools/*) return 0 ;;
     # agent-instruction-path-drift (issue #869 / #879): any-depth, case-folded.
     # Keep these patterns in sync with the drift guard in
     # tools/model-registry/tests/test_workflow_drift.py.
@@ -4417,14 +4420,17 @@ EOF
     echo "selftest: burn bundle step still executes the worktree script" >&2
     exit 1
   }
-  printf '%s\n' "$burn_run" | grep 'reap_agent_orphans' >/dev/null || {
-    echo "selftest: burn bundle step does not reap detached agent processes" >&2
+  # Accepted residual (#964): the Bundle step has no orphan reaper.
+  # Ship-outcome (#963) still reaps before exec; Bundle/pending must not
+  # reintroduce a re-digest race against a Bundle-step reaper.
+  if printf '%s\n' "$burn_run" | grep -E 'reap_agent_orphans|reap_should_kill' >/dev/null; then
+    echo "selftest: burn bundle step still defines an orphan reaper" >&2
     exit 1
-  }
-  printf '%s\n' "$burn_run" | grep 'now" != "$captured"' >/dev/null || {
-    echo "selftest: burn bundle step does not re-check the bundle after the reap" >&2
+  fi
+  if printf '%s\n' "$burn_run" | grep 'now" != "$captured"' >/dev/null; then
+    echo "selftest: burn bundle step still re-checks digest after a removed reap" >&2
     exit 1
-  }
+  fi
   grep -q 'deliver_sha256=' "$burn" || {
     echo "selftest: the burn pre-agent pin does not record deliver_sha256" >&2
     exit 1
@@ -4511,6 +4517,30 @@ EOF
     echo "selftest: a burn ship step enables show_full_output" >&2
     exit 1
   fi
+  # Capture steps run post-agent git show — same GIT_* blank+unset as
+  # ship_outcome / Bundle, or a GITHUB_ENV plant wraps the restore (Bugbot).
+  burn_capture_n="$(grep -c 'name: Capture denied tools (link' "$burn" || true)"
+  [ "$burn_capture_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn Capture denied tools steps, found ${burn_capture_n}" >&2
+    exit 1
+  }
+  burn_cap_git_n="$(awk '
+    function flush() {
+      if (in_step && has_dir && has_exec && has_unset_dir && has_unset_exec) ok++
+      in_step = 0; has_dir = 0; has_exec = 0; has_unset_dir = 0; has_unset_exec = 0
+    }
+    /^      - name: Capture denied tools \(link/ { flush(); in_step = 1; next }
+    in_step && /^      - name:/ { flush(); next }
+    in_step && /GIT_DIR: ""/ { has_dir = 1 }
+    in_step && /GIT_EXEC_PATH: ""/ { has_exec = 1 }
+    in_step && /unset GIT_DIR GIT_WORK_TREE/ { has_unset_dir = 1 }
+    in_step && /GIT_EXEC_PATH \|\| true/ { has_unset_exec = 1 }
+    END { flush(); print ok+0 }
+  ' "$burn")"
+  [ "$burn_cap_git_n" -eq 5 ] || {
+    echo "selftest: expected 5 burn Capture steps with GIT_DIR/GIT_EXEC_PATH blank+unset, found ${burn_cap_git_n}" >&2
+    exit 1
+  }
   grep -q 'name: Require ship branch or explicit decline' "$burn" || {
     echo "selftest: burn workflow lacks the #962 post-agent ship-outcome hard check" >&2
     exit 1
@@ -4862,10 +4892,11 @@ EOF
     echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
     exit 1
   }
-  # Two copies: ship-outcome (before exec) and Bundle (before write_bundle).
+  # Exactly one reaper: ship-outcome (before exec). Bundle must not define one
+  # (#964 tracks Bundle reaper looping separately; #953 removed it).
   burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
-  [ "$burn_reap_n" -eq 2 ] || {
-    echo "selftest: expected the reaper predicate in the burn ship-outcome and bundle steps, found ${burn_reap_n}" >&2
+  [ "$burn_reap_n" -eq 1 ] || {
+    echo "selftest: expected the reaper predicate only in the burn ship-outcome step, found ${burn_reap_n}" >&2
     exit 1
   }
   burn_reap_a="$(awk '
@@ -4899,23 +4930,6 @@ EOF
     # Foreign setsid leader, cwd outside tree.
     if reap_should_kill 77 42 sleep /tmp "x" 77 "" 99 1 /tmp/evil-watch; then :; else
       echo "selftest: burn ship-outcome reap_should_kill kept a foreign session leader" >&2
-      exit 1
-    fi
-  )
-  burn_reap_b="$(awk '
-    /reap_should_kill\(\) \{/ { c++; if (c==2) p=1 }
-    p { print }
-    p && /^          \}$/ { exit }
-  ' "$burn")"
-  (
-    eval "$burn_reap_b"
-    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
-    if reap_should_kill 55 1 sleep / "backlog-burn.bundle" 3 "" 99 1; then :; else
-      echo "selftest: burn bundle reap_should_kill kept a process mentioning the burn bundle" >&2
-      exit 1
-    fi
-    if reap_should_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1; then
-      echo "selftest: burn bundle reap_should_kill killed a process outside the burn" >&2
       exit 1
     fi
   )
@@ -4968,6 +4982,20 @@ EOF
     echo "selftest: burn ship-outcome reap does not protect process ancestors" >&2
     exit 1
   }
+  # Narrow ban: refuse reintroduction of PID-snapshot / cgroup-scope Bundle
+  # machinery only (ship-outcome reaper above is intentional).
+  if [ -f "${repo_root}/scripts/backlog-burn-pid-snap.sh" ]; then
+    echo "selftest: scripts/backlog-burn-pid-snap.sh must not exist" >&2
+    exit 1
+  fi
+  if [ -e "${repo_root}/.github/actions/bb-scoped-claude" ]; then
+    echo "selftest: .github/actions/bb-scoped-claude must not exist" >&2
+    exit 1
+  fi
+  if [ -f "${repo_root}/.github/workflows/backlog-burn-cgroup-reap.yml" ]; then
+    echo "selftest: backlog-burn-cgroup-reap.yml must not exist" >&2
+    exit 1
+  fi
   grep -q '  triage:' "$burn" || {
     echo "selftest: burn provider-triage is not a separate job" >&2
     exit 1

@@ -273,6 +273,7 @@ def gather_snapshot(
         issues.append({
             "number": number,
             "title": it.get("title", ""),
+            "body": it.get("body") or "",
             "createdAt": it.get("created_at", ""),
             "labels": [lbl.get("name", "") for lbl in it.get("labels", [])],
             "comments": thread,

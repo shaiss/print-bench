@@ -502,6 +502,17 @@ surfaces studies awaiting a read live in
     and opens its draft PR after the agent step, and posts the success
     comment only once the remote tip and a same-repo draft PR at that tip
     are verified (issue #853)
+  - `backlog-burn-agent-diag.sh` / `backlog-burn-agent-diag-capture.sh` —
+    sanitized post-agent diagnostic for backlog-burn: the capture bootstrap
+    restores both the diag script and `tools/provenance/src` from the
+    pre-agent pin into `$RUNNER_TEMP`, then writes allowlisted denied tool names only
+    (exact Claude Code tools or `mcp__<ns>__<tool>`, else `(other)`; never
+    reason / tool_input / command text) and the final assistant message's
+    length + sha256 (never an excerpt or the message text), with
+    pattern-based redaction of common token shapes via
+    `provenance.gitstore.scrub` (no guarantee for arbitrary secrets);
+    `show_full_output` stays false
+    (Refs #885 #886 #889)
   - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
     context (Gate contract / Acceptance criteria / Design name / Chosen
     approach) from an allowlisted author only (github-actions[bot] or

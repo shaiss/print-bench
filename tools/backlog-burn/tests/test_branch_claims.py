@@ -40,10 +40,12 @@ def _iso(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def issue(number, *, labels=(LABEL,), comments=(), created="2026-09-20T00:00:00Z"):
+def issue(number, *, labels=(LABEL,), comments=(), created="2026-09-20T00:00:00Z",
+          title=None, body="Touches: docs/example.md\n"):
     return {
         "number": number,
-        "title": f"issue {number}",
+        "title": title if title is not None else f"issue {number}",
+        "body": body,
         "createdAt": created,
         "labels": list(labels),
         "comments": list(comments),
@@ -196,7 +198,9 @@ def test_compare_set_follows_the_label():
 def _gather(monkeypatch, routes, *, issues_payload=None, branches=(ORPHAN,)):
     """Run gather_snapshot over canned routes; return (snapshot, urls)."""
     issues_payload = issues_payload if issues_payload is not None else [
-        {"number": 565, "title": "scout cap state", "created_at": "2026-09-20T00:00:00Z",
+        {"number": 565, "title": "scout cap state",
+         "body": "Touches: docs/example.md\n",
+         "created_at": "2026-09-20T00:00:00Z",
          "labels": [{"name": LABEL}], "comments": 0},
     ]
     base_routes = {
