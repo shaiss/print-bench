@@ -4866,25 +4866,30 @@ EOF
     export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
     # ship-outcome reaper is broader: ppid=1 dies even with cwd outside
     # the tree (a walk can cd /tmp — Security Reviewer on #963).
-    if reap_should_kill 55 1 sleep /tmp "harmless-argv" 3 "" 99 1; then :; else
+    # 10th arg is exe path (allowlist is path-based, not comm).
+    if reap_should_kill 55 1 sleep /tmp "harmless-argv" 3 "" 99 1 /tmp/evil-watch; then :; else
       echo "selftest: burn ship-outcome reap_should_kill kept a ppid=1 process outside the tree" >&2
       exit 1
     fi
-    if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1; then
-      echo "selftest: burn ship-outcome reap_should_kill killed allowlisted systemd" >&2
+    if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1 /usr/lib/systemd/systemd; then
+      echo "selftest: burn ship-outcome reap_should_kill killed allowlisted systemd exe" >&2
       exit 1
     fi
-    # Spoofed Agent.* / systemd* globs must NOT be kept (exact-name allowlist).
-    if reap_should_kill 55 1 Agent.watch /tmp "x" 3 "" 99 1; then :; else
-      echo "selftest: burn ship-outcome reap_should_kill kept spoofed Agent.watch" >&2
+    if reap_should_kill 55 1 Runner.Worker /tmp "x" 3 "" 99 1 /home/runner/runners/2.0.0/bin/Runner.Worker; then
+      echo "selftest: burn ship-outcome reap_should_kill killed allowlisted Runner.Worker exe" >&2
       exit 1
     fi
-    if reap_should_kill 55 1 systemd-watch /tmp "x" 3 "" 99 1; then :; else
-      echo "selftest: burn ship-outcome reap_should_kill kept spoofed systemd-watch" >&2
+    # Spoofed comm with evil exe must still be killed (comm is not trusted).
+    if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1 /tmp/evil-watch; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept comm=systemd with evil exe" >&2
+      exit 1
+    fi
+    if reap_should_kill 55 1 Agent.watch /tmp "x" 3 "" 99 1 /tmp/Agent.watch; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept spoofed Agent.watch exe" >&2
       exit 1
     fi
     # Foreign setsid leader, cwd outside tree.
-    if reap_should_kill 77 42 sleep /tmp "x" 77 "" 99 1; then :; else
+    if reap_should_kill 77 42 sleep /tmp "x" 77 "" 99 1 /tmp/evil-watch; then :; else
       echo "selftest: burn ship-outcome reap_should_kill kept a foreign session leader" >&2
       exit 1
     fi
@@ -4931,8 +4936,7 @@ EOF
     echo "selftest: burn ship-outcome does not unlink the sealed path before exec" >&2
     exit 1
   }
-  # No spoofable Agent.* / systemd* globs in the ship-outcome allowlist
-  # (ignore comments that name the ban).
+  # Allowlist must key on /proc/pid/exe, not spoofable/truncated comm.
   ship_reap_body="$(awk '
     /^      - name: Require ship branch or explicit decline/ { in_step=1 }
     in_step && /reap_should_kill\(\) \{/ { p=1 }
@@ -4941,6 +4945,10 @@ EOF
   ' "$burn")"
   printf '%s\n' "$ship_reap_body" | grep -v '^[[:space:]]*#' | grep -E 'Agent\.\*(\||\))|systemd\*(\||\))' >/dev/null && {
     echo "selftest: burn ship-outcome reap still uses spoofable Agent.*/systemd* globs" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_reap_body" | grep -F '/home/runner/runners/*/bin/Runner.Worker' >/dev/null || {
+    echo "selftest: burn ship-outcome reap does not allowlist via /proc/pid/exe paths" >&2
     exit 1
   }
   grep -q '  triage:' "$burn" || {
