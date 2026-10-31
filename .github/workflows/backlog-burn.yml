@@ -837,31 +837,32 @@ jobs:
           # Reap dontAsk orphans before exec. Stricter than Bundle: a walk
           # can cd /tmp so cwd/argv filters alone miss the watcher
           # (Security Reviewer on #963). Kill ppid=1 / foreign session
-          # leaders / run-*.scope after an allowlist keyed on /proc/pid/exe
-          # (comm is PR_SET_NAME/argv0 — spoofable and 15-byte truncated).
-          # Then seal the script to an unlinked O_RDONLY inode and exec via fd.
+          # leaders / run-*.scope after keep rules that do NOT trust:
+          #   - comm (PR_SET_NAME / argv0 — spoofable, 15-byte truncated)
+          #   - /home/runner/runners/*/bin/* (job-writable — plantable)
+          # Keep only our process ancestors (the real Runner.Worker) and
+          # root-owned system paths. Then seal + exec via unlinked O_RDONLY fd.
           # Optional 10th arg is exe path for selftests (no live /proc).
           reap_should_kill() {
             local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
-            local exe="${10:-}"
+            local exe="${10:-}" anc
             [ -n "$pid" ] || return 1
             [ "$pid" = "$self_pid" ] && return 1
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
+            # Never kill ancestors of this shell (protects the real runner).
+            anc="$self_pid"
+            while [ -n "$anc" ] && [ "$anc" != "0" ] && [ "$anc" != "1" ]; do
+              [ "$anc" = "$pid" ] && return 1
+              anc="$(awk '/^PPid:/ { print $2; exit }' "/proc/${anc}/status" 2>/dev/null || true)"
+            done
             if [ -z "$exe" ]; then
               exe="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
             fi
-            # Path-based keep list — never trust comm (Security Reviewer /
-            # Bugbot on #963: exec -a systemd spoofs comm; long names truncate).
+            # Root-owned system paths only — never /home/runner (writable).
             case "$exe" in
               /usr/lib/systemd/*|/lib/systemd/*|/usr/lib/snapd/snapd)
-                return 1 ;;
-              /home/runner/runners/*/bin/Runner.Worker|\
-              /home/runner/runners/*/bin/Runner.Listener|\
-              /home/runner/runners/*/bin/Runner.PluginHost|\
-              /home/runner/runners/*/bin/Agent.Listener|\
-              /home/runner/runners/*/bin/Agent.PluginHost)
                 return 1 ;;
               /usr/bin/containerd|/usr/bin/containerd-shim*|/usr/bin/dockerd|\
               /usr/bin/dbus-daemon|/usr/sbin/dbus-daemon)

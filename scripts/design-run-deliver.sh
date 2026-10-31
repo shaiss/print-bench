@@ -4864,28 +4864,24 @@ EOF
   (
     eval "$burn_reap_a"
     export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
-    # ship-outcome reaper is broader: ppid=1 dies even with cwd outside
-    # the tree (a walk can cd /tmp — Security Reviewer on #963).
-    # 10th arg is exe path (allowlist is path-based, not comm).
+    # ship-outcome reaper: ppid=1 dies even with cwd outside the tree.
+    # 10th arg is exe path. /home/runner/... is NOT a keep path (writable).
     if reap_should_kill 55 1 sleep /tmp "harmless-argv" 3 "" 99 1 /tmp/evil-watch; then :; else
       echo "selftest: burn ship-outcome reap_should_kill kept a ppid=1 process outside the tree" >&2
       exit 1
     fi
     if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1 /usr/lib/systemd/systemd; then
-      echo "selftest: burn ship-outcome reap_should_kill killed allowlisted systemd exe" >&2
+      echo "selftest: burn ship-outcome reap_should_kill killed root-owned systemd exe" >&2
       exit 1
     fi
-    if reap_should_kill 55 1 Runner.Worker /tmp "x" 3 "" 99 1 /home/runner/runners/2.0.0/bin/Runner.Worker; then
-      echo "selftest: burn ship-outcome reap_should_kill killed allowlisted Runner.Worker exe" >&2
+    # Planted runner-path binary must be killed (home is writable).
+    if reap_should_kill 55 1 Runner.Worker /tmp "x" 3 "" 99 1 /home/runner/runners/2.0.0/bin/Runner.Worker; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept planted /home/runner Runner.Worker" >&2
       exit 1
     fi
-    # Spoofed comm with evil exe must still be killed (comm is not trusted).
+    # Spoofed comm with evil exe must still be killed.
     if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1 /tmp/evil-watch; then :; else
       echo "selftest: burn ship-outcome reap_should_kill kept comm=systemd with evil exe" >&2
-      exit 1
-    fi
-    if reap_should_kill 55 1 Agent.watch /tmp "x" 3 "" 99 1 /tmp/Agent.watch; then :; else
-      echo "selftest: burn ship-outcome reap_should_kill kept spoofed Agent.watch exe" >&2
       exit 1
     fi
     # Foreign setsid leader, cwd outside tree.
@@ -4947,8 +4943,17 @@ EOF
     echo "selftest: burn ship-outcome reap still uses spoofable Agent.*/systemd* globs" >&2
     exit 1
   }
-  printf '%s\n' "$ship_reap_body" | grep -F '/home/runner/runners/*/bin/Runner.Worker' >/dev/null || {
-    echo "selftest: burn ship-outcome reap does not allowlist via /proc/pid/exe paths" >&2
+  # Must NOT keep job-writable /home/runner/runners paths.
+  printf '%s\n' "$ship_reap_body" | grep -v '^[[:space:]]*#' | grep -F '/home/runner/runners' >/dev/null && {
+    echo "selftest: burn ship-outcome reap still allowlists writable /home/runner/runners paths" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_reap_body" | grep -F '/usr/lib/systemd/' >/dev/null || {
+    echo "selftest: burn ship-outcome reap does not keep root-owned systemd exe paths" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_reap_body" | grep -F 'anc="$self_pid"' >/dev/null || {
+    echo "selftest: burn ship-outcome reap does not protect process ancestors" >&2
     exit 1
   }
   grep -q '  triage:' "$burn" || {
