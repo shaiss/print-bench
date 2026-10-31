@@ -170,7 +170,8 @@ def _strip_space_format_controls(text: str) -> str:
     out = []
     for ch in text:
         # Keep line structure and ordinary indent; drop NBSP/U+2000/…/Cf.
-        if ch in ("\\n", "\\t", " "):
+        # Use real LF/TAB code points (not the two-char sequences \\n / \\t).
+        if ch == "\n" or ch == "\t" or ch == " ":
             out.append(ch)
             continue
         if unicodedata.category(ch) in _DROP_CATS:
@@ -713,6 +714,20 @@ fails += check_cmd('legacy ##[', 'say ##[error]injected mid-line')
 fails += check_cmd('legacy ##[add-mask]', '##[add-mask]whatever')
 fails += check_cmd('LS U+2028 ::', 'ok\u2028::error::x')
 fails += check_cmd('ZWSP ::', 'ok\n\u200b::error::x')
+# LF/TAB must be KEPT so a later-line :: is still line-leading and escapable
+# (Bugbot on #963: comparing to the two-char sequences \\n/\\t dropped Cc).
+_nl_out = redact_patterns('ok\n::error::injected', 1000)
+if '\n' not in _nl_out or _LIVE_WF_RE.search(_nl_out) or '\\::' not in _nl_out:
+    print('FAIL  selftest: LF not preserved / later-line :: not escaped (%r)' % _nl_out)
+    fails += 1
+else:
+    print('ok    selftest: LF preserved and later-line :: escaped')
+_tab_out = redact_patterns('\t::warning::x', 1000)
+if _LIVE_WF_RE.search(_tab_out) or not _tab_out.startswith('\t\\::'):
+    print('FAIL  selftest: TAB indent :: not escaped (%r)' % _tab_out)
+    fails += 1
+else:
+    print('ok    selftest: TAB indent :: escaped with tab kept')
 # MED-A: Unicode space (Zs) before :: must not leave a live workflow cmd.
 for name, ch in (
     ('NBSP U+00A0', '\u00a0'),
