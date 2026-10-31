@@ -87,7 +87,7 @@ REDACT_PY='
 import re
 import unicodedata
 
-_INPUT_CAP = 20480
+_INPUT_CAP = '"${REDACT_INPUT_CAP}"'
 _DROP_CATS = frozenset({"Zs", "Zl", "Zp", "Cf", "Cc"})
 
 # --- verbatim from PR #953 provenance.gitstore (key-shape redactor) ---
