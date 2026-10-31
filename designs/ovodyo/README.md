@@ -70,7 +70,8 @@ crossing story is in `slot-path` above.*
 
 ![Helical window broadside](previews/slot-window.png)
 
-*Looking into the 10 mm helical window — preview red reads through the cut;
+*Numeral close-up — "08" sits on its face (about a fifth of the frame) while
+the 10 mm helical slot cuts across the lower half. Preview red is the core;
 any green on the cut walls is a preview artifact, not your filament.*
 
 ![Base drivetrain in the truss](previews/base-mech-in-situ.png)
@@ -97,8 +98,9 @@ whole clock would print as one fused lump):
   35, 25, 45, 55, 15**, bottom **30, 05, 40, 20, 00, 50** (00–55 in 5s). Until
   the drive lands ([#604](https://github.com/shaiss/print-bench/issues/604)), it's a **desk die you set by hand** —
   tumble until the face you want parks on a flat pentagon — not yet a running
-  clock face. The 10 mm helical slot is also where you grip the ball to tumble
-  it (fingernail or fingertip in the window).
+  clock face. Mid-tumble there is no reading yet — wait a beat for the face to
+  park. The 10 mm helical slot is also where you grip the ball to tumble it
+  (fingernail or fingertip in the window).
 - `base-segment` — the constant-section **centre** truss segment (~127 mm).
 - `base-end` — one of the two **tapering end wings** that come to a needle point
   (a Ø5.6 mm round nose) and carry a bored stalk boss over the motor pod, with
@@ -109,16 +111,17 @@ whole clock would print as one fused lump):
   lattice's negative, so it seats one way only) under the PCB, with two sealed
   pockets you fill with ~55 g of Ø2 mm steel shot through the plugged ports on
   its end face. Print it in red — it is a working part.
-- `base-plug` — the tapered plug that closes each ballast port (print two).
+- `base-plug` — the tapered plug that closes each ballast port (print four —
+  two to use, two as spares; a Ø5 mm part is the one the scraper loses).
 
 The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf`
 (built by `./scripts/plate.sh ovodyo` from `ci.plate`): the eight production
 parts as eight separate objects a slicer imports as parts — duplicate `base-end`
-and `base-plug` in the slicer to print two of each. Every part's footprint clears
+in the slicer to print two, and `base-plug` to print four. Every part's footprint clears
 a **220×220 mm** bed (the seam coupon is the longest single dimension at
 164 mm); the recommended layout on a **256 mm bed** is **two plates**: the four
 ball halves alone (they pack 2×2 with shared settings — the long plate), then
-segment + both ends + core + both plugs on a second plate that packs tightly —
+segment + both ends + core + the plugs on a second plate that packs tightly —
 lay it out in the slicer first (the coffee-break plate). If your printer's
 profile greys out the front-left corner (stock X1/P1 carve an exclusion there),
 nudge the layout up-left before slicing.
@@ -150,6 +153,9 @@ the default render is the assembled clock.
   halves on a **smooth / engineering plate** if the pole numerals come out
   ragged on textured PEI — the plate grain shows in layer-1 cut edges; the
   droop band above them is the known #600 caveat, not a reason for supports.
+  Set the plate type in Bambu Studio to match the physical plate (glue stick
+  on Engineering plate for PLA). The pole face will come out glossier than
+  the other eleven numeral faces; that is normal.
 - **Infill:** 15–20 %.
 - **Supports:** none. The truss and mock drive print support-free, and the
   ball halves print **pole-down** (see Orientation), which makes the cavity an
@@ -170,8 +176,9 @@ the default render is the assembled clock.
   off. Safe on every other part if a tip lifts. No tuned fit on this design
   touches the bed (the seam rings print at the top of the pole-down halves;
   the core sockets exit vertical faces) — the only bed-face locator is the
-  Ø4.9 bumper recess on `base-end`, which forgives first-layer squish because
-  the silicone bumper is soft.
+  Ø4.9 stick-on bumper recess on `base-end`. Elephant-foot can narrow that
+  mouth; if a bumper's adhesive will not seat on the recess floor, open the
+  recess slightly by hand with a drill bit (do not change `foot_recess_d`).
 - **Orientation:** ball halves **pole-down** — the flat pole pentagon is the
   first layer and the seam ring is the top of the print (as the parts render).
   The pole face carries a numeral, so **layer 1 is the stencil itself**; the
@@ -252,7 +259,8 @@ flat faces meet; the facets line up again as they close and the seam reads as
 one fine line. No glue, no dowels, and it unscrews the same way to reach the
 mechanism. **Print the seam coupon first** (`ovodyo-coupon.scad`: a male ring
 and a female puck side by side; the strip is **164 mm wide — needs a ≥170 mm
-bed**; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
+bed**; keep it out of the front-left corner on X1/P1 — stock profiles carve an
+exclusion there; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
 0.05 mm steps until the puck runs on by hand with light drag and seats without
 rattle — then render the halves with that value. If the coupon's male ring feels
 tight only at the very start of the turn, that's **first-layer squish on the
@@ -260,7 +268,11 @@ coupon flange** (the thread sits ~1.5 mm above the bed), not the fit — don't
 loosen `seam_tol` for it. If the **thread lead-in itself binds** through the
 first half-turn, that *is* the fit — raise `seam_tol` by 0.05. If a seam
 threads on but won't seat flat, it's **cross-threaded** — back it all the way
-off and restart; don't loosen `seam_tol` for that either.
+off and restart; don't loosen `seam_tol` for that either. Print one ball's two
+halves first, screw that pair together and check the fit — and run a fingernail
+over the pole band and facet edges; if it catches, note it on
+[#600](https://github.com/shaiss/print-bench/issues/600) — before batching the
+second ball's halves with the same `seam_tol`.
 
 **Stalks (v0 display):** trial-fit the rod dry in the `base-end` boss before
 final assembly, then seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
@@ -276,25 +288,31 @@ tape or a dab of glue holds a temporary join — working order below; once taped
 lift from the centre segment so the ends don't peel).
 
 **The red core goes in before the clock stands up, and the order matters:**
-1. fill each ballast pocket with Ø2 mm steel shot → 2. wedge a `base-plug` into
-each port → 3. slide the keel into the **bare** centre segment → 4. tape both
-wings on → 5. place the assembly where it lives. Fill and plug *on the bench
-before* you slide — a seated keel has no port access, and taped wings block the
-keel's path into the centre. Print the plugs on the coffee-break plate with the
-other base parts, never solo (a Ø5 mm part is easy to lose; a spare is cheap
-insurance). Weigh the pour first (~55 g total starting fill); pour in **~10 g
-stages and tap between stages** (tapping while pouring fights the funnel — the
-first pour is about five minutes of tapping, and that duration is normal, not a
-broken part). A folded-paper funnel with the tip cut to ~3 mm keeps shot off the
-desk — the Ø3.2 mm port is only about one and a half pellets wide, so shot will
-jam and arch. A strong magnet held against the pocket wall settles an arch and
-drags shot around through a couple of mm of plastic — worth a try (chrome-steel
-shot only; stainless bearing balls won't follow a magnet). Once the fill that
-lands STABLE is final, a few drops of CA (or epoxy) through each port before the
-plug locks the CoG you measured — loose shot can resettle and quietly eat tip
-clearance. This is permanent (you can't pour some out afterward), so do it only
-after the tip check passes. Press a Ø5 mm silicone bumper into each of the four
-foot recesses.
+
+1. Fill each ballast pocket with Ø2 mm steel shot.
+2. Wedge a `base-plug` into each port.
+3. Slide the keel into the **bare** centre segment.
+4. Tape both wings on.
+5. Place the assembly where it lives.
+
+Fill and plug *on the bench before* you slide — a seated keel has no port
+access, and taped wings block the keel's path into the centre. Print the plugs
+on the coffee-break plate with the other base parts, never solo (a Ø5 mm part
+is easy to lose; print four — two to use, two as spares). Weigh the pour first
+(~55 g total starting fill); pour in **~10 g stages and tap between stages**
+(tapping while pouring fights the funnel — the first pour is about five minutes
+of tapping, and that duration is normal, not a broken part). A folded-paper
+funnel with the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port is
+only about one and a half pellets wide, so shot will jam and arch. A strong
+magnet held against the pocket wall settles an arch and drags shot around
+through a couple of mm of plastic — worth a try (chrome-steel shot only;
+stainless bearing balls won't follow a magnet). Once the fill that lands STABLE
+is final, a few drops of CA (or epoxy) through each port before the plug locks
+the CoG you measured — loose shot can resettle and quietly eat tip clearance.
+This is permanent (you can't pour some out afterward), so do it only after the
+tip check passes. Affix a Ø5 mm × 1.5 mm hemispherical stick-on silicone bumper
+in each of the four foot recesses (adhesive on the recess floor); if
+elephant-foot narrowed the mouth, open it slightly with a drill bit first.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
@@ -302,19 +320,31 @@ wrapped in felt (or similar) inside the halves before you screw them shut is a
 fine interim heft hack — start around **~20 g per ball** (unmeasured first guess;
 you may need to adjust), split across **both halves** or centred on the seam
 plane (not one-sided), kept against the seam and away from the numeral faces
-(the cuts are windows; a dark wrap shows less). A one-sided lump doesn't just
-bias parking — in v0 it changes how many tumbles it takes to set a reading.
-**Loose shot is forbidden** — it rattles against the numeral voids, and on this
-page rattle reads as broken. The heft arrives properly with the drive.
+(the cuts are windows; a dark wrap shows less). **Red** felt reads through the
+numeral cuts as an honest interim v0 two-tone — material behind a window, not
+paint, and **not** the committed two-tone ([#599](https://github.com/shaiss/print-bench/issues/599) insert /
+[#600](https://github.com/shaiss/print-bench/issues/600) render keep their rank). After opening a ball (dusting,
+etc.), re-centre the wrap on the seam plane before you close it. A one-sided
+lump doesn't just bias parking — in v0 it changes how many tumbles it takes to
+set a reading. **Loose shot is forbidden** — it rattles against the numeral
+voids, and on this page rattle reads as broken. The heft arrives properly with
+the drive.
 
 **Care:** cut-through numerals, the 10 mm slot, and the airy truss collect desk
 dust — unscrew a ball (one full turn) and wipe the cavity when it looks dull;
-dust the lattice with a soft brush. Rotate which numeral faces the desk under
-the putty dab so wear doesn't pick one face forever. A knock should prefer the
-one-turn seam over cracking a shell — unscrew fully and re-seat (expectation,
-not a guarantee). Low side light through the cut numerals is this clock's best look —
-near a window, out of direct afternoon sun (PLA can soften and fade on a
-hot sill; PETG/ASA tolerate it better). Ambient light only; no built-in LEDs.
+dust the lattice with a soft brush. Where the helical slot crosses the seam,
+the threaded seam ring shows through the window — prints clean, it's expected
+(no committed render shows it; `hours-ball` is the seamless preview). A few
+wisps across the numeral voids are normal with dry PLA; clear with a knife tip
+through the slot or the unscrew-and-wipe — print PLA dry. Rotate which numeral
+faces the desk under the putty dab so wear doesn't pick one face forever.
+Museum putty is consumable (rated hundreds of peel-stick cycles, not thousands);
+a felt pad or leather coaster under each ball is the re-set-friendly interim
+display. A knock should prefer the one-turn seam over cracking a shell —
+unscrew fully and re-seat (expectation, not a guarantee). Low side light
+through the cut numerals is this clock's best look — near a window, out of
+direct afternoon sun (PLA can soften and fade on a hot sill; PETG/ASA tolerate
+it better). Ambient light only; no built-in LEDs.
 
 The real
 clock is driven by a geared stepper through a bevel differential and homed with a
