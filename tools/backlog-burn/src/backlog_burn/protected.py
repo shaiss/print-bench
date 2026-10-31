@@ -182,20 +182,26 @@ def extract_scope_paths(title: str, body: str = "") -> Optional[set[str]]:
 
     * no path tokens are found, or
     * a token still carries a glob metacharacter (``*``, ``?``, ``[``) so the
-      concrete path set cannot be determined.
+      concrete path set cannot be determined, or
+    * title or body exceeds ``_PATH_SCAN_CAP`` (fail closed — never truncate
+      and miss a protected path past the cap; LOW-A on #953).
     """
     text_bits = [title or "", body or ""]
-    found: set[str] = set()
+    # Fail closed on oversized input BEFORE any path extraction — truncating
+    # would let a protected path after the cap go unseen (LOW-A on #953).
+    # Callers treat None as "scope unknown" and skip the issue.
+    for text in text_bits:
+        if len(text) > _PATH_SCAN_CAP:
+            return None
 
+    found: set[str] = set()
     for text in text_bits:
         for m in _TOUCHES_LINE.finditer(text):
             for piece in re.split(r"[\s,]+", m.group(1)):
                 tok = _clean_token(piece)
                 if tok:
                     found.add(tok)
-        # Cap before the path regex — never feed it an unbounded body.
-        scan = text if len(text) <= _PATH_SCAN_CAP else text[:_PATH_SCAN_CAP]
-        for m in _PATH_TOKEN.finditer(scan):
+        for m in _PATH_TOKEN.finditer(text):
             tok = _clean_token(m.group(1))
             if tok:
                 found.add(tok)

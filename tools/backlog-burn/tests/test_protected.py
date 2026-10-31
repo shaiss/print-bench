@@ -181,22 +181,51 @@ def test_touches_bare_scripts_still_counts():
     assert prot.extract_scope_paths("x", "Touches: scripts\n") == {"scripts"}
 
 
-def test_path_scan_caps_large_adversarial_body():
-    # LOW-1 on #953: ``(?:seg/)*`` can quadratic-backtrack on a huge body.
-    # Cap keeps a 64KB adversarial scan well under 1s, and paths in the
-    # scanned prefix still extract.
+def test_path_scan_over_cap_returns_none_fail_closed():
+    # LOW-A on #953: over the cap must return None (fail closed), never
+    # truncate and miss a protected path past the cut. Reviewer's probe
+    # shape: benign path + padding + protected path after the cap.
+    import time
+
+    pad = "x " * 10240
+    body = "docs/readme.md\n" + pad + "\nscripts/design-run-deliver.sh\n"
+    assert len(body) > prot._PATH_SCAN_CAP
+    t0 = time.perf_counter()
+    assert prot.extract_scope_paths("x", body) is None
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.0, f"over-cap should return None quickly: {elapsed:.3f}s"
+
+
+def test_path_scan_over_cap_worst_case_shapes_are_fast():
+    # Reviewer probe_cap.py: '!' / '*' / U+200B at 64KB must not scan.
+    import time
+
+    for ch in ("!", "*", "\u200b"):
+        body = ch * 65536
+        t0 = time.perf_counter()
+        assert prot.extract_scope_paths("x", body) is None
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 1.0, (
+            f"over-cap {ch!r} body too slow: {elapsed:.3f}s"
+        )
+
+
+def test_path_scan_at_cap_worst_case_regex_shape():
+    # LOW-1 on #953: real worst-case regex input at the cap (not abcd/ x N).
+    # Reviewer accepts a remaining 3–4s worst case below the cap.
     import time
 
     prefix = "please edit scripts/design-run-deliver.sh before the noise\n"
-    # Many near-path segments that fail the protected-name alts — the shape
-    # that used to burn CPU before the 20KB cap.
-    adversarial = prefix + ("abcd/" * 14000) + "zzzz"
-    assert len(adversarial) >= 64 * 1024
-    t0 = time.perf_counter()
-    paths = prot.extract_scope_paths("x", adversarial)
-    elapsed = time.perf_counter() - t0
-    assert elapsed < 1.0, f"path scan too slow on 64KB body: {elapsed:.3f}s"
-    assert paths == {"scripts/design-run-deliver.sh"}
+    for ch in ("!", "*", "\u200b"):
+        body = (prefix + (ch * prot._PATH_SCAN_CAP))[: prot._PATH_SCAN_CAP]
+        assert len(body) == prot._PATH_SCAN_CAP
+        t0 = time.perf_counter()
+        paths = prot.extract_scope_paths("x", body)
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 5.0, (
+            f"at-cap {ch!r} scan too slow: {elapsed:.3f}s"
+        )
+        assert paths == {"scripts/design-run-deliver.sh"}
 
 
 def test_protected_scope_reason_safe():

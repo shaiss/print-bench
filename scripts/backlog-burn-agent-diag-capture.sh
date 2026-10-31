@@ -136,12 +136,46 @@ ALLOWED = {
     "label",
     "log_note",
     "denied_tools",
+    "denied_tools_extra",
     "final_assistant_message_len",
     "final_assistant_message_sha256",
 }
 MAX_BYTES = 64 * 1024
-MAX_DENIALS = 40
+MAX_DENIALS = 12
+# MED-A (#953): keep in sync with backlog-burn-agent-diag.sh and the
+# upload-diag schema check in .github/workflows/backlog-burn.yml.
+KNOWN_TOOLS = frozenset(
+    {
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "LS",
+        "WebFetch",
+        "WebSearch",
+        "Task",
+        "TodoWrite",
+        "NotebookEdit",
+        "NotebookRead",
+        "BashOutput",
+        "KillBash",
+        "KillShell",
+        "ExitPlanMode",
+        "SlashCommand",
+        "Agent",
+        "Skill",
+    }
+)
+_MCP_TOOL = re.compile(r"^mcp__[A-Za-z0-9_-]{1,64}__[A-Za-z0-9_-]{1,64}$")
+_OTHER = "(other)"
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def tool_allowed(name: str) -> bool:
+    return name == _OTHER or name in KNOWN_TOOLS or _MCP_TOOL.fullmatch(name) is not None
 
 raw_secrets = [
     line.strip()
@@ -200,19 +234,38 @@ if not isinstance(msg_sha, str) or not _SHA256_HEX.fullmatch(msg_sha):
 if not isinstance(obj["denied_tools"], list) or len(obj["denied_tools"]) > MAX_DENIALS:
     print("::error::diag.json denied_tools invalid", file=sys.stderr)
     sys.exit(1)
+extra = obj["denied_tools_extra"]
+if type(extra) is not int or isinstance(extra, bool) or extra < 0:
+    print("::error::diag.json denied_tools_extra must be a non-negative int", file=sys.stderr)
+    sys.exit(1)
 clean_denials = []
+seen_tools = set()
 for row in obj["denied_tools"]:
     # Tool name only — refuse a reason/input field (Agentic Security on #953).
     if not isinstance(row, dict) or set(row.keys()) != {"tool"}:
         print("::error::diag.json denial row must be {tool} only", file=sys.stderr)
         sys.exit(1)
-    tool = S(str(row.get("tool") or ""))
-    clean_denials.append({"tool": tool[:200]})
+    tool = str(row.get("tool") or "")
+    # MED-A: refuse planted free text — allowlist / mcp pattern / "(other)" only.
+    # Do not scrub-then-accept: scrub cannot turn arbitrary text into a
+    # known tool name, and a planted value must not pass.
+    if not tool_allowed(tool):
+        print(
+            f"::error::diag.json denial tool not allowlisted: {tool!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if tool in seen_tools:
+        print("::error::diag.json denied_tools must be unique", file=sys.stderr)
+        sys.exit(1)
+    seen_tools.add(tool)
+    clean_denials.append({"tool": tool})
 
 payload = {
     "label": S(obj["label"])[:200],
     "log_note": S(obj["log_note"])[:300],
     "denied_tools": clean_denials,
+    "denied_tools_extra": extra,
     "final_assistant_message_len": msg_len,
     "final_assistant_message_sha256": msg_sha,
 }
