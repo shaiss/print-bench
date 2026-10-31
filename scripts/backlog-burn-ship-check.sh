@@ -359,6 +359,16 @@ run_check() {
   echo "::group::backlog-burn ship outcome + diag (#${issue})"
   print_ship_diag "${log:-}"
 
+  # Behavioral selftest hook: record whether a planted GIT_EXEC_PATH survived
+  # the startup unset to the git call site. symbolic-ref/rev-parse are often
+  # builtins (so a helper plant would never run); the probe is the falsifiable
+  # check (Bugbot on #963).
+  if [[ -n "${BB_SHIP_CHECK_GIT_ENV_PROBE:-}" ]]; then
+    {
+      if [ -n "${GIT_EXEC_PATH+x}" ]; then printf 'GIT_EXEC_PATH=SET\n'; else printf 'GIT_EXEC_PATH=UNSET\n'; fi
+    } >"${BB_SHIP_CHECK_GIT_ENV_PROBE}" || true
+  fi
+
   if [[ -z "$head_ref" ]]; then
     head_ref="$(git symbolic-ref -q --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
   fi
@@ -694,51 +704,33 @@ EOF
     echo "ok    selftest: planted GH_BIN is not executed (trusted /usr/bin/gh used)"
   fi
 
-  # Behavioral: a planted GIT_EXEC_PATH must NOT supply git helpers.
-  # /usr/bin/git still execs git-symbolic-ref from GIT_EXEC_PATH; a plant
-  # can forge a ship-branch HEAD. Without --head-ref the script reads HEAD
-  # via git; assert the helper marker is absent and a forged branch name
-  # does not pass the gate.
-  mkdir -p "$tmp/evil-git-exec"
-  cat >"$tmp/evil-git-exec/git-symbolic-ref" <<'EOF'
-#!/bin/sh
-marker="${GIT_EXEC_MARKER:?GIT_EXEC_MARKER unset}"
-printf 'planted\n' >"$marker"
-# Forge a ship-branch name — if this helper ran, the gate would pass.
-printf '%s\n' 'claude/issue-962-forged-via-git-exec-path'
-exit 0
-EOF
-  chmod +x "$tmp/evil-git-exec/git-symbolic-ref"
-  # Also plant rev-parse in case symbolic-ref is skipped.
-  cat >"$tmp/evil-git-exec/git-rev-parse" <<'EOF'
-#!/bin/sh
-marker="${GIT_EXEC_MARKER:?GIT_EXEC_MARKER unset}"
-printf 'planted\n' >"$marker"
-printf '%s\n' 'claude/issue-962-forged-via-git-exec-path'
-exit 0
-EOF
-  chmod +x "$tmp/evil-git-exec/git-rev-parse"
-  rm -f "$tmp/git-exec-marker"
+  # Behavioral: a planted GIT_EXEC_PATH must be cleared before git runs.
+  # Do not rely on helper wrappers — symbolic-ref/rev-parse are often
+  # builtins so a plant never execs (Bugbot on #963). Do not omit
+  # --head-ref either: a real claude/issue-962-* checkout would pass the
+  # gate after a successful clear and falsely fail this case. Probe the
+  # env at the git call site instead (same pattern as the proxy probe).
+  : >"$tmp/git-exec-probe.env"
   set +e
   env \
-      GIT_EXEC_PATH="$tmp/evil-git-exec" \
-      GIT_EXEC_MARKER="$tmp/git-exec-marker" \
+      BB_SHIP_CHECK_GIT_ENV_PROBE="$tmp/git-exec-probe.env" \
+      GIT_EXEC_PATH=/tmp/evil-git-exec-should-be-cleared \
       GH_TOKEN= \
       GITHUB_TOKEN= \
-      "$0" --issue 962 \
+      "$0" --issue 962 --head-ref main \
       --comments-file /dev/null \
       --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
       >"$tmp/gitexec.out" 2>&1
-  local gitexec_rc=$?
   set -e
-  if [[ -f "$tmp/git-exec-marker" ]]; then
-    echo "FAIL  selftest: planted GIT_EXEC_PATH helper was executed"; fails=$((fails + 1))
+  if [[ ! -s "$tmp/git-exec-probe.env" ]]; then
+    echo "FAIL  selftest: GIT_EXEC_PATH probe was never written"; fails=$((fails + 1))
     cat "$tmp/gitexec.out"
-  elif [[ "$gitexec_rc" -eq 0 ]]; then
-    echo "FAIL  selftest: planted GIT_EXEC_PATH unexpectedly passed the gate"; fails=$((fails + 1))
+  elif ! grep -qx 'GIT_EXEC_PATH=UNSET' "$tmp/git-exec-probe.env"; then
+    echo "FAIL  selftest: planted GIT_EXEC_PATH reached git call site (probe: $(tr '\n' ' ' <"$tmp/git-exec-probe.env"))"
+    fails=$((fails + 1))
     cat "$tmp/gitexec.out"
   else
-    echo "ok    selftest: planted GIT_EXEC_PATH is cleared (trusted git helpers used)"
+    echo "ok    selftest: planted GIT_EXEC_PATH is cleared before git"
   fi
 
   if [[ "$fails" -ne 0 ]]; then
