@@ -4864,17 +4864,19 @@ EOF
   (
     eval "$burn_reap_a"
     export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
-    # First definition is ship-outcome: must catch ship-check + burn bundle.
-    if reap_should_kill 55 1 sleep / "backlog-burn-ship-check" 3 "" 99 1; then :; else
-      echo "selftest: burn ship-outcome reap_should_kill kept a process mentioning ship-check" >&2
+    # ship-outcome reaper is broader: ppid=1 dies even with cwd outside
+    # the tree (a walk can cd /tmp — Security Reviewer on #963).
+    if reap_should_kill 55 1 sleep /tmp "harmless-argv" 3 "" 99 1; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept a ppid=1 process outside the tree" >&2
       exit 1
     fi
-    if reap_should_kill 55 1 sleep / "backlog-burn.bundle" 3 "" 99 1; then :; else
-      echo "selftest: burn ship-outcome reap_should_kill kept a process mentioning the burn bundle" >&2
+    if reap_should_kill 55 1 systemd /tmp "x" 3 "" 99 1; then
+      echo "selftest: burn ship-outcome reap_should_kill killed allowlisted systemd" >&2
       exit 1
     fi
-    if reap_should_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1; then
-      echo "selftest: burn ship-outcome reap_should_kill killed a process outside the burn" >&2
+    # Foreign setsid leader, cwd outside tree.
+    if reap_should_kill 77 42 sleep /tmp "x" 77 "" 99 1; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept a foreign session leader" >&2
       exit 1
     fi
   )
@@ -4895,6 +4897,15 @@ EOF
       exit 1
     fi
   )
+  # ship-outcome must pin GITHUB_WORKSPACE and exec via a held fd.
+  printf '%s\n' "$ship_check_env" | grep -qx '          GITHUB_WORKSPACE: ${{ github.workspace }}' || {
+    echo "selftest: burn ship-outcome step does not pin GITHUB_WORKSPACE" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep '/proc/self/fd/3' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not exec the pinned inode via /proc/self/fd" >&2
+    exit 1
+  }
   grep -q '  triage:' "$burn" || {
     echo "selftest: burn provider-triage is not a separate job" >&2
     exit 1

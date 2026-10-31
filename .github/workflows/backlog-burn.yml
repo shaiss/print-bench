@@ -796,6 +796,9 @@ jobs:
           REQUESTS_CA_BUNDLE: ""
           NODE_EXTRA_CA_CERTS: ""
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Pin workspace: the reaper's cwd match must not follow a planted
+          # GITHUB_WORKSPACE (Security Reviewer on #963).
+          GITHUB_WORKSPACE: ${{ github.workspace }}
           RUNNER_TEMP: ${{ runner.temp }}
           PATH: /usr/bin:/bin
           LD_PRELOAD: ""
@@ -831,10 +834,12 @@ jobs:
           # immediately before the gh call and refuses a non-empty one.
           export GH_BIN=/usr/bin/gh
           export GH_HOST=github.com
-          # Same reap as the Bundle step: dontAsk children are reparented to
-          # init / setsid / run-*.scope and can replace the hashed restore
-          # (or poison a fresh GH_CONFIG_DIR) after the digest check
-          # (Agentic Security Review on #963). Kill them before exec.
+          # Reap dontAsk orphans before exec. Stricter than Bundle: a walk
+          # can cd /tmp so cwd/argv filters alone miss the watcher
+          # (Security Reviewer on #963). Kill ppid=1 / foreign session
+          # leaders / run-*.scope after the runner/systemd allowlist,
+          # regardless of cwd. Exec still goes through a held fd so a
+          # path rewrite cannot redirect the pinned inode.
           reap_should_kill() {
             local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
             [ -n "$pid" ] || return 1
@@ -845,25 +850,17 @@ jobs:
             case "$comm" in
               Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
             esac
-            local in_tree=0 mentions=0
-            case "$cwd" in
-              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
-            esac
-            case "$cmd" in
-              *backlog-burn-ship-check*|*backlog-burn.bundle*|*model_registry*) mentions=1 ;;
-            esac
-            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+            # ppid=1 orphan: kill even when cwd is outside workspace/temp
+            # (a walk can cd /tmp and still rewrite RUNNER_TEMP by path).
+            if [ "$ppid" = "1" ]; then
               return 0
             fi
-            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+            # Foreign session leader (setsid), regardless of cwd.
+            if [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
               return 0
             fi
             case "$cgroup" in
-              *run-*.scope*)
-                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
-                  return 0
-                fi
-                ;;
+              *run-*.scope*) return 0 ;;
             esac
             return 1
           }
@@ -958,14 +955,18 @@ jobs:
             exit 1
           fi
           reap_agent_orphans
-          # Re-check after reap: a watcher killed mid-rewrite must not leave
-          # a substituted file under the digest we already accepted.
-          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          # Hold an open fd to the pinned inode, then re-hash and exec via
+          # that fd. A path rewrite of $restore_tmp after the digest check
+          # cannot redirect what we run (Security Reviewer on #963).
+          exec 3<"$restore_tmp"
+          got="$(sha256sum /proc/self/fd/3 | awk '{print $1}')"
           if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
             echo "::error::backlog-burn-ship-check.sh sha256 changed after reap (possible orphan rewrite)" >&2
             exit 1
           fi
-          exec "$restore_tmp" \
+          # Reopen so bash reads from offset 0 (sha256sum consumed the fd).
+          exec 3<"$restore_tmp"
+          exec /usr/bin/bash --noprofile --norc /proc/self/fd/3 \
             --issue "$ISSUE" \
             --run-started-at "$JOB_WINDOW_START" \
             --execution-log "${RUNNER_TEMP}/claude-execution-output.json"
