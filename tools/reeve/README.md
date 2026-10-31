@@ -46,8 +46,9 @@ pattern; issue #313) — only when `--repo` is passed:
   harvester, whose disarmed runs are all-skipped and so cannot false-alarm)
   — the ten newest completed runs each.
 - **Open issues carrying an active 🚢 SHIP-LOCK** claim, and the open PRs and
-  `claude/issue-<N>-*` branches that would corroborate one (the selector's
-  lock semantics, mirrored from `tools/backlog-burn`, not imported).
+  branches that would corroborate one (`claude/issue-<N>-*`, or a `cursor/*`
+  branch carrying `N` as a delimited token; PRs also via Closes/Fixes/
+  Resolves/Refs in body or title — issue #768).
 - **Open `adoption-study` and `agent-brief` issues** with their labels (the
   same listing, no extra request) — the inputs of the `adoption-study` and
   `agent-brief-queue` detectors.
@@ -95,7 +96,7 @@ Twelve pure functions of one snapshot, deterministic order, byte-stable report:
 | `gate-failing` | the latest run has pre-fails, a part with no score / criticals / a failed slice, or a false derivative override |
 | `routine-dead` | none of a watched workflow's last `routine_dead_runs` completed runs succeeded and at least one hard-failed (a pure-cancelled streak is queue noise) |
 | `agent-brief-queue` | an open forge brief is pending / parked `needs-decision` / `wright-declined` — the queue state beside `routine-dead`, so a forge death-streak shows as a backlog that stopped moving (#745; an armed brief is not flagged) |
-| `lock-leak` | an active 🚢 SHIP-LOCK is older than `lock_leak_hours` with no corroborating branch or closing PR — a killed run's ghost claim (issue #312) |
+| `lock-leak` | an active 🚢 SHIP-LOCK is older than `lock_leak_hours` with no corroborating branch or referencing open PR — a killed run's ghost claim (issue #312); backtick-quoted markers mid-body are not locks (#872) |
 | `provenance-foreign-tip` | either provenance data ref fails tip continuity — `foreign` (forged or rolled back, or a mark-order conflict), `deleted`, `unanchored`, or (armed) `bootstrap`; `provenance.continuity_verdict` ports the harvester's rule — marks ordered by upload time (`created_at`, the artifact id only for a tie), the evidence checkpoint's ancestry cross-checked through `GET /compare` — and runs every row of the shared `tools/provenance/tests/fixtures/continuity_cases.json` |
 | `provenance-lag` | a pending unit is past its anchor + `provenance_lag_hours` (`due_at`; `defer_until` for a unit deferred by design — an in-flight run or a pending deployment), the evidence ref is absent, or the STALL check: a PR closed more than `settle_hours + max_defer_hours + provenance_lag_hours` ago, last updated more than `provenance_lag_hours` ago and not before `backfill_since`, is in none of frozen / pending / skipped (the harvester stopped seeing PRs) |
 | `adoption-study` | an open study submission has no `disposition:*` label yet, or is flagged `disposition:worth-raising` |

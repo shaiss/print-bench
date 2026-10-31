@@ -85,10 +85,12 @@ DEFAULT_REQUIRED_LABEL = "autonomy-ok"
 
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 # Hidden authenticity marker settle (and attended claim writers) emit.
-# A comment is a lock only when it carries this marker AND is authored by
+# A comment is a lock only when its first non-blank line starts with
+# SHIP_LOCK_MARKER, it carries this HTML marker, AND it is authored by
 # one of SHIP_LOCK_AUTHOR_LOGINS — never because it merely starts with
-# SHIP_LOCK_MARKER, and never because authorType is Bot (Cipher, #864).
-# Mirrored in scripts/design-run-deliver.sh.
+# SHIP_LOCK_MARKER, never because authorType is Bot, and never because
+# the HTML marker appears mid-body (Cipher #864 + #872). Mirrored in
+# scripts/design-run-deliver.sh / routine-lock-cleanup.sh / reeve.github.
 #
 # Note: backlog-burn's agent still has issues: write and can also post a
 # marker-bearing claim (tracked in #872) — this allowlist is not "settle
@@ -193,6 +195,12 @@ _CLOSING_KEYWORDS = (
 )
 
 
+# UTF-8 BOM tolerated before a SHIP-LOCK lead. Heading (``#``…``######``)
+# and bold (``**…**``) wrappers are stripped the same way in every reader.
+_BOM = "\ufeff"
+_LOCK_HEADING_RE = re.compile(r"^#{1,6}\s+")
+
+
 def _first_line(text: str) -> str:
     """The first non-blank line of ``text``, stripped (``""`` if none)."""
     for line in (text or "").splitlines():
@@ -200,6 +208,23 @@ def _first_line(text: str) -> str:
         if stripped:
             return stripped
     return ""
+
+
+def _lock_lead_line(text: str) -> str:
+    """First non-blank line with BOM / heading / bold wrappers stripped.
+
+    Used only for SHIP-LOCK lead matching (and WITHDRAWN on that lead).
+    Mirrored in ``reeve.github`` and the shell readers' ``lock_lead``.
+    """
+    line = _first_line(text)
+    if line.startswith(_BOM):
+        line = line[len(_BOM) :]
+    line = _LOCK_HEADING_RE.sub("", line, count=1)
+    # Only a full-line bold wrap (**…**). A leading ** alone must not
+    # strip — otherwise "**LEAD** is discussed…" would authenticate.
+    if line.startswith("**") and line.endswith("**") and len(line) > 4:
+        line = line[2:-2]
+    return line
 
 
 def _parse_iso(ts: str) -> Optional[datetime]:
@@ -217,14 +242,24 @@ def _parse_iso(ts: str) -> Optional[datetime]:
 
 
 def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
-    """True when ``comment`` is an authentic SHIP-LOCK (Cipher, #864).
+    """True when ``comment`` is an authentic SHIP-LOCK (Cipher #864 + #872).
 
-    Requires BOTH the HTML authenticity marker and author login in
-    ``SHIP_LOCK_AUTHOR_LOGINS`` (``github-actions[bot]``, ``shaiss``).
-    A bare ``🚢 SHIP-LOCK`` first line is never enough;
-    nor is marker + some other Bot (e.g. ``claude[bot]``).
+    One rule, mirrored in ``reeve.github``,
+    ``scripts/routine-lock-cleanup.sh``, and ``scripts/design-run-deliver.sh``:
+
+    1. the first non-blank line (BOM / heading / bold wrappers stripped)
+       starts with ``SHIP_LOCK_MARKER``,
+    2. the HTML authenticity marker is present in the body, and
+    3. the author login is in ``SHIP_LOCK_AUTHOR_LOGINS``.
+
+    A bare ``🚢 SHIP-LOCK`` first line is never enough; nor is marker +
+    some other Bot (e.g. ``claude[bot]``); nor is a backtick-quoted
+    marker mid-body (#872). A WITHDRAWN first line still authenticates
+    here so :func:`_ship_lock_state` can release the claim.
     """
     body = comment.get("body") or ""
+    if not _lock_lead_line(body).startswith(SHIP_LOCK_MARKER):
+        return False
     if SHIP_LOCK_HTML_MARKER not in body:
         return False
     login = (comment.get("authorLogin") or "").lower()
@@ -239,10 +274,11 @@ def _ship_lock_state(
     """Classify the *latest* authentic SHIP-LOCK: ``none`` / ``active`` / ``stale``.
 
     A claim is a state, not a flag (the skill's §0.3 rule): read the newest
-    authentic lock (HTML marker + trusted author) and act on that one.
-    ``🚢 SHIP-LOCK WITHDRAWN`` releases the claim (``none``), which is why a
-    withdrawal has to be able to *un*-exclude an issue here, not merely be
-    ignored. A comment that merely starts with ``🚢 SHIP-LOCK`` is ignored.
+    authentic lock (first-line SHIP-LOCK lead + HTML marker + trusted
+    author) and act on that one. ``🚢 SHIP-LOCK WITHDRAWN`` releases the
+    claim (``none``), which is why a withdrawal has to be able to
+    *un*-exclude an issue here, not merely be ignored. A comment that
+    merely starts with ``🚢 SHIP-LOCK`` is ignored.
 
     An un-withdrawn claim older than ``stale_after_hours`` is ``stale`` — the
     caller only asks about the lock once it has already ruled out a
@@ -260,7 +296,7 @@ def _ship_lock_state(
     # createdAt is ISO-8601 UTC ("2026-08-07T23:35:56Z"), which sorts
     # lexicographically in timestamp order — newest last.
     latest = max(lock_comments, key=lambda c: c.get("createdAt", ""))
-    if "WITHDRAWN" in _first_line(latest.get("body", "")).upper():
+    if "WITHDRAWN" in _lock_lead_line(latest.get("body", "")).upper():
         return "none"
     if now is None:
         return "active"

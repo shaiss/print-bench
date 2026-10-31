@@ -61,11 +61,13 @@ _LINK_NEXT_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 # the two tools must stay independently installable (the groomer's precedent).
 SHIP_LOCK_MARKER = "🚢 SHIP-LOCK"
 SHIP_LOCK_HTML_MARKER = "<!-- design-run-ship-lock:v1 -->"
-# Exact logins that may author a lock (Cipher, #864). Mirrored from
+# Exact logins that may author a lock (Cipher #864 + #872). Mirrored from
 # backlog_burn.select.SHIP_LOCK_AUTHOR_LOGINS — settle (GITHUB_TOKEN) and
 # attended PAT (shaiss). cursor[bot] is excluded: shared Cursor App login
 # (Bugbot / Security / Approval / cloud agents). Attended runs post as
-# shaiss or not at all. No generic "[bot]" match.
+# shaiss or not at all. No generic "[bot]" match. Authenticity also
+# requires the first non-blank line to start with SHIP_LOCK_MARKER and
+# the HTML marker to be present — see _is_authentic_ship_lock.
 SHIP_LOCK_AUTHOR_LOGINS = frozenset({
     "github-actions[bot]",
     "shaiss",
@@ -133,6 +135,13 @@ ROUTINE_WORKFLOWS = ("design-run.yml", "backlog-burn.yml", "chunker.yml", "label
 _RUNS_FETCHED = 10
 
 
+# UTF-8 BOM tolerated before a SHIP-LOCK lead (editors / paste). Heading
+# (``#``…``######``) and bold (``**…**``) wrappers are stripped the same
+# way in every reader so a rendered markdown lead still authenticates.
+_BOM = "\ufeff"
+_LOCK_HEADING_RE = re.compile(r"^#{1,6}\s+")
+
+
 def _first_line(text: str) -> str:
     """The first non-blank line of ``text``, stripped (``""`` if none)."""
     for line in (text or "").splitlines():
@@ -140,6 +149,47 @@ def _first_line(text: str) -> str:
         if stripped:
             return stripped
     return ""
+
+
+def _lock_lead_line(text: str) -> str:
+    """First non-blank line with BOM / heading / bold wrappers stripped.
+
+    Used only for SHIP-LOCK lead matching (and WITHDRAWN on that lead).
+    Mirrored in ``backlog_burn.select`` and the shell readers' ``lock_lead``.
+    """
+    line = _first_line(text)
+    if line.startswith(_BOM):
+        line = line[len(_BOM) :]
+    line = _LOCK_HEADING_RE.sub("", line, count=1)
+    # Only a full-line bold wrap (**…**). A leading ** alone must not
+    # strip — otherwise "**LEAD** is discussed…" would authenticate.
+    if line.startswith("**") and line.endswith("**") and len(line) > 4:
+        line = line[2:-2]
+    return line
+
+
+def _is_authentic_ship_lock(comment: dict[str, Any]) -> bool:
+    """True when ``comment`` is an authentic SHIP-LOCK (Cipher #864 + #872).
+
+    One rule, mirrored in ``backlog_burn.select``,
+    ``scripts/routine-lock-cleanup.sh``, and ``scripts/design-run-deliver.sh``:
+
+    1. the first non-blank line (BOM / heading / bold wrappers stripped)
+       starts with the SHIP-LOCK lead,
+    2. the HTML authenticity marker is present in the body, and
+    3. the author login is in ``SHIP_LOCK_AUTHOR_LOGINS``.
+
+    A WITHDRAWN first line still counts as authentic here (so a release can
+    clear a claim); the gatherer then drops held locks whose lead contains
+    WITHDRAWN. A backtick-quoted marker mid-body (#872) is never a lock.
+    """
+    body = comment.get("body") or ""
+    if not _lock_lead_line(body).startswith(SHIP_LOCK_MARKER):
+        return False
+    if SHIP_LOCK_HTML_MARKER not in body:
+        return False
+    login = ((comment.get("user") or {}).get("login") or "").lower()
+    return login in {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}
 
 
 def _get(url: str, token: str) -> tuple[Any, str]:
@@ -263,14 +313,9 @@ def gather_run_health(
             f"{API_ROOT}/repos/{repo}/issues/{item['number']}/comments?per_page=100",
             token,
         )
-        _lock_logins = {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}
         lock_comments = [
             c for c in comments
-            if SHIP_LOCK_HTML_MARKER in (c.get("body") or "")
-            and (
-                ((c.get("user") or {}).get("login") or "").lower()
-                in _lock_logins
-            )
+            if _is_authentic_ship_lock(c)
         ]
         if not lock_comments:
             continue
@@ -278,7 +323,7 @@ def gather_run_health(
         # the newest lock comment counts, and a WITHDRAWN one releases it.
         # created_at is ISO-8601 UTC, which sorts lexicographically.
         latest = max(lock_comments, key=lambda c: c.get("created_at", ""))
-        if "WITHDRAWN" in _first_line(latest.get("body", "")).upper():
+        if "WITHDRAWN" in _lock_lead_line(latest.get("body", "")).upper():
             continue
         issues.append(
             {
@@ -292,6 +337,7 @@ def gather_run_health(
         {
             "number": pr["number"],
             "headRefName": (pr.get("head") or {}).get("ref", ""),
+            "title": pr.get("title") or "",
             "body": pr.get("body") or "",
         }
         for pr in _paged(f"{API_ROOT}/repos/{repo}/pulls?state=open&per_page=100", token)

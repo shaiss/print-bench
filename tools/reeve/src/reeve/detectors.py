@@ -52,15 +52,19 @@ from . import provenance
 
 _WS_RE = re.compile(r"\s+")
 
-# GitHub honours these nine keywords, case-insensitively, each optionally
-# followed by a colon, to auto-close an issue from a PR body. Mirrored from
-# tools/backlog-burn/src/backlog_burn/select.py, not imported — the tools stay
-# independently installable, and select.py's own tests pin the semantics.
-_CLOSING_KEYWORDS = (
+# GitHub's nine auto-close keywords, plus ``ref``/``refs`` (issue #768: a
+# draft that intentionally avoids closing still corroborates a ship claim).
+# Case-insensitive; each optionally followed by a colon. Closing set mirrored
+# from tools/backlog-burn/src/backlog_burn/select.py, not imported — the tools
+# stay independently installable; Refs is reeve-local for lock-leak only.
+_REFERENCE_KEYWORDS = (
     "close", "closes", "closed",
     "fix", "fixes", "fixed",
     "resolve", "resolves", "resolved",
+    "ref", "refs",
 )
+# Back-compat alias: older tests / call sites name the closing set.
+_CLOSING_KEYWORDS = _REFERENCE_KEYWORDS
 
 
 def _flat(text: str) -> str:
@@ -94,16 +98,63 @@ def _issue_branch_re(number: int) -> re.Pattern[str]:
     return re.compile(rf"^claude/issue-{re.escape(str(number))}-")
 
 
-def _closes_issue(pr_body: str, number: int) -> bool:
-    """True if ``pr_body`` closes issue ``number`` via any GitHub keyword."""
+def _cursor_issue_branch_re(number: int) -> re.Pattern[str]:
+    """Matcher for a ``cursor/*`` branch carrying ``number`` as a delimited token.
+
+    Whole-number only, hyphen- or slash-delimited (the shapes the ship
+    branches actually use): ``-768-``, a trailing ``-768``, or ``/768``
+    right after the ``cursor/`` prefix. A bare ``cursor/`` prefix never
+    corroborates, ``#76`` must not match ``...-768-...``, and a non-digit
+    boundary alone is not enough — otherwise a hex suffix (``e6b6``), a
+    version fragment (``v1.6``), or a glued form (``task768draft``) would
+    corroborate the wrong issue (Bugbot / CodeRabbit on #952).
+    """
     num = re.escape(str(number))
-    for kw in _CLOSING_KEYWORDS:
-        # keyword, optional ':', whitespace, '#<number>', not glued to more
-        # digits (so "#9" does not match issue 95).
+    return re.compile(rf"^cursor/(?:.*[-/])?{num}(?:[-/].*)?$")
+
+
+def _references_issue(text: str, number: int) -> bool:
+    """True if ``text`` references issue ``number`` via a closing or Refs keyword.
+
+    Whole-number only (``#9`` does not match issue 95). Searches title or
+    body the same way — callers pass whichever field they have.
+    """
+    num = re.escape(str(number))
+    for kw in _REFERENCE_KEYWORDS:
         pattern = rf"(?i)\b{kw}:?\s+#{num}\b"
-        if re.search(pattern, pr_body or ""):
+        if re.search(pattern, text or ""):
             return True
     return False
+
+
+def _closes_issue(pr_body: str, number: int) -> bool:
+    """True if ``pr_body`` references issue ``number`` via any keyword.
+
+    Kept as the historical name; includes Refs for lock-leak corroboration.
+    """
+    return _references_issue(pr_body, number)
+
+
+def _branch_corroborates(name: str, number: int) -> bool:
+    """True if branch ``name`` corroborates a ship claim on issue ``number``."""
+    return bool(
+        _issue_branch_re(number).match(name or "")
+        or _cursor_issue_branch_re(number).match(name or "")
+    )
+
+
+def _pr_corroborates(pr: dict, number: int) -> bool:
+    """True if an open PR corroborates a ship claim on issue ``number``.
+
+    Corroborators (#768): Closes/Fixes/Resolves/Refs in body or title, a
+    ``claude/issue-<N>-*`` head, or a ``cursor/*`` head carrying ``N`` as a
+    delimited token. Never a bare ``cursor/`` prefix match.
+    """
+    if _references_issue(pr.get("body", ""), number):
+        return True
+    if _references_issue(pr.get("title", ""), number):
+        return True
+    return _branch_corroborates(pr.get("headRefName", "") or "", number)
 
 
 def _all_records(records: list[dict]) -> list[dict]:
@@ -207,26 +258,22 @@ def lock_leak(
 ) -> list[dict]:
     """Active 🚢 SHIP-LOCK claims that outlived any evidence of work.
 
-    Mirrors the selector's corroboration order (``select.py``): a
-    ``claude/issue-<N>-*`` branch, or an open PR whose head branch matches or
-    whose body carries a closing keyword, corroborates the claim and clears
-    the issue here. What remains is the #312 incident class — a run killed
-    between posting its lock and pushing a branch — and it fires once the
-    claim is older than ``leak_hours``. An unparseable ``lockCreatedAt`` is
-    skipped: never report a leak on a claim that cannot be dated.
+    An open PR corroborates when its body or title carries
+    Closes/Fixes/Resolves/Refs #N, or its head is ``claude/issue-<N>-*`` or a
+    ``cursor/*`` branch carrying ``N`` as a delimited token (#768). A bare
+    remote branch of either form corroborates the same way. What remains is
+    the #312 incident class — a run killed between posting its lock and
+    pushing a branch — and it fires once the claim is older than
+    ``leak_hours``. An unparseable ``lockCreatedAt`` is skipped: never
+    report a leak on a claim that cannot be dated.
     """
     now = _parse_iso(generated_at)
     findings: list[dict] = []
     for issue in issues:
         number = issue["number"]
-        rx = _issue_branch_re(number)
-        if any(rx.match(b or "") for b in branches or []):
+        if any(_branch_corroborates(b or "", number) for b in branches or []):
             continue
-        if any(
-            _closes_issue(pr.get("body", ""), number)
-            or rx.match(pr.get("headRefName", "") or "")
-            for pr in open_prs or []
-        ):
+        if any(_pr_corroborates(pr, number) for pr in open_prs or []):
             continue
         created = _parse_iso(issue.get("lockCreatedAt", ""))
         if created is None or now is None:
