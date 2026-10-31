@@ -2052,7 +2052,7 @@ jobs:
             fi
             mkdir -p -- "${stage}/link-${i}"
             printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
-            python3 -I -c "import json,re,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_len','final_assistant_message_sha256'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536, 'diag too large'; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED, 'bad keys'; assert 'final_assistant_message_truncated' not in obj; assert isinstance(obj['denied_tools'], list); n=obj['final_assistant_message_len']; assert type(n) is int and not isinstance(n, bool) and n>=0; h=obj['final_assistant_message_sha256']; assert isinstance(h, str) and re.fullmatch(r'[0-9a-f]{64}', h)" \
+            python3 -I -c "import json,re,sys; from pathlib import Path; ALLOWED={'label','log_note','denied_tools','final_assistant_message_len','final_assistant_message_sha256'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536, 'diag too large'; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED, 'bad keys'; assert 'final_assistant_message_truncated' not in obj; assert isinstance(obj['denied_tools'], list); assert all(isinstance(r, dict) and set(r)=={'tool'} and isinstance(r['tool'], str) for r in obj['denied_tools']); n=obj['final_assistant_message_len']; assert type(n) is int and not isinstance(n, bool) and n>=0; h=obj['final_assistant_message_sha256']; assert isinstance(h, str) and re.fullmatch(r'[0-9a-f]{64}', h)" \
               "${stage}/link-${i}/diag.json"
             staged=$((staged + 1))
           done

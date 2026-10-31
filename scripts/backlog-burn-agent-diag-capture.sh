@@ -202,12 +202,12 @@ if not isinstance(obj["denied_tools"], list) or len(obj["denied_tools"]) > MAX_D
     sys.exit(1)
 clean_denials = []
 for row in obj["denied_tools"]:
-    if not isinstance(row, dict) or set(row.keys()) - {"tool", "reason"}:
-        print("::error::diag.json denial row shape invalid", file=sys.stderr)
+    # Tool name only — refuse a reason/input field (Agentic Security on #953).
+    if not isinstance(row, dict) or set(row.keys()) != {"tool"}:
+        print("::error::diag.json denial row must be {tool} only", file=sys.stderr)
         sys.exit(1)
     tool = S(str(row.get("tool") or ""))
-    reason = S(str(row.get("reason") or ""))
-    clean_denials.append({"tool": tool[:200], "reason": reason[:300]})
+    clean_denials.append({"tool": tool[:200]})
 
 payload = {
     "label": S(obj["label"])[:200],

@@ -505,11 +505,12 @@ surfaces studies awaiting a read live in
   - `backlog-burn-agent-diag.sh` / `backlog-burn-agent-diag-capture.sh` —
     sanitized post-agent diagnostic for backlog-burn: the capture bootstrap
     restores both the diag script and `tools/provenance/src` from the
-    pre-agent pin into `$RUNNER_TEMP`, then writes denied tool names, deny
-    reasons, and the final assistant message's length + sha256 (never the
-    message text) with pattern-based redaction of common token shapes via
-    `provenance.gitstore.scrub` (no guarantee for arbitrary secrets);
-    `show_full_output` stays false (Refs #885 #886 #889)
+    pre-agent pin into `$RUNNER_TEMP`, then writes denied tool names only
+    (never reason / tool_input / command text) and the final assistant
+    message's length + sha256 (never the message text), with pattern-based
+    redaction of common token shapes via `provenance.gitstore.scrub` (no
+    guarantee for arbitrary secrets); `show_full_output` stays false
+    (Refs #885 #886 #889)
   - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
     context (Gate contract / Acceptance criteria / Design name / Chosen
     approach) from an allowlisted author only (github-actions[bot] or

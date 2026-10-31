@@ -3,13 +3,14 @@
 #
 # Reads the claude-code-action execution log (present even when
 # show_full_output stays false) and writes ONLY:
-#   * denied tool names + deny reasons (pattern-scrubbed)
+#   * denied tool NAMES (never reason / tool_input / command text;
+#     same posture as backlog-burn-ship-check.sh)
 #   * the final assistant message's length + sha256 (never the text;
 #     same MED-C posture as backlog-burn-ship-check.sh)
 # through the repo's existing redactor (provenance.gitstore.scrub =
 # pattern-based shapes of common tokens; no guarantee for arbitrary
 # secrets). Never enables show_full_output; never prints tokens /
-# raw gh output / headers / final-message excerpts.
+# raw gh output / headers / final-message excerpts / denial reasons.
 #
 # MUST be restored from the pre-agent START_SHA pin into $RUNNER_TEMP
 # (see backlog-burn-agent-diag-capture.sh) — never run the worktree copy
@@ -248,58 +249,47 @@ for obj in objs:
                 if cand:
                     final_msg = cand
 
-# Fallback: scrape denial mentions from the raw text when structured
-# permission_denials are absent (show_full_output stays false).
-structured = []
+# Tool names ONLY — never reason / tool_input / command text / raw dumps
+# (matches backlog-burn-ship-check.sh; Agentic Security on #953).
+_TOOL_TOKEN = re.compile(
+    r"(?i)\b(Bash|Write|Edit|mcp__\w+|NotebookEdit|Agent|Skill|Read|Glob|Grep)\b"
+)
+names: list[str] = []
 for d in denials:
     if isinstance(d, dict):
-        name = (
+        n = (
             d.get("tool_name")
             or d.get("toolName")
             or d.get("name")
             or d.get("tool")
             or ""
         )
-        reason = (
-            d.get("reason")
-            or d.get("message")
-            or d.get("error")
-            or d.get("rule")
-            or ""
-        )
-        # Scrub FULL strings, then truncate — never [:N] before scrub.
-        if name:
-            tool = RT(str(name), 200)
-        else:
-            tool = RT(json.dumps(d), 200)
-        structured.append({
-            "tool": tool,
-            "reason": RT(str(reason), 300) if reason else "",
-        })
-    else:
-        structured.append({"tool": RT(str(d), 200), "reason": ""})
+        if n:
+            # Scrub FULL name, then truncate — never dump the whole denial
+            # object (that can carry tool_input.command).
+            names.append(RT(str(n), 200))
+    elif isinstance(d, str) and d.strip():
+        m = _TOOL_TOKEN.search(d)
+        names.append(RT(m.group(1) if m else d.strip().split()[0][:80], 200))
 
-if not structured and raw:
+# Fallback: name-only scrape when structured permission_denials are absent
+# (show_full_output stays false). Never capture surrounding context.
+if not names and raw:
     for m in re.finditer(
-        r"(?:denied|permission_denial|PermissionDenied)[^\n]{0,160}"
-        r"(Bash\([^)]*\)|Write|Edit|mcp__\w+|NotebookEdit|Agent|Skill|Read|Glob|Grep)",
+        r"(?i)(?:denied|permission_denial|PermissionDenied)[^\n]{0,80}"
+        r"\b(Bash|Write|Edit|mcp__\w+|NotebookEdit|Agent|Skill|Read|Glob|Grep)\b",
         raw,
-        re.I,
     ):
-        structured.append({
-            "tool": RT(m.group(1), 200),
-            "reason": RT(m.group(0), 200),
-        })
+        names.append(RT(m.group(1), 200))
 
-# De-dupe by tool name, keep first reason.
+# De-dupe preserving order.
 seen = set()
 uniq = []
-for row in structured:
-    key = row["tool"]
-    if key in seen:
+for name in names:
+    if name in seen:
         continue
-    seen.add(key)
-    uniq.append(row)
+    seen.add(name)
+    uniq.append({"tool": name})
     if len(uniq) >= 40:
         break
 
@@ -323,12 +313,9 @@ lines = [f"### {label}", ""]
 if log_note:
     lines.append(f"- {log_note}")
 if uniq:
-    lines.append("- denied tools:")
+    lines.append("- denied tools (names only):")
     for row in uniq:
-        if row["reason"]:
-            lines.append(f"  - `{row['tool']}` — {row['reason']}")
-        else:
-            lines.append(f"  - `{row['tool']}`")
+        lines.append(f"  - `{row['tool']}`")
 else:
     lines.append(
         "- denied tools: (none listed in the execution log; "
