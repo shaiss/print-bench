@@ -1,0 +1,9 @@
+# Boolean fit checks — never printed. Each ladder step ∩ the nominal
+# reference head at the insertion clocking (0.01 mm pull) must be empty.
+# mate-ctrl is the mandatory negative: same pair, clocked at 0.
+mate-020 empty
+mate-025 empty
+mate-030 empty
+mate-035 empty
+mate-040 empty
+mate-ctrl interferes
