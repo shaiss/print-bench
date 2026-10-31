@@ -4567,6 +4567,11 @@ EOF
     echo "selftest: burn ship-outcome step does not unset planted GIT_EXEC_PATH" >&2
     exit 1
   }
+  # Same orphan reap as Bundle before exec (#963 Security Reviewer).
+  printf '%s\n' "$ship_check_run" | grep 'reap_agent_orphans' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not reap agent orphans before exec" >&2
+    exit 1
+  }
   # #962 security: gh comment fetch must not follow a planted GH_HOST /
   # GH_CONFIG_DIR / proxy (token exfil + forged Bot DECLINED). The
   # workflow unsets any planted GH_CONFIG_DIR; the restored script
@@ -4845,9 +4850,10 @@ EOF
     echo "selftest: expected the burn bundle step and settle lock cleanup on --routine backlog-burn, found ${burn_routine_n}" >&2
     exit 1
   }
+  # Two copies: ship-outcome (before exec) and Bundle (before write_bundle).
   burn_reap_n="$(grep -c 'reap_should_kill()' "$burn" || true)"
-  [ "$burn_reap_n" -eq 1 ] || {
-    echo "selftest: expected the reaper predicate in the burn bundle step, found ${burn_reap_n}" >&2
+  [ "$burn_reap_n" -eq 2 ] || {
+    echo "selftest: expected the reaper predicate in the burn ship-outcome and bundle steps, found ${burn_reap_n}" >&2
     exit 1
   }
   burn_reap_a="$(awk '
@@ -4858,12 +4864,34 @@ EOF
   (
     eval "$burn_reap_a"
     export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
+    # First definition is ship-outcome: must catch ship-check + burn bundle.
+    if reap_should_kill 55 1 sleep / "backlog-burn-ship-check" 3 "" 99 1; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept a process mentioning ship-check" >&2
+      exit 1
+    fi
     if reap_should_kill 55 1 sleep / "backlog-burn.bundle" 3 "" 99 1; then :; else
-      echo "selftest: burn reap_should_kill kept a process mentioning the burn bundle" >&2
+      echo "selftest: burn ship-outcome reap_should_kill kept a process mentioning the burn bundle" >&2
       exit 1
     fi
     if reap_should_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1; then
-      echo "selftest: burn reap_should_kill killed a process outside the burn" >&2
+      echo "selftest: burn ship-outcome reap_should_kill killed a process outside the burn" >&2
+      exit 1
+    fi
+  )
+  burn_reap_b="$(awk '
+    /reap_should_kill\(\) \{/ { c++; if (c==2) p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$burn")"
+  (
+    eval "$burn_reap_b"
+    export GITHUB_WORKSPACE=/work RUNNER_TEMP=/tmp/rt
+    if reap_should_kill 55 1 sleep / "backlog-burn.bundle" 3 "" 99 1; then :; else
+      echo "selftest: burn bundle reap_should_kill kept a process mentioning the burn bundle" >&2
+      exit 1
+    fi
+    if reap_should_kill 55 1 sleep / "design-run.bundle" 3 "" 99 1; then
+      echo "selftest: burn bundle reap_should_kill killed a process outside the burn" >&2
       exit 1
     fi
   )

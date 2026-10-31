@@ -831,6 +831,78 @@ jobs:
           # immediately before the gh call and refuses a non-empty one.
           export GH_BIN=/usr/bin/gh
           export GH_HOST=github.com
+          # Same reap as the Bundle step: dontAsk children are reparented to
+          # init / setsid / run-*.scope and can replace the hashed restore
+          # (or poison a fresh GH_CONFIG_DIR) after the digest check
+          # (Agentic Security Review on #963). Kill them before exec.
+          reap_should_kill() {
+            local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
+            [ -n "$pid" ] || return 1
+            [ "$pid" = "$self_pid" ] && return 1
+            case "$pid" in
+              *[!0-9]*) return 1 ;;
+            esac
+            case "$comm" in
+              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+            esac
+            local in_tree=0 mentions=0
+            case "$cwd" in
+              "${GITHUB_WORKSPACE:-/nonexistent}"*|"${RUNNER_TEMP:-/nonexistent}"*) in_tree=1 ;;
+            esac
+            case "$cmd" in
+              *backlog-burn-ship-check*|*backlog-burn.bundle*|*model_registry*) mentions=1 ;;
+            esac
+            if [ "$ppid" = "1" ] && { [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; }; then
+              return 0
+            fi
+            if [ "$in_tree" = 1 ] && [ -n "$sid" ] && [ "$sid" = "$pid" ] && [ "$sid" != "$my_pgid" ] && [ "$sid" != "1" ] && [ "$sid" != "0" ]; then
+              return 0
+            fi
+            case "$cgroup" in
+              *run-*.scope*)
+                if [ "$in_tree" = 1 ] || [ "$mentions" = 1 ]; then
+                  return 0
+                fi
+                ;;
+            esac
+            return 1
+          }
+          reap_agent_orphans() {
+            local d pid ppid comm cwd cmd v pgid my_pgid sid cgroup
+            local -a victims=()
+            my_pgid="$(ps -o pgid= -p $$ | tr -d '[:space:]')"
+            shopt -s nullglob
+            for d in /proc/[0-9]*; do
+              pid="${d#/proc/}"
+              case "$pid" in
+                *[!0-9]*) continue ;;
+              esac
+              ppid="$(awk '/^PPid:/ { print $2; exit }' "$d/status" 2>/dev/null || true)"
+              comm="$(tr -d '\0' < "$d/comm" 2>/dev/null || true)"
+              cwd="$(readlink "$d/cwd" 2>/dev/null || true)"
+              cmd="$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true)"
+              sid="$(ps -o sid= -p "$pid" 2>/dev/null | tr -d '[:space:]' || true)"
+              cgroup="$(tr '\0' ' ' < "$d/cgroup" 2>/dev/null || true)"
+              if reap_should_kill "$pid" "$ppid" "$comm" "$cwd" "$cmd" "$sid" "$cgroup" "$my_pgid" "$$"; then
+                victims+=("$pid")
+              fi
+            done
+            shopt -u nullglob
+            if [ "${#victims[@]}" -eq 0 ]; then
+              return 0
+            fi
+            for v in "${victims[@]}"; do
+              pgid="$(ps -o pgid= -p "$v" 2>/dev/null | tr -d '[:space:]' || true)"
+              if [ -n "$pgid" ] && [ "$pgid" != "$my_pgid" ] && [ "$pgid" != "1" ] && [ "$pgid" != "0" ]; then
+                kill -TERM -- "-${pgid}" 2>/dev/null || true
+              fi
+              kill -TERM "$v" 2>/dev/null || true
+            done
+            sleep 1
+            for v in "${victims[@]}"; do
+              kill -KILL "$v" 2>/dev/null || true
+            done
+          }
           if [ -z "${START_SHA:-}" ]; then
             echo "::error::START_SHA is empty — the pin step did not run" >&2
             exit 1
@@ -883,6 +955,14 @@ jobs:
           got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
           if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
             echo "::error::restored backlog-burn-ship-check.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          reap_agent_orphans
+          # Re-check after reap: a watcher killed mid-rewrite must not leave
+          # a substituted file under the digest we already accepted.
+          got="$(sha256sum "$restore_tmp" | awk '{print $1}')"
+          if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
+            echo "::error::backlog-burn-ship-check.sh sha256 changed after reap (possible orphan rewrite)" >&2
             exit 1
           fi
           exec "$restore_tmp" \
