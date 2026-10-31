@@ -247,17 +247,22 @@ for row in obj["denied_tools"]:
         sys.exit(1)
     tool = str(row.get("tool") or "")
     # MED-A: refuse planted free text — allowlist / mcp pattern / "(other)" only.
-    # Do not scrub-then-accept: scrub cannot turn arbitrary text into a
-    # known tool name, and a planted value must not pass.
+    # Do not scrub-then-accept into the allowlist: scrub cannot turn arbitrary
+    # text into a known tool name. But DO scrub an already-shaped mcp__ name
+    # and collapse to "(other)" if a credential pattern fires (Bugbot on #953).
     if not tool_allowed(tool):
         print(
             f"::error::diag.json denial tool not allowlisted: {tool!r}",
             file=sys.stderr,
         )
         sys.exit(1)
+    if tool != _OTHER and tool not in KNOWN_TOOLS:
+        scrubbed = S(tool)
+        if scrubbed != tool:
+            tool = _OTHER
     if tool in seen_tools:
-        print("::error::diag.json denied_tools must be unique", file=sys.stderr)
-        sys.exit(1)
+        # Dedup after scrub collapse (two secret-shaped mcp names → one other).
+        continue
     seen_tools.add(tool)
     clean_denials.append({"tool": tool})
 

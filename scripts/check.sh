@@ -653,6 +653,16 @@ if ! ./scripts/backlog-burn-ship-check.sh --selftest; then
   fail=1
 fi
 
+# backlog-burn agent-diag allowlist (MED-A on #953): denied tool names are
+# exact Claude Code tools or mcp__<ns>__<tool> (else "(other)"); unique names
+# capped at 12; string-denial first-token branch is gone; credential-shaped
+# mcp__ names collapse to "(other)". Wired here so CI /preflight cannot drift
+# from the copies in capture.sh and the upload-diag schema.
+echo "-- backlog-burn-agent-diag selftest: scripts/backlog-burn-agent-diag.sh --selftest"
+if ! ./scripts/backlog-burn-agent-diag.sh --selftest; then
+  fail=1
+fi
+
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
 # wrapper is the greenlight loop's ONE shell surface, and its --selftest is

@@ -128,6 +128,16 @@ sys.exit(0 if got == exp else 1)
     echo "FAIL  selftest: mcp bad characters"; cat "$tmp/mcp_bad/diag.json"; fails=$((fails + 1))
   fi
 
+  # 4b) mcp name carrying a ghs_-shaped token -> (other) after scrub
+  local ghs_plant="mcp__leak__ghs_ABCDEFGHIJKLMNOPQRSTUVWX12"
+  run_case mcp_secret "$(python3 -I -c 'import json,sys; print(json.dumps({"type":"result","permission_denials":[{"tool_name":sys.argv[1]}],"result":""}))' "$ghs_plant")"
+  if expect_tools "$tmp/mcp_secret/diag.json" '[{"tool":"(other)"}]' \
+     && ! grep -q 'ghs_' "$tmp/mcp_secret/diag.json" "$tmp/mcp_secret.summary.md"; then
+    echo "ok    selftest: mcp name with credential shape becomes (other)"
+  else
+    echo "FAIL  selftest: mcp credential-shape scrub"; cat "$tmp/mcp_secret/diag.json"; fails=$((fails + 1))
+  fi
+
   # Positive controls: known + well-formed mcp survive
   run_case known_ok '{"type":"result","permission_denials":[{"tool_name":"Bash"},{"tool_name":"mcp__scout__file_design_brief"}],"result":""}'
   if expect_tools "$tmp/known_ok/diag.json" '[{"tool":"Bash"},{"tool":"mcp__scout__file_design_brief"}]'; then
@@ -444,7 +454,12 @@ _TOOL_TOKEN = re.compile(
 
 
 def normalize_tool_name(raw):
-    """Allowlisted name, '(other)' for a non-empty invalid name, or None to skip."""
+    """Allowlisted name, '(other)' for a non-empty invalid name, or None to skip.
+
+    After the shape check, pattern-scrub the name. If scrub changes it
+    (credential shape inside an otherwise-valid mcp__ name), emit
+    '(other)' so diag.json and the step summary agree (Bugbot on #953).
+    """
     if raw is None:
         return None
     if not isinstance(raw, str):
@@ -452,8 +467,12 @@ def normalize_tool_name(raw):
     if not raw:
         return None
     if raw in KNOWN_TOOLS:
+        # Known constants cannot carry a secret; scrub is a no-op for them.
         return raw
     if _MCP_TOOL.fullmatch(raw):
+        scrubbed = scrub(raw, secrets)
+        if scrubbed != raw:
+            return _OTHER
         return raw
     return _OTHER
 
