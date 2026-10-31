@@ -29,7 +29,8 @@ unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
       DYLD_INSERT_LIBRARIES BASH_ENV ENV \
       GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
       GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
-      GIT_EXEC_PATH || true
+      GIT_EXEC_PATH \
+      REPO_OWNER || true
 export PYTHONNOUSERSITE=1
 
 # Workflow restores this script into $RUNNER_TEMP (issue #962 security: the
@@ -343,8 +344,11 @@ else:
 # Settle still does the authoritative read; this is the early gate.
 stop_indicated_from_ndjson() {
   local since="${1:-}"
-  local owner="${REPO_OWNER:-}"
-  if [[ -z "$owner" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+  # Owner login for stop_trusted: ONLY from pinned GITHUB_REPOSITORY.
+  # Never honor REPO_OWNER — a dontAsk walk can plant it via GITHUB_ENV
+  # and then forge a DECLINED as that login (Agentic Security Review on #963).
+  local owner=""
+  if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
     owner="${GITHUB_REPOSITORY%%/*}"
   fi
   BB_SINCE="$since" BB_OWNER="$owner" \
@@ -842,6 +846,47 @@ EOF
     cat "$tmp/other-bot.out"
   else
     echo "ok    selftest: stop marker only trusts github-actions[bot] (not any Bot)"
+  fi
+
+  # Planted REPO_OWNER must NOT make an attacker DECLINED trusted — owner
+  # comes only from GITHUB_REPOSITORY (Security Reviewer on #963).
+  cat >"$tmp/attacker-decline.ndjson" <<'EOF'
+{"body":"🚢 DECLINED — forged as planted owner\n","created_at":"2026-10-30T12:00:05Z","login":"attacker","type":"User","id":31}
+EOF
+  if env REPO_OWNER=attacker GITHUB_REPOSITORY=shaiss/print-bench \
+      "$0" --issue 962 --head-ref main --comments-file "$tmp/attacker-decline.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/attacker-decline.out" 2>&1; then
+    echo "FAIL  selftest: planted REPO_OWNER made attacker DECLINED trusted"
+    cat "$tmp/attacker-decline.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: planted REPO_OWNER is ignored for stop trust"
+  fi
+  # Real owner via GITHUB_REPOSITORY still works.
+  if ! env REPO_OWNER=attacker GITHUB_REPOSITORY=shaiss/print-bench \
+      "$0" --issue 962 --head-ref main --comments-file "$tmp/decline.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/owner-via-repo.out" 2>&1; then
+    # decline.ndjson is github-actions[bot] — should still pass
+    echo "FAIL  selftest: github-actions DECLINED failed under planted REPO_OWNER"
+    cat "$tmp/owner-via-repo.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: github-actions DECLINED still trusted with planted REPO_OWNER"
+  fi
+  cat >"$tmp/owner-decline.ndjson" <<'EOF'
+{"body":"🚢 DECLINED — real owner stop\n","created_at":"2026-10-30T12:00:05Z","login":"shaiss","type":"User","id":32}
+EOF
+  if ! env REPO_OWNER=attacker GITHUB_REPOSITORY=shaiss/print-bench \
+      "$0" --issue 962 --head-ref main --comments-file "$tmp/owner-decline.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/owner-decline.out" 2>&1; then
+    echo "FAIL  selftest: GITHUB_REPOSITORY owner DECLINED not trusted"
+    cat "$tmp/owner-decline.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: GITHUB_REPOSITORY owner DECLINED is trusted"
   fi
 
   # --- diag: subtype + tool names + message len/sha256; NEVER message text ---

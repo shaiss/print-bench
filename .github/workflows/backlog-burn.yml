@@ -807,6 +807,11 @@ jobs:
           REQUESTS_CA_BUNDLE: ""
           NODE_EXTRA_CA_CERTS: ""
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Blank REPO_OWNER: stop_trusted must not honor a GITHUB_ENV plant
+          # of an attacker login (Agentic Security Review on #963). The
+          # restored script also unsets it and derives owner only from
+          # GITHUB_REPOSITORY.
+          REPO_OWNER: ""
           # Pin workspace: the reaper's cwd match must not follow a planted
           # GITHUB_WORKSPACE (Security Reviewer on #963).
           GITHUB_WORKSPACE: ${{ github.workspace }}
@@ -839,7 +844,8 @@ jobs:
             HTTP_PROXY HTTPS_PROXY ALL_PROXY \
             http_proxy https_proxy all_proxy \
             SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
-            NODE_EXTRA_CA_CERTS || true
+            NODE_EXTRA_CA_CERTS \
+            REPO_OWNER || true
           # Do NOT pre-create GH_CONFIG_DIR here: a same-uid leftover from
           # the ship walk can poison a RUNNER_TEMP dir before gh runs
           # (Bugbot on #962). The restored script mktemps an empty dir
