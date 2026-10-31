@@ -9,8 +9,10 @@
 # early, clear fail: after the ship walk, HEAD must be on
 # claude/issue-<N>-* OR the thread must carry an explicit stop marker the
 # settle job already recognizes (🚢 DECLINED / 🚦 DECISION NEEDED /
-# 🚢 DEFERRED), and the ship step's result subtype + denial tool names +
-# a capped final message are printed with secrets redacted.
+# 🚢 DEFERRED), and the ship step prints result subtype + denial tool
+# names (sanitized) plus the final message's length and sha256 — never
+# the message text (MED-C on #963: shape redaction cannot beat /proc env
+# dumps or split/encoded keys).
 #
 # Live:
 #   ./scripts/backlog-burn-ship-check.sh --issue <N> \
@@ -69,14 +71,23 @@ SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss'
 # login or the repo owner — never any other Bot-type user (MED/LOW on #963).
 STOP_MARKER_BOT_LOGIN='github-actions[bot]'
 MSG_CAP=1000
+# Hard cap before any regex (MED-B on #963): the #953 JWT/AWS patterns are
+# quadratic on pathological input (eyJ × 40k took >20s). ~20 KiB is plenty
+# for a subtype string or a denial-tool name list.
+REDACT_INPUT_CAP=20480
 
-# Shared redaction (diag_redact + print_ship_diag must stay in sync).
-# Order: strip controls → neutralize workflow cmds → key-shape redact → cap.
-# Key-shape specs below are copied verbatim from PR #953's
-# provenance.gitstore._SECRET_PATTERN_SPECS / redact_patterns (do not import
-# that package from the post-agent path); ship-diag additions follow.
+# Shared sanitizer for subtype + denial tool names (diag_redact +
+# print_ship_diag must stay in sync). Order: hard-cap → strip Unicode
+# space/format/controls → neutralize workflow cmds → key-shape redact →
+# optional output cap. Key-shape specs are copied verbatim from PR #953's
+# provenance.gitstore._SECRET_PATTERN_SPECS (do not import that package
+# from the post-agent path); ship-diag additions follow.
 REDACT_PY='
 import re
+import unicodedata
+
+_INPUT_CAP = 20480
+_DROP_CATS = frozenset({"Zs", "Zl", "Zp", "Cf", "Cc"})
 
 # --- verbatim from PR #953 provenance.gitstore (key-shape redactor) ---
 _SECRET_PATTERN_SPECS = (
@@ -148,17 +159,34 @@ _SECRET_PATTERNS = tuple(
     (re.compile(pat), repl) for pat, repl in _SHIP_DIAG_EXTRA_SPECS
 )
 
-# C0 except LF, C1, DEL, plus U+2028/U+2029 and zero-width (U+200B-U+200D, U+FEFF).
-_CTRL_RE = re.compile(
-    r"[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029\u200b-\u200d\ufeff]"
-)
+# After Zs/Zl/Zp/Cf/Cc (except LF) are stripped, only ASCII space/tab remain
+# as line-leading indent before a workflow-command ::.
 _WF_LINE_RE = re.compile(r"(?m)^([ \t]*)::")
+_LIVE_WF_RE = re.compile(r"(?m)^[ \t]*::")
+
+
+def _strip_space_format_controls(text: str) -> str:
+    """Drop Unicode Zs/Zl/Zp/Cf and Cc. Keep LF + ASCII space/tab only."""
+    out = []
+    for ch in text:
+        # Keep line structure and ordinary indent; drop NBSP/U+2000/…/Cf.
+        if ch in ("\\n", "\\t", " "):
+            out.append(ch)
+            continue
+        if unicodedata.category(ch) in _DROP_CATS:
+            continue
+        out.append(ch)
+    return "".join(out)
 
 
 def redact_patterns(text, cap=None):
     text = text or ""
-    # 1) Strip controls first so NUL/CR/LS/ZWSP cannot hide a workflow cmd.
-    text = _CTRL_RE.sub("", text)
+    # 0) Hard-cap BEFORE any regex (MED-B ReDoS bound).
+    if len(text) > _INPUT_CAP:
+        text = text[:_INPUT_CAP]
+    # 1) Strip Unicode space/format + controls so NBSP/U+2000/…/U+3000
+    #    cannot hide a line-leading :: (MED-A).
+    text = _strip_space_format_controls(text)
     # 2) Neutralize workflow commands: line-leading :: (optional indent) and
     #    legacy ##[ anywhere (including ##[add-mask]).
     text = _WF_LINE_RE.sub(r"\1\\::", text)
@@ -191,9 +219,9 @@ sys.stdout.write(redact_patterns(text, cap))
 "
 }
 
-# Extract subtype, denial tool names ONLY, and capped final message from an
-# execution log. Never prints inputs/args of denials. Never enables
-# show_full_output — reads whatever the action already wrote.
+# Extract subtype + denial tool names (sanitized) and final-message
+# length/sha256 from an execution log. Never prints message text, never
+# prints denial inputs/args. Never enables show_full_output.
 print_ship_diag() {
   local log="$1"
   if [[ -z "$log" || ! -f "$log" ]]; then
@@ -202,7 +230,7 @@ print_ship_diag() {
   fi
   BB_LOG="$log" BB_CAP="$MSG_CAP" "$PYTHON3" -I -c "
 ${REDACT_PY}
-import json, os, re, sys
+import hashlib, json, os, re, sys
 
 path = os.environ['BB_LOG']
 cap = int(os.environ.get('BB_CAP', '1000'))
@@ -291,11 +319,16 @@ else:
         'ship-diag: permission_denials tools: (none listed in execution log; '
         'count may still be >0 when show_full_output is false)'
     )
+# MED-C: never emit message text — length + sha256 of the raw body only.
+msg_len = len(final_msg)
+msg_sha = hashlib.sha256(final_msg.encode('utf-8')).hexdigest()
 if final_msg:
-    print('ship-diag: final message (redacted, capped ~%d chars):' % cap)
-    print(redact(final_msg))
+    print('ship-diag: final message: len=%d sha256=%s' % (msg_len, msg_sha))
 else:
-    print('ship-diag: final message: (empty or not present in execution log)')
+    print(
+        'ship-diag: final message: (empty or not present; len=%d sha256=%s)'
+        % (msg_len, msg_sha)
+    )
 "
 }
 
@@ -618,8 +651,6 @@ selftest() {
 ${REDACT_PY}
 import re, sys
 
-_live_wf = re.compile(r'(?m)^[ \t]*::')
-
 def check_secret(name, raw, forbidden):
     out = redact_patterns(raw, 1000)
     bad = [f for f in forbidden if f in out]
@@ -632,12 +663,17 @@ def check_secret(name, raw, forbidden):
 def check_cmd(name, raw):
     out = redact_patterns(raw, 1000)
     problems = []
-    if _live_wf.search(out):
+    if _LIVE_WF_RE.search(out):
         problems.append('live line-leading ::')
     if '##[' in out:
         problems.append('live ##[')
-    if _CTRL_RE.search(out):
-        problems.append('control/zw char survived')
+    # Surviving Zs/Zl/Zp/Cf/Cc (other than LF/TAB/SPACE) means strip failed.
+    for ch in out:
+        if ch in ('\n', '\t', ' '):
+            continue
+        if unicodedata.category(ch) in _DROP_CATS:
+            problems.append('space/format/control char survived')
+            break
     if problems:
         print('FAIL  selftest: probe %s kept %s in %r' % (name, problems, out))
         return 1
@@ -677,6 +713,39 @@ fails += check_cmd('legacy ##[', 'say ##[error]injected mid-line')
 fails += check_cmd('legacy ##[add-mask]', '##[add-mask]whatever')
 fails += check_cmd('LS U+2028 ::', 'ok\u2028::error::x')
 fails += check_cmd('ZWSP ::', 'ok\n\u200b::error::x')
+# MED-A: Unicode space (Zs) before :: must not leave a live workflow cmd.
+for name, ch in (
+    ('NBSP U+00A0', '\u00a0'),
+    ('U+2000', '\u2000'),
+    ('U+2001', '\u2001'),
+    ('U+2002', '\u2002'),
+    ('U+2003', '\u2003'),
+    ('U+2004', '\u2004'),
+    ('U+2005', '\u2005'),
+    ('U+2006', '\u2006'),
+    ('U+2007', '\u2007'),
+    ('U+2008', '\u2008'),
+    ('U+2009', '\u2009'),
+    ('U+200A', '\u200a'),
+    ('U+202F', '\u202f'),
+    ('U+205F', '\u205f'),
+    ('U+1680', '\u1680'),
+    ('U+3000', '\u3000'),
+):
+    fails += check_cmd('Unicode ws %s ::' % name, 'ok\n' + ch + '::error::injected')
+# MED-B: pathological eyJ×40k must finish quickly under the ~20 KiB input
+# cap (uncapped this pattern took >20s). Budget 5s leaves headroom on
+# slow runners while still catching a missing cap.
+import time
+pathological = 'eyJ' * 14000  # ~42 KiB
+t0 = time.monotonic()
+_ = redact_patterns(pathological, 1000)
+elapsed = time.monotonic() - t0
+if elapsed > 5.0:
+    print('FAIL  selftest: MED-B ReDoS bound: %.2fs for 40k eyJ input' % elapsed)
+    fails += 1
+else:
+    print('ok    selftest: MED-B 40k eyJ input finishes in %.3fs' % elapsed)
 sys.exit(fails)
 " || { echo "FAIL  selftest: redact_probe cases failed"; fails=$((fails + 1)); }
 
@@ -760,8 +829,10 @@ EOF
     echo "ok    selftest: stop marker only trusts github-actions[bot] (not any Bot)"
   fi
 
-  # --- diag extracts subtype + tool names only; redacts message ---
+  # --- diag: subtype + tool names + message len/sha256; NEVER message text ---
   local ghp_diag="gh"'p_'"ABCDEFGHIJKLMNOPQRSTUVWX"
+  # Distinctive marker must not appear in diag output (MED-C).
+  local msg_marker="UNIQUE_MSG_BODY_MARKER_9f3c_do_not_emit"
   cat >"$tmp/exec.json" <<EOF
 {
   "type": "result",
@@ -771,7 +842,7 @@ EOF
   "permission_denials": [
     {"tool_name": "Bash", "tool_input": {"command": "git push origin main TOKEN=${ghp_diag}"}}
   ],
-  "result": "done; export GITHUB_TOKEN=${ghp_diag} and push\\n::warning::planted"
+  "result": "${msg_marker}; export GITHUB_TOKEN=${ghp_diag} and push\\n::warning::planted"
 }
 EOF
   print_ship_diag "$tmp/exec.json" >"$tmp/diag.out"
@@ -785,15 +856,30 @@ EOF
   else
     echo "ok    selftest: diag prints denial tool names only (no inputs)"
   fi
-  if grep -q 'ghp_ABCDEF' "$tmp/diag.out"; then
-    echo "FAIL  selftest: token leaked in diag final message"; fails=$((fails + 1))
+  if grep -q 'ghp_ABCDEF' "$tmp/diag.out" || grep -qF "$msg_marker" "$tmp/diag.out" \
+     || grep -q '::warning::' "$tmp/diag.out" || grep -q 'export GITHUB_TOKEN' "$tmp/diag.out"; then
+    echo "FAIL  selftest: message text or token leaked into diag (MED-C)"
+    cat "$tmp/diag.out"
+    fails=$((fails + 1))
   else
-    echo "ok    selftest: diag redacts token-like strings in the final message"
+    echo "ok    selftest: diag emits no final-message text (MED-C)"
   fi
-  if grep -qE '^::warning::' "$tmp/diag.out"; then
-    echo "FAIL  selftest: bare :: workflow command in diag final message"; fails=$((fails + 1))
+  # len + sha256 of the raw result body must be present and match.
+  local expect_sha
+  expect_sha="$("$PYTHON3" -I -c "
+import hashlib, json
+o=json.load(open('$tmp/exec.json', encoding='utf-8'))
+body=o['result'].strip()
+print('%d %s' % (len(body), hashlib.sha256(body.encode('utf-8')).hexdigest()))
+")"
+  local expect_len="${expect_sha%% *}"
+  expect_sha="${expect_sha##* }"
+  if grep -q "final message: len=${expect_len} sha256=${expect_sha}" "$tmp/diag.out"; then
+    echo "ok    selftest: diag reports final message len+sha256"
   else
-    echo "ok    selftest: diag escapes :: workflow-command lines in the final message"
+    echo "FAIL  selftest: diag missing len=${expect_len} sha256=${expect_sha}"
+    cat "$tmp/diag.out"
+    fails=$((fails + 1))
   fi
   grep -q 'subtype=success' "$tmp/diag.out" && echo "ok    selftest: diag reports result subtype"
 

@@ -596,7 +596,7 @@ jobs:
           github_token: ${{ github.token }}
           claude_args: --permission-mode dontAsk --settings .claude/backlog-burn-settings.json --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" --model ${{ steps.chain.outputs.link1_model }} --effort max
           # show_full_output stays false (#962): public logs must not dump
-          # tool inputs. Bounded subtype / denial-tool / capped-message diag
+          # tool inputs. Bounded subtype / denial-tool / len+sha256 diag
           # is printed by the post-ship hard check instead.
           show_full_output: false
           prompt: |
@@ -736,7 +736,7 @@ jobs:
       # here — after the walk, before the bundle — unless HEAD is on
       # claude/issue-<N>-* or the thread carries an explicit stop marker
       # settle already recognizes. Also print bounded redacted diag
-      # (subtype, denial tool names only, capped final message).
+      # (subtype, denial tool names only, final-message len+sha256 — no text).
       #
       # The script is NOT the worktree copy. Write/Edit are allowed in the
       # ship steps, and dontAsk denies cannot stop the agent rewriting
@@ -747,6 +747,11 @@ jobs:
       # pre-agent digest, execute a regular file in $RUNNER_TEMP.
       - name: Require ship branch or explicit decline
         id: ship_outcome
+        # Bound the gate (incl. diag redact): pathological eyJ input was
+        # quadratic in the #953 JWT pattern (MED-B on #963). 10 min leaves
+        # room for gh comment fetch + reaper; the script also hard-caps
+        # redact input at ~20 KiB before any regex.
+        timeout-minutes: 10
         if: >-
           always()
           && steps.policy.outputs.enabled == 'true'
