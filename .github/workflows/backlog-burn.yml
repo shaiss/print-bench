@@ -837,9 +837,10 @@ jobs:
           # Reap dontAsk orphans before exec. Stricter than Bundle: a walk
           # can cd /tmp so cwd/argv filters alone miss the watcher
           # (Security Reviewer on #963). Kill ppid=1 / foreign session
-          # leaders / run-*.scope after the runner/systemd allowlist,
-          # regardless of cwd. Exec still goes through a held fd so a
-          # path rewrite cannot redirect the pinned inode.
+          # leaders / run-*.scope after an exact-name runner/systemd
+          # allowlist (no Agent.* / systemd* globs — those are spoofable
+          # via /tmp/Agent.watch). Then seal the script to an unlinked
+          # O_RDONLY inode and exec via that fd.
           reap_should_kill() {
             local pid="$1" ppid="$2" comm="$3" cwd="$4" cmd="$5" sid="$6" cgroup="$7" my_pgid="$8" self_pid="$9"
             [ -n "$pid" ] || return 1
@@ -847,8 +848,13 @@ jobs:
             case "$pid" in
               *[!0-9]*) return 1 ;;
             esac
+            # Exact names only — globs like Agent.* / systemd* are spoofable
+            # by copying a watcher to /tmp/Agent.watch (Security Reviewer).
             case "$comm" in
-              Runner.*|Agent.*|systemd*|containerd*|dockerd*|dbus*) return 1 ;;
+              Runner.Worker|Runner.Listener|Agent.Listener|Agent.PluginHost|\
+              systemd|systemd-journald|systemd-logind|systemd-resolved|\
+              systemd-networkd|systemd-udevd|containerd|dockerd|dbus-daemon)
+                return 1 ;;
             esac
             # ppid=1 orphan: kill even when cwd is outside workspace/temp
             # (a walk can cd /tmp and still rewrite RUNNER_TEMP by path).
@@ -955,16 +961,29 @@ jobs:
             exit 1
           fi
           reap_agent_orphans
-          # Hold an open fd to the pinned inode, then re-hash and exec via
-          # that fd. A path rewrite of $restore_tmp after the digest check
-          # cannot redirect what we run (Security Reviewer / Bugbot on #963).
-          # Do NOT reopen by path after the hash: sha256sum opens its own
-          # description and leaves our fd at offset 0 — a second path-based
-          # open on restore_tmp would throw away the inode pin.
-          exec 3<"$restore_tmp"
+          # Seal onto a private inode, open O_RDONLY, unlink the path, then
+          # exec via the held fd. A path rewrite of restore_tmp cannot
+          # redirect us; an in-place overwrite of a still-linked path also
+          # cannot (Security Reviewer: /proc/self/fd/N tracks a live path
+          # until unlinked). O_RDONLY so a peer opening our fd cannot write.
+          sealed="$(mktemp "${RUNNER_TEMP}/backlog-burn-ship-check-sealed.XXXXXX")"
+          if [ -L "$sealed" ] || [ ! -f "$sealed" ]; then
+            echo "::error::refusing sealed ship-check through a symlink" >&2
+            exit 1
+          fi
+          cp -f -- "$restore_tmp" "$sealed"
+          chmod 400 "$sealed"
+          got="$(sha256sum "$sealed" | awk '{print $1}')"
+          if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
+            rm -f -- "$sealed"
+            echo "::error::sealed backlog-burn-ship-check.sh sha256 does not match the pre-agent pin" >&2
+            exit 1
+          fi
+          exec 3<"$sealed"
+          rm -f -- "$sealed"
           got="$(sha256sum /proc/self/fd/3 | awk '{print $1}')"
           if [ "$got" != "$SHIP_CHECK_SHA256" ]; then
-            echo "::error::backlog-burn-ship-check.sh sha256 changed after reap (possible orphan rewrite)" >&2
+            echo "::error::sealed ship-check sha256 changed after unlink (possible orphan rewrite)" >&2
             exit 1
           fi
           exec /usr/bin/bash --noprofile --norc /proc/self/fd/3 \

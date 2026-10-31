@@ -4874,6 +4874,15 @@ EOF
       echo "selftest: burn ship-outcome reap_should_kill killed allowlisted systemd" >&2
       exit 1
     fi
+    # Spoofed Agent.* / systemd* globs must NOT be kept (exact-name allowlist).
+    if reap_should_kill 55 1 Agent.watch /tmp "x" 3 "" 99 1; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept spoofed Agent.watch" >&2
+      exit 1
+    fi
+    if reap_should_kill 55 1 systemd-watch /tmp "x" 3 "" 99 1; then :; else
+      echo "selftest: burn ship-outcome reap_should_kill kept spoofed systemd-watch" >&2
+      exit 1
+    fi
     # Foreign setsid leader, cwd outside tree.
     if reap_should_kill 77 42 sleep /tmp "x" 77 "" 99 1; then :; else
       echo "selftest: burn ship-outcome reap_should_kill kept a foreign session leader" >&2
@@ -4910,6 +4919,28 @@ EOF
   reopen_n="$(printf '%s\n' "$ship_check_run" | grep -v '^[[:space:]]*#' | grep -c 'exec 3<' || true)"
   [ "$reopen_n" -eq 1 ] || {
     echo "selftest: burn ship-outcome must open fd 3 exactly once (found ${reopen_n})" >&2
+    exit 1
+  }
+  # Sealed unlinked inode: copy → open → rm before exec (in-place overwrite).
+  printf '%s\n' "$ship_check_run" | grep 'ship-check-sealed' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not seal the script to a private inode" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | tr '\\' ' ' | tr '\n' ' ' | grep -E 'exec 3<"\$sealed".*rm -f -- "\$sealed"' >/dev/null \
+    || printf '%s\n' "$ship_check_run" | grep -A2 'exec 3<"\$sealed"' | grep 'rm -f -- "\$sealed"' >/dev/null || {
+    echo "selftest: burn ship-outcome does not unlink the sealed path before exec" >&2
+    exit 1
+  }
+  # No spoofable Agent.* / systemd* globs in the ship-outcome allowlist
+  # (ignore comments that name the ban).
+  ship_reap_body="$(awk '
+    /^      - name: Require ship branch or explicit decline/ { in_step=1 }
+    in_step && /reap_should_kill\(\) \{/ { p=1 }
+    p { print }
+    p && /^          \}$/ { exit }
+  ' "$burn")"
+  printf '%s\n' "$ship_reap_body" | grep -v '^[[:space:]]*#' | grep -E 'Agent\.\*(\||\))|systemd\*(\||\))' >/dev/null && {
+    echo "selftest: burn ship-outcome reap still uses spoofable Agent.*/systemd* globs" >&2
     exit 1
   }
   grep -q '  triage:' "$burn" || {
