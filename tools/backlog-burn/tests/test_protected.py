@@ -181,6 +181,23 @@ def test_touches_bare_scripts_still_counts():
     assert prot.extract_scope_paths("x", "Touches: scripts\n") == {"scripts"}
 
 
+def test_path_scan_caps_large_adversarial_body():
+    # LOW-1 on #953: ``(?:seg/)*`` can quadratic-backtrack on a huge body.
+    # Cap keeps a 64KB adversarial scan well under 1s, and paths in the
+    # scanned prefix still extract.
+    import time
+
+    prefix = "please edit scripts/design-run-deliver.sh before the noise\n"
+    # Many near-path segments that fail the protected-name alts — the shape
+    # that used to burn CPU before the 20KB cap.
+    adversarial = prefix + ("abcd/" * 14000) + "zzzz"
+    assert len(adversarial) >= 64 * 1024
+    t0 = time.perf_counter()
+    paths = prot.extract_scope_paths("x", adversarial)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.0, f"path scan too slow on 64KB body: {elapsed:.3f}s"
+    assert paths == {"scripts/design-run-deliver.sh"}
+
 
 def test_protected_scope_reason_safe():
     assert (

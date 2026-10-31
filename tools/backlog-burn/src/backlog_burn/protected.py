@@ -161,6 +161,9 @@ _PATH_TOKEN = re.compile(
     + rf"|(?:\./)?(?:{_SEG}/)+(?:{_ANY_DEPTH_FILE_ALT})"
     + r")(?![A-Za-z0-9_./-])"
 )
+# Cap free-text path scans so ``(?:seg/)*`` cannot quadratic-backtrack on
+# a huge adversarial body (LOW-1 on #953). Touches: lines are not capped.
+_PATH_SCAN_CAP = 20480
 
 _TOUCHES_LINE = re.compile(
     r"(?im)^\s*\*?\*?Touches\*?\*?\s*:\s*(.+?)\s*$"
@@ -190,7 +193,9 @@ def extract_scope_paths(title: str, body: str = "") -> Optional[set[str]]:
                 tok = _clean_token(piece)
                 if tok:
                     found.add(tok)
-        for m in _PATH_TOKEN.finditer(text):
+        # Cap before the path regex — never feed it an unbounded body.
+        scan = text if len(text) <= _PATH_SCAN_CAP else text[:_PATH_SCAN_CAP]
+        for m in _PATH_TOKEN.finditer(scan):
             tok = _clean_token(m.group(1))
             if tok:
                 found.add(tok)

@@ -115,13 +115,16 @@ if [ ! -f "$raw_diag" ] || [ -L "$raw_diag" ]; then
   exit 1
 fi
 
-# Validate schema + re-scrub with pinned provenance (exact secrets from
-# SECRETS_FILE + credential_env forms + patterns). Refuse anything that is
-# not our payload shape (blocks planting the execution log).
+# Validate schema + re-scrub denied-tool fields with pinned provenance
+# (SECRETS_FILE values + credential_env forms + pattern shapes). Refuse
+# anything that is not our payload shape (blocks planting the execution
+# log). Final assistant message text is never in the payload — only
+# length + sha256 (MED-1 / MED-C).
 validated="$(mktemp "${RUNNER_TEMP}/backlog-burn-diag-validated.XXXXXX")"
 cleanup_paths+=("$validated")
 python3 -I - "$prov_src" "$raw_diag" "$validated" "$SECRETS_FILE" <<'PY'
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -133,11 +136,12 @@ ALLOWED = {
     "label",
     "log_note",
     "denied_tools",
-    "final_assistant_message_truncated",
+    "final_assistant_message_len",
+    "final_assistant_message_sha256",
 }
 MAX_BYTES = 64 * 1024
-MAX_FINAL = 500
 MAX_DENIALS = 40
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 raw_secrets = [
     line.strip()
@@ -179,11 +183,19 @@ if not isinstance(obj, dict) or set(obj.keys()) != ALLOWED:
 if not isinstance(obj["label"], str) or not isinstance(obj["log_note"], str):
     print("::error::diag.json label/log_note must be strings", file=sys.stderr)
     sys.exit(1)
-if not isinstance(obj["final_assistant_message_truncated"], str):
-    print("::error::diag.json final_assistant_message_truncated must be a string", file=sys.stderr)
+if "final_assistant_message_truncated" in obj:
+    print(
+        "::error::diag.json must not contain final_assistant_message_truncated",
+        file=sys.stderr,
+    )
     sys.exit(1)
-if len(obj["final_assistant_message_truncated"]) > MAX_FINAL:
-    print("::error::diag.json final message exceeds truncate bound", file=sys.stderr)
+msg_len = obj["final_assistant_message_len"]
+if type(msg_len) is not int or isinstance(msg_len, bool) or msg_len < 0:
+    print("::error::diag.json final_assistant_message_len must be a non-negative int", file=sys.stderr)
+    sys.exit(1)
+msg_sha = obj["final_assistant_message_sha256"]
+if not isinstance(msg_sha, str) or not _SHA256_HEX.fullmatch(msg_sha):
+    print("::error::diag.json final_assistant_message_sha256 must be 64 lowercase hex", file=sys.stderr)
     sys.exit(1)
 if not isinstance(obj["denied_tools"], list) or len(obj["denied_tools"]) > MAX_DENIALS:
     print("::error::diag.json denied_tools invalid", file=sys.stderr)
@@ -201,9 +213,8 @@ payload = {
     "label": S(obj["label"])[:200],
     "log_note": S(obj["log_note"])[:300],
     "denied_tools": clean_denials,
-    "final_assistant_message_truncated": S(
-        obj["final_assistant_message_truncated"]
-    )[:MAX_FINAL],
+    "final_assistant_message_len": msg_len,
+    "final_assistant_message_sha256": msg_sha,
 }
 Path(out_path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 PY

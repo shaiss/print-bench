@@ -3,11 +3,13 @@
 #
 # Reads the claude-code-action execution log (present even when
 # show_full_output stays false) and writes ONLY:
-#   * denied tool names + deny reasons
-#   * a truncated final assistant message (<= 500 chars)
+#   * denied tool names + deny reasons (pattern-scrubbed)
+#   * the final assistant message's length + sha256 (never the text;
+#     same MED-C posture as backlog-burn-ship-check.sh)
 # through the repo's existing redactor (provenance.gitstore.scrub =
-# exact known secrets + pattern-based shapes). Never enables
-# show_full_output; never prints tokens / raw gh output / headers.
+# pattern-based shapes of common tokens; no guarantee for arbitrary
+# secrets). Never enables show_full_output; never prints tokens /
+# raw gh output / headers / final-message excerpts.
 #
 # MUST be restored from the pre-agent START_SHA pin into $RUNNER_TEMP
 # (see backlog-burn-agent-diag-capture.sh) — never run the worktree copy
@@ -110,6 +112,7 @@ from provenance.gitstore import scrub, scrub_then_truncate, credential_env
 fi
 
 python3 -I - "$provenance_src" "$execution_log" "$secrets_file" "$out_dir" "$label" "$summary_path" <<'PY'
+import hashlib
 import json
 import os
 import re
@@ -300,13 +303,17 @@ for row in structured:
     if len(uniq) >= 40:
         break
 
-final_trunc = RT(final_msg, 500)
+# MED-1 / MED-C: never emit message text — length + sha256 of the raw
+# body only (matches backlog-burn-ship-check.sh).
+msg_len = len(final_msg)
+msg_sha = hashlib.sha256(final_msg.encode("utf-8")).hexdigest()
 
 payload = {
     "label": label,
     "log_note": log_note,
     "denied_tools": uniq,
-    "final_assistant_message_truncated": final_trunc,
+    "final_assistant_message_len": msg_len,
+    "final_assistant_message_sha256": msg_sha,
 }
 
 out_path = Path(out_dir) / "diag.json"
@@ -327,14 +334,15 @@ else:
         "- denied tools: (none listed in the execution log; "
         "show_full_output stays false)"
     )
-lines.append("- final assistant message (<=500 chars, redacted):")
-if final_trunc:
-    lines.append("")
-    lines.append("```")
-    lines.append(final_trunc)
-    lines.append("```")
+if final_msg:
+    lines.append(
+        f"- final assistant message: len={msg_len} sha256={msg_sha}"
+    )
 else:
-    lines.append("  (empty)")
+    lines.append(
+        f"- final assistant message: (empty or not present; "
+        f"len={msg_len} sha256={msg_sha})"
+    )
 lines.append("")
 block = "\n".join(lines)
 

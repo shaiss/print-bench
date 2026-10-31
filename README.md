@@ -506,8 +506,9 @@ surfaces studies awaiting a read live in
     sanitized post-agent diagnostic for backlog-burn: the capture bootstrap
     restores both the diag script and `tools/provenance/src` from the
     pre-agent pin into `$RUNNER_TEMP`, then writes denied tool names, deny
-    reasons, and a ≤500-char final assistant message scrubbed via
-    `provenance.gitstore.scrub` (exact secrets + credential patterns);
+    reasons, and the final assistant message's length + sha256 (never the
+    message text) with pattern-based redaction of common token shapes via
+    `provenance.gitstore.scrub` (no guarantee for arbitrary secrets);
     `show_full_output` stays false (Refs #885 #886 #889)
   - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
     context (Gate contract / Acceptance criteria / Design name / Chosen
