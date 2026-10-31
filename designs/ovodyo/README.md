@@ -259,7 +259,8 @@ flat faces meet; the facets line up again as they close and the seam reads as
 one fine line. No glue, no dowels, and it unscrews the same way to reach the
 mechanism. **Print the seam coupon first** (`ovodyo-coupon.scad`: a male ring
 and a female puck side by side; the strip is **164 mm wide — needs a ≥170 mm
-bed**; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
+bed**; keep it out of the front-left corner on X1/P1 — stock profiles carve an
+exclusion there; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
 0.05 mm steps until the puck runs on by hand with light drag and seats without
 rattle — then render the halves with that value. If the coupon's male ring feels
 tight only at the very start of the turn, that's **first-layer squish on the
@@ -268,7 +269,9 @@ loosen `seam_tol` for it. If the **thread lead-in itself binds** through the
 first half-turn, that *is* the fit — raise `seam_tol` by 0.05. If a seam
 threads on but won't seat flat, it's **cross-threaded** — back it all the way
 off and restart; don't loosen `seam_tol` for that either. Print one ball's two
-halves first, screw that pair together and check the fit, before batching the
+halves first, screw that pair together and check the fit — and run a fingernail
+over the pole band and facet edges; if it catches, note it on
+[#600](https://github.com/shaiss/print-bench/issues/600) — before batching the
 second ball's halves with the same `seam_tol`.
 
 **Stalks (v0 display):** trial-fit the rod dry in the `base-end` boss before

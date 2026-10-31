@@ -241,8 +241,9 @@ red interior/two-tone (preview), and the exposed base drivetrain. What remains:
 | ~~Deliverable gated as loose parts; no `ci.plate`~~ done: `ci.plate` → `build/ovodyo-plate.3mf`, 8 objects | (`ci.fusecheck` stays with the seam work) |
 | Ball generator is design-local | #600 (promote to `lib/`, with a `tri_k` guard + facet mate) |
 | No committed style pack / stylelift metrics | #601 (style pack + facet/openness metrics) |
-| Ballast pockets + ≈55 g starting fill; `ci.cog` advisory CoG/tip-over (WARN on TIP-RISK); first emit on `d8d9cf5` / PR #789 measured STABLE 38.28 mm — fill still a starting guess, playbook in “TIP-RISK care” | #603 (item 10 remaining: this manifest; platform half #623 / #652) |
+| Ballast pockets + ≈55 g starting fill; `ci.cog` advisory CoG/tip-over (WARN on TIP-RISK); first emit on `d8d9cf5` / PR #789 measured STABLE 38.28 mm — fill still a starting guess, playbook in “TIP-RISK care”; Ø1.6 mm pocket vent still open | #603 (item 10 remaining: this manifest; platform half #623 / #652; vent) |
 | **No ball-side stalk socket** — brass rod seats in `base-end` only; hero preview's "reaches the ball centre" is not a printable interface (Drik #914) | #604 (hub/bearing with the real drive); page carries the interim display note until then |
+| Red-felt interim two-tone has no committed demo photo yet (page words it honestly) | #601 (evidence: photo of a real felt-wrapped half) |
 
 ## Tumble kinematics (N2)
 
@@ -505,6 +506,11 @@ print, same material and profile as the halves.
   ~45° from above — stencil bridges that read fine head-on can vanish); **one-turn
   close-by-palm feel** (Ø78 shell closed by flat palms at the slot, not the
   coupon's 15–20 mm hand lever — seat should stop on the flats, not wind out slop).
+- **#601 evidence** (2026-10-30 queue): red-felt two-tone demo photo of a real
+  felt-wrapped half — page already words the interim honestly; photo rides the
+  when-a-printed-half-exists round.
+- **#603** (2026-10-30 queue): Ø1.6 mm ballast-pocket vent at the far end of each
+  pocket (air glug on pour-tap-settle cycles) — geometry, not a docs fix.
 - **Render one-looks** (next render touch / #601 new-camera round; camera freeze
   holds — one look for the owner, not a reframe): `hours-ball` pole parting line;
   `slot-corner` hairlines.
