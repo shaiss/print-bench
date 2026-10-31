@@ -959,8 +959,8 @@ jobs:
           # that fd. A path rewrite of $restore_tmp after the digest check
           # cannot redirect what we run (Security Reviewer / Bugbot on #963).
           # Do NOT reopen by path after the hash: sha256sum opens its own
-          # description and leaves our fd at offset 0 — a second
-          # exec 3<"$restore_tmp" would throw away the inode pin.
+          # description and leaves our fd at offset 0 — a second path-based
+          # open on restore_tmp would throw away the inode pin.
           exec 3<"$restore_tmp"
           got="$(sha256sum /proc/self/fd/3 | awk '{print $1}')"
           if [ "$got" != "$SHIP_CHECK_SHA256" ]; then

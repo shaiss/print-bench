@@ -4907,7 +4907,7 @@ EOF
     exit 1
   }
   # Must not reopen the path after the fd pin (Bugbot / Security Reviewer).
-  reopen_n="$(printf '%s\n' "$ship_check_run" | grep -c 'exec 3<' || true)"
+  reopen_n="$(printf '%s\n' "$ship_check_run" | grep -v '^[[:space:]]*#' | grep -c 'exec 3<' || true)"
   [ "$reopen_n" -eq 1 ] || {
     echo "selftest: burn ship-outcome must open fd 3 exactly once (found ${reopen_n})" >&2
     exit 1
