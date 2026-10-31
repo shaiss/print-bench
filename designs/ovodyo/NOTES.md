@@ -451,12 +451,12 @@ printcheck table — infill, not solid-mesh).
 
 `designs/ovodyo/ovodyo-coupon.scad` (part `seam-coupon`, gated as
 `build/ovodyo-coupon.stl`) is the seam's tuning coupon: the production male
-ring on a thin chamfered flange beside a chamfered puck carrying the production
+ring on a chamfered flange beside a chamfered puck carrying the production
 female cut, mouth up the way the top half prints. Both come from the same
 `_seam_neck` / `_seam_female_cut` modules the ball halves use, so the
 `seam_tol` that fits here is the one the four halves get. It is 164 mm wide
-(two Ø70 rings side by side) and 7 mm tall — a ≥ 170 mm bed, a few minutes of
-print, same material and profile as the halves.
+(two Ø70 rings side by side) and ~9 mm tall on the male side — a ≥ 170 mm bed,
+a few minutes of print, same material and profile as the halves.
 
 - **What to tune:** `seam_tol`, the radial thread clearance, in **0.05 mm
   steps** (`-D 'seam_tol=0.30'` on the coupon, then on every half). Default
@@ -468,26 +468,17 @@ print, same material and profile as the halves.
   turn is right; grinding or needing to force it is too tight.
 - **Too tight / won't start:** raise `seam_tol` by 0.05 and reprint the
   coupon. **Rattles, wobbles, or spins back off:** lower it by 0.05.
-- **First-layer squish** fattens a ring's flange foot on the bed. The **female**
-  groove prints **mouth-up** at the top of the puck (same as the production top
-  half, whose seam face is the last plane printed), so first-layer squish never
-  touches it — that is why the female fit is faithful. The **male** coupon,
-  though, stands on a flange *on the bed*, while the production male ring prints
-  at the *top* of the pole-down bottom half — so the male coupon can show a
-  first-flank elephant's foot the ball never gets. The male thread itself
-  starts at z ≈ 1.49 mm (on top of the 1.5 mm flange), so first-layer squish
-  fattens the flange foot, not the thread flanks. Diagnose the hard start:
-  - **Hard only at the first bite, then runs free** → coupon-only flange foot:
-    fix the first layer (z-offset / flow); do **not** loosen `seam_tol`.
-  - **Thread lead-in itself binds** (drag stays through the first half-turn) →
-    raise `seam_tol` by 0.05 and reprint the coupon — that is the fit the
-    halves will get.
-  Prefer the looser-feeling end of a clean seat before locking the value for
-  the halves.
-- **Coupon fidelity (priority follow-up):** print the coupon male **top-down**
-  like the production half (ring ~35 mm up), not flange-on-bed (~1.5 mm up).
-  That deletes the flange-foot hard-start branch instead of documenting it —
-  Jane/PM triage on #961.
+- **Coupon fidelity (landed, PM triage #961):** the male flange is **4.0 mm**
+  tall so the thread lead-in clears the bed's first-layer squish /
+  elephant-foot zone (the prior 1.5 mm flange sat the ring start inside that
+  influence and could fake a "too tight" reading). Not a full flip onto
+  supports — taller flange only. The **female** groove still prints
+  **mouth-up** at the top of the puck (same as the production top half), so
+  first-layer squish never touches it. Prefer the looser-feeling end of a
+  clean seat before locking the value for the halves. If the **thread
+  lead-in itself binds** (drag stays through the first half-turn) → raise
+  `seam_tol` by 0.05 and reprint the coupon — that is the fit the halves
+  will get.
 - Then render the four halves with the winning value and print them
   pole-down (see Key decisions: Ball seam).
 
@@ -500,20 +491,42 @@ print, same material and profile as the halves.
 
 ## Follow-ups / queue (PM triage #961)
 
-- **#601 eyetest** (when a printed half exists): reading-distance photo (~60 cm,
-  desk lamp); showroom squint; slot-rim polish/patina + thumb-drag after a month;
-  dust-in-the-cuts look; **foreshortened-glance legibility** (shallow desk angle,
-  ~45° from above — stencil bridges that read fine head-on can vanish); **one-turn
-  close-by-palm feel** (Ø78 shell closed by flat palms at the slot, not the
-  coupon's 15–20 mm hand lever — seat should stop on the flats, not wind out slop).
+- **#601 eyetest** (when a printed half exists — **promoted above further page
+  rounds**): seated ~45° above the desk, ~60 cm reading distance; photograph
+  under **ceiling light and low-side-light glare**; faces **"00"** and **"08"**;
+  photograph the **current `text()` numerals as the baseline** before the
+  stencil-glyph swap. Also: showroom squint; slot-rim polish/patina +
+  thumb-drag after a month; dust-in-the-cuts look; **foreshortened-glance
+  legibility** (shallow desk angle — stencil bridges that read fine head-on can
+  vanish); **one-turn close-by-palm feel** (Ø78 shell closed by flat palms at
+  the slot, not the coupon's 15–20 mm hand lever — seat should stop on the
+  flats, not wind out slop); **bridge-bar wear** on the resting face's 1.2 mm
+  stencil ties under desk load (putty / felt / coaster — rotate the resting
+  face).
 - **#601 evidence** (2026-10-30 queue): red-felt two-tone demo photo of a real
   felt-wrapped half — page already words the interim honestly; photo rides the
   when-a-printed-half-exists round.
+- **#768** (queue note, Jane): measure the slot-to-plaque wall strip at the
+  tight pass-by — ≥2 mm fine / <1.5 mm nudge the slot clocking. No clearance is
+  recorded in-tree yet; measure and record here. Geometry lives on the frozen
+  #914 carrier, not a docs PR.
 - **#603** (2026-10-30 queue): Ø1.6 mm ballast-pocket vent at the far end of each
   pocket (air glug on pour-tap-settle cycles) — geometry, not a docs fix.
+  Jane ×2 endorsements (vent + bumper-recess lead-in chamfer) recorded on the
+  triage — both already queued; #603 opens with the votes visible.
+- **#599** (queue note, Jane bonus): PEI smooth plate also serves the insert
+  show faces — evidence note on the top-ranked deferred item.
+- **#600** (queue note, Jane bonus): `base-core` accent colour = cheapest
+  two-tone — page already says "Print it in red"; dedicated line is
+  two-tone-page territory.
+- **Field-test check (Jane):** ridge-chord underside sag expectation
+  1.5–2.5 mm against the page's recorded ~1 mm — measure on a printed
+  `base-segment` / `base-end`, do not promote the higher band onto the page
+  unmeasured.
 - **Render one-looks** (next render touch / #601 new-camera round; camera freeze
   holds — one look for the owner, not a reframe): `hours-ball` pole parting line;
-  `slot-corner` hairlines.
+  `slot-corner` hairlines. Owner option at the freeze look: a new `hero-wide`
+  camera line (never a reframe of the frozen hero).
 
 ## Resume context
 

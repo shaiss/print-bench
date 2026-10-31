@@ -58,6 +58,9 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 
 ![A single ball](previews/hours-ball.png)
 
+*One faceted die three-quarter — flush pentagon plaques, cut-through numerals
+(dark voids in a single-material print), helical slot framing the interior.*
+
 ![Helical slot path across corners](previews/slot-path.png)
 
 *The helical slot cutting across corner facets — a single-material print is one
@@ -113,6 +116,9 @@ whole clock would print as one fused lump):
   its end face. Print it in red — it is a working part.
 - `base-plug` — the tapered plug that closes each ballast port (print four —
   two to use, two as spares; a Ø5 mm part is the one the scraper loses).
+- `mock-drive` — a single representative reduction gear, kept as a gated
+  printability sample of the (otherwise preview-only) drivetrain. It is not a
+  placed assembly part and is not included on the production plate.
 
 The printable deliverable is the **multi-object plate**, `build/ovodyo-plate.3mf`
 (built by `./scripts/plate.sh ovodyo` from `ci.plate`): the eight production
@@ -125,9 +131,6 @@ segment + both ends + core + the plugs on a second plate that packs tightly —
 lay it out in the slicer first (the coffee-break plate). If your printer's
 profile greys out the front-left corner (stock X1/P1 carve an exclusion there),
 nudge the layout up-left before slicing.
-- `mock-drive` — a single representative reduction gear, kept as a gated
-  printability sample of the (otherwise preview-only) drivetrain. It is not a
-  placed assembly part and is not included on the production plate.
 
 The base drivetrain (gear-trains, steppers, bevels, PCB) and the balls' red
 interior are **preview-only** — colours are ignored on STL export, so they are
@@ -140,7 +143,9 @@ the default render is the assembled clock.
 ## Print settings
 
 - **Material:** PLA (white shell + red interior/mechanism is the intent; v0 is
-  single-material).
+  single-material). Prefer a **light PLA** against a dark desk or mat — the
+  cut-through numerals read as voids, and contrast against the background is
+  the one readability dial a single-material builder controls.
 - **Layer height:** 0.2 mm for the base parts; **0.16 mm for the four ball
   halves** (and for the seam coupon — print it on the halves' profile so the
   `seam_tol` that fits is the one the halves get) — the near-pole facets sit
@@ -169,8 +174,13 @@ the default render is the assembled clock.
   (turning supports on to "fix" them is the weld-the-seam failure mode).
   The truss ridge chords also bridge ~32 mm between posts (bay length at
   `bays=4`) — in PLA expect up to ~1 mm of underside droop and a few loose
-  strands on those spans; that's the print, not a failure. Keep supports off,
-  because anything painted inside the lattice can never be removed.
+  strands on those spans; that's the print, not a failure. Mitigate with
+  **thicker bridges** / **slower bridge walls** in the slicer if your profile
+  offers them — keep the recorded ~1 mm magnitude as the expectation, not a
+  chase-to-zero. Keep supports off, because anything painted inside the
+  lattice can never be removed. On the ball halves, a small kink in the slot
+  roof bridge at each facet crossing is normal (the bridge walks a faceted
+  path), not a slicing defect.
 - **Brim:** **on by default for `base-segment` and `base-end`** (line-contact
   chords lift easily); the ball halves have big flat pole faces and can stay
   off. Safe on every other part if a tip lifts. No tuned fit on this design
@@ -262,17 +272,18 @@ and a female puck side by side; the strip is **164 mm wide — needs a ≥170 mm
 bed**; keep it out of the front-left corner on X1/P1 — stock profiles carve an
 exclusion there; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
 0.05 mm steps until the puck runs on by hand with light drag and seats without
-rattle — then render the halves with that value. If the coupon's male ring feels
-tight only at the very start of the turn, that's **first-layer squish on the
-coupon flange** (the thread sits ~1.5 mm above the bed), not the fit — don't
-loosen `seam_tol` for it. If the **thread lead-in itself binds** through the
-first half-turn, that *is* the fit — raise `seam_tol` by 0.05. If a seam
-threads on but won't seat flat, it's **cross-threaded** — back it all the way
-off and restart; don't loosen `seam_tol` for that either. Print one ball's two
-halves first, screw that pair together and check the fit — and run a fingernail
-over the pole band and facet edges; if it catches, note it on
-[#600](https://github.com/shaiss/print-bench/issues/600) — before batching the
-second ball's halves with the same `seam_tol`.
+rattle — then render the halves with that value. If the **thread lead-in itself
+binds** through the first half-turn, that *is* the fit — raise `seam_tol` by
+0.05. If a seam threads on but won't seat flat, it's **cross-threaded** — back
+it all the way off and restart; don't loosen `seam_tol` for that either. Print
+one ball's two halves **after the coupon, before batching** the second ball —
+screw that pair together and check the fit, and run a fingernail over the pole
+band and facet edges; if it catches, note it on
+[#600](https://github.com/shaiss/print-bench/issues/600) (a catch is a data
+point, not a stop — the faint pole band is the known #600 caveat, and the seam
+fit is already proven by the pair you just screwed). Closing the Ø78 shell is
+**palms at the slot**, not the coupon's 15–20 mm hand lever — expect a firmer
+seat that stops on the flats; a stiff first close is not cross-threaded.
 
 **Stalks (v0 display):** trial-fit the rod dry in the `base-end` boss before
 final assembly, then seat **Ø4 mm brass rods + a tape shim** (or reamed Ø5)
@@ -289,7 +300,8 @@ lift from the centre segment so the ends don't peel).
 
 **The red core goes in before the clock stands up, and the order matters:**
 
-1. Fill each ballast pocket with Ø2 mm steel shot.
+1. Degrease the Ø2 mm steel shot (IPA, dry fully) — oiled shot defeats the
+   later CA lock — then fill each ballast pocket.
 2. Wedge a `base-plug` into each port.
 3. Slide the keel into the **bare** centre segment.
 4. Tape both wings on.
@@ -318,11 +330,13 @@ elephant-foot narrowed the mouth, open it slightly with a drill bit first.
 mass lives in the drive that [#604](https://github.com/shaiss/print-bench/issues/604) brings. A **packed** pour of shot
 wrapped in felt (or similar) inside the halves before you screw them shut is a
 fine interim heft hack — start around **~20 g per ball** (unmeasured first guess;
-you may need to adjust), split across **both halves** or centred on the seam
-plane (not one-sided), kept against the seam and away from the numeral faces
-(the cuts are windows; a dark wrap shows less). **Red** felt reads through the
-numeral cuts as an honest interim v0 two-tone — material behind a window, not
-paint, and **not** the committed two-tone ([#599](https://github.com/shaiss/print-bench/issues/599) insert /
+you may need to adjust; weigh the felt wrap on the same pour scale), split
+across **both halves** or centred on the seam plane (not one-sided), kept
+against the seam and away from the numeral faces (the cuts are windows; a dark
+wrap shows less). Aim for the **same wrap tightness in both balls** — the pair
+is handled together. **Red** felt reads through the numeral cuts as an honest
+interim v0 two-tone — material behind a window, not paint, and **not** the
+committed two-tone ([#599](https://github.com/shaiss/print-bench/issues/599) insert /
 [#600](https://github.com/shaiss/print-bench/issues/600) render keep their rank). After opening a ball (dusting,
 etc.), re-centre the wrap on the seam plane before you close it. A one-sided
 lump doesn't just bias parking — in v0 it changes how many tumbles it takes to
@@ -337,7 +351,9 @@ the threaded seam ring shows through the window — prints clean, it's expected
 (no committed render shows it; `hours-ball` is the seamless preview). A few
 wisps across the numeral voids are normal with dry PLA; clear with a knife tip
 through the slot or the unscrew-and-wipe — print PLA dry. Rotate which numeral
-faces the desk under the putty dab so wear doesn't pick one face forever.
+faces the desk under the putty dab — and under a felt pad or leather coaster —
+so wear doesn't pick one face forever (the resting face's 1.2 mm stencil ties
+are the thinnest feature under desk load).
 Museum putty is consumable (rated hundreds of peel-stick cycles, not thousands);
 a felt pad or leather coaster under each ball is the re-set-friendly interim
 display. A knock should prefer the one-turn seam over cracking a shell —
