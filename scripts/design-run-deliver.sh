@@ -4600,6 +4600,14 @@ EOF
     echo "selftest: burn ship-outcome step does not re-export GH_BIN=/usr/bin/gh" >&2
     exit 1
   }
+  printf '%s\n' "$ship_check_env" | grep -qx '          GH_PAGER: cat' || {
+    echo "selftest: burn ship-outcome step does not pin GH_PAGER=cat" >&2
+    exit 1
+  }
+  printf '%s\n' "$ship_check_run" | grep 'export GH_PAGER=cat' >/dev/null || {
+    echo "selftest: burn ship-outcome step does not re-export GH_PAGER=cat" >&2
+    exit 1
+  }
   grep -q 'GH_HOST: github.com' "$burn" || {
     echo "selftest: burn ship-outcome step does not pin GH_HOST=github.com" >&2
     exit 1
@@ -4619,6 +4627,10 @@ EOF
   ship_check_src="$repo_root/scripts/backlog-burn-ship-check.sh"
   grep -q 'GIT_EXEC_PATH' "$ship_check_src" || {
     echo "selftest: ship-check does not clear planted GIT_EXEC_PATH" >&2
+    exit 1
+  }
+  grep -q 'GH_PAGER=cat' "$ship_check_src" || {
+    echo "selftest: ship-check does not force GH_PAGER=cat before gh" >&2
     exit 1
   }
   grep -q 'bb-gh-config' "$ship_check_src" || {

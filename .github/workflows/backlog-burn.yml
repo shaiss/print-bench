@@ -787,6 +787,12 @@ jobs:
           GH_BIN: /usr/bin/gh
           GH_HOST: github.com
           GH_ENTERPRISE_TOKEN: ""
+          # Disable planted pagers: with GH_FORCE_TTY, gh api --paginate still
+          # execs GH_PAGER/PAGER and that child inherits GH_TOKEN (Security
+          # Reviewer on #963). Pin to cat; script also unsets before gh.
+          GH_PAGER: cat
+          PAGER: cat
+          GH_FORCE_TTY: ""
           HTTP_PROXY: ""
           HTTPS_PROXY: ""
           ALL_PROXY: ""
@@ -824,7 +830,8 @@ jobs:
           unset GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
             GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
             GIT_EXEC_PATH \
-            GH_ENTERPRISE_TOKEN GH_CONFIG_DIR HTTP_PROXY HTTPS_PROXY ALL_PROXY \
+            GH_ENTERPRISE_TOKEN GH_CONFIG_DIR GH_FORCE_TTY \
+            HTTP_PROXY HTTPS_PROXY ALL_PROXY \
             http_proxy https_proxy all_proxy \
             SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
             NODE_EXTRA_CA_CERTS || true
@@ -834,6 +841,9 @@ jobs:
           # immediately before the gh call and refuses a non-empty one.
           export GH_BIN=/usr/bin/gh
           export GH_HOST=github.com
+          export GH_PAGER=cat
+          export PAGER=cat
+          unset GH_FORCE_TTY || true
           # Reap dontAsk orphans before exec. Stricter than Bundle: a walk
           # can cd /tmp so cwd/argv filters alone miss the watcher
           # (Security Reviewer on #963). Kill ppid=1 / foreign session

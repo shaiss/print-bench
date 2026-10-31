@@ -392,10 +392,14 @@ run_check() {
     # http_unix_socket / api_host into a RUNNER_TEMP dir created earlier;
     # Bugbot on #962). --hostname pins the host even if hosts.yml exists.
     # Fail closed on fetch error — never treat attacker NDJSON as "no stop".
-    unset GH_ENTERPRISE_TOKEN HTTP_PROXY HTTPS_PROXY ALL_PROXY \
+    unset GH_ENTERPRISE_TOKEN GH_FORCE_TTY HTTP_PROXY HTTPS_PROXY ALL_PROXY \
       http_proxy https_proxy all_proxy \
       SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
       NODE_EXTRA_CA_CERTS || true
+    # Planted GH_PAGER/PAGER + GH_FORCE_TTY make gh exec the pager with
+    # GH_TOKEN (Security Reviewer on #963). Force cat; never inherit a plant.
+    export GH_PAGER=cat PAGER=cat
+    unset GH_FORCE_TTY || true
     local gh_cfg
     gh_cfg="$(mktemp -d "${TMPDIR:-/tmp}/bb-gh-config.XXXXXX")"
     if [[ -L "$gh_cfg" || ! -d "$gh_cfg" ]]; then
@@ -424,11 +428,15 @@ run_check() {
           if [ -n "${HTTPS_PROXY+x}" ]; then printf 'HTTPS_PROXY=SET\n'; else printf 'HTTPS_PROXY=UNSET\n'; fi
           if [ -n "${ALL_PROXY+x}" ]; then printf 'ALL_PROXY=SET\n'; else printf 'ALL_PROXY=UNSET\n'; fi
           printf 'gh_bin=%s\n' "$gh_bin"
+          printf 'GH_PAGER=%s\n' "${GH_PAGER-}"
+          if [ -n "${GH_FORCE_TTY+x}" ]; then printf 'GH_FORCE_TTY=SET\n'; else printf 'GH_FORCE_TTY=UNSET\n'; fi
         } >"${BB_SHIP_CHECK_PROXY_PROBE}" || true
       fi
       if ! comments="$(
         GH_HOST=github.com GH_CONFIG_DIR="$gh_cfg" \
+        GH_PAGER=cat PAGER=cat \
         GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN}}" \
+        env -u GH_FORCE_TTY \
         "$gh_bin" api --hostname github.com --paginate \
           "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
           --jq '.[] | {body,created_at,login:.user.login,type:.user.type,id}'
@@ -641,6 +649,9 @@ EOF
       HTTP_PROXY='http://evil.example:1' \
       HTTPS_PROXY='http://evil.example:1' \
       ALL_PROXY='socks5://evil.example:1' \
+      GH_PAGER=/tmp/evil-pager \
+      PAGER=/tmp/evil-pager \
+      GH_FORCE_TTY=1 \
       "$0" --issue 962 --head-ref claude/issue-962-proxy-clear \
       --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
       >"$tmp/proxy.out" 2>&1; then
@@ -662,10 +673,18 @@ EOF
       echo "FAIL  selftest: call site did not pin gh_bin=/usr/bin/gh (probe: $(tr '\n' ' ' <"$tmp/proxy-probe.env"))"
       proxy_leaks=$((proxy_leaks + 1))
     fi
+    if ! grep -qx 'GH_PAGER=cat' "$tmp/proxy-probe.env"; then
+      echo "FAIL  selftest: planted GH_PAGER not forced to cat (probe: $(tr '\n' ' ' <"$tmp/proxy-probe.env"))"
+      proxy_leaks=$((proxy_leaks + 1))
+    fi
+    if ! grep -qx 'GH_FORCE_TTY=UNSET' "$tmp/proxy-probe.env"; then
+      echo "FAIL  selftest: planted GH_FORCE_TTY reached gh (probe: $(tr '\n' ' ' <"$tmp/proxy-probe.env"))"
+      proxy_leaks=$((proxy_leaks + 1))
+    fi
     if [[ "$proxy_leaks" -ne 0 ]]; then
       fails=$((fails + proxy_leaks))
     else
-      echo "ok    selftest: planted lowercase/uppercase proxies are cleared before gh"
+      echo "ok    selftest: planted proxies/pagers are cleared before gh"
     fi
   fi
 
