@@ -4,3 +4,10 @@
 # pr/issue/sha/tag), so new commits cannot reintroduce that shape. This ignore
 # covers only the introducing commit still reachable in PR #846's range.
 d42f8c780041a973ff19a8226a0d4a44aa995974:tools/provenance/tests/fixtures/records/commit/d63588d44d5248bae73e9487528a9387c269726b.json:generic-api-key:76
+
+# Synthetic selftest fixture: classic jwt.io demo JWT used once as a literal
+# in scripts/backlog-burn-ship-check.sh MED-1 redact_probe cases (PR #963).
+# Later commits build the same fixture by concatenation so it never reappears
+# as a contiguous secret-shaped string; this fingerprint covers only that
+# introducing commit still reachable in the PR range.
+926b84641c12a862ec4a6deac91c413533db52e0:scripts/backlog-burn-ship-check.sh:jwt:653

@@ -558,8 +558,11 @@ selftest() {
   trap cleanup_st EXIT
 
   # --- redact + cap ---
+  # Synthetic fixtures are built at runtime (concat) so the repo never holds
+  # a literal secret-shaped string for gitleaks to trip on.
   local out
-  out="$(BB_IN='see ghp_ABCDEFGHIJKLMNOPQRSTUVWX and ok' diag_redact 1000)"
+  local ghp_tok="gh"'p_'"ABCDEFGHIJKLMNOPQRSTUVWX"
+  out="$(BB_IN="see ${ghp_tok} and ok" diag_redact 1000)"
   printf '%s' "$out" | grep -q '\*\*\*' \
     || { echo "FAIL  selftest: token-like string was not redacted (got: $out)"; fails=$((fails + 1)); }
   printf '%s' "$out" | grep -q 'ghp_ABCDEF' \
@@ -567,7 +570,9 @@ selftest() {
     || echo "ok    selftest: token-like string is redacted"
 
   # Basic pattern from #953 needs >=20 b64 chars; KEY= covers the assignment.
-  out="$(BB_IN='ANTHROPIC_API_KEY=abcdefghijklmnop Basic YWJjZGVmZ2hpamtsbXFxcnN0dXZ3eHl6=' diag_redact 1000)"
+  local key_val='abcdefghijklmnop'
+  local basic_b64='YWJjZGVm'"Z2hpamtsbXFxcnN0dXZ3eHl6"'='
+  out="$(BB_IN="ANTHROPIC_API_KEY=${key_val} Basic ${basic_b64}" diag_redact 1000)"
   printf '%s' "$out" | grep -q '\*\*\*' \
     || { echo "FAIL  selftest: KEY=/Basic secrets not redacted (got: $out)"; fails=$((fails + 1)); }
   printf '%s' "$out" | grep -q 'abcdefghijklmnop' \
@@ -640,22 +645,31 @@ def check_cmd(name, raw):
     return 0
 
 fails = 0
-fails += check_secret('ghp', 'x ghp_ABCDEFGHIJKLMNOPQRSTUVWX123456', ['ghp_ABCDEF', 'ABCDEFGHIJKLMNOPQRSTUVWX123456'])
-fails += check_secret('sk-or', 'sk-or-v1-abcdefghijklmnopqrstuvwxyz012345', ['sk-or-v1-abcdefgh', 'abcdefghijklmnopqrstuvwxyz012345'])
-fails += check_secret('sk-ant', 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz', ['sk-ant-api03-abcdefgh', 'abcdefghijklmnopqrstuvwxyz'])
-zai = '0123456789abcdef0123456789abcdef.AbCdEfGh12345678'
-fails += check_secret('zai (hex32.alnum16)', 'key ' + zai, [zai, '0123456789abcdef0123456789abcdef'])
-fails += check_secret('ZAI_KEY=', 'ZAI_KEY=' + zai, [zai, '0123456789abcdef0123456789abcdef'])
-fails += check_secret('ANTHROPIC_API_KEY=', 'ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxxxxxxxxxxxxxxYY', ['sk-ant-api03-xxxxxxxx', 'xxxxxxxxxxxxxxxxxxxxYY'])
-fails += check_secret('OPENROUTER_API_KEY=', 'OPENROUTER_API_KEY=sk-or-v1-yyyyyyyyyyyyyyyyyyyyYYYY', ['sk-or-v1-yyyyyyyy', 'yyyyyyyyyyyyyyyyyyyyYYYY'])
-aiza = 'AIzaBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
-fails += check_secret('GOOGLE AIza', aiza, [aiza, 'AIzaBBBBBBBBBBBBBBBBBBBB'])
-jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcDEF123_-xyz'
-fails += check_secret('JWT', jwt, [jwt, 'eyJhbGciOiJIUzI1NiJ9', 'abcDEF123_-xyz'])
-fails += check_secret('url userinfo', 'postgres://user:hunter2secret@host/db', ['hunter2secret', 'user:hunter2secret'])
+# Build every secret-shaped fixture by concatenation so a static scan of
+# this file never sees a complete token / JWT / AIza / pat string.
+_ghp = 'gh' + 'p_' + 'A' * 36
+fails += check_secret('ghp', 'x ' + _ghp, ['ghp_' + 'A' * 6, 'A' * 36])
+_skor = 'sk-' + 'or-v1-' + 'abcdefghijklmnopqrstuvwxyz012345'
+fails += check_secret('sk-or', _skor, ['sk-or-v1-' + 'abcdefgh', 'abcdefghijklmnopqrstuvwxyz012345'])
+_skant = 'sk-' + 'ant-api03-' + 'abcdefghijklmnopqrstuvwxyz'
+fails += check_secret('sk-ant', _skant, ['sk-ant-api03-' + 'abcdefgh', 'abcdefghijklmnopqrstuvwxyz'])
+zai = ('0123456789abcdef' * 2) + '.' + 'AbCdEfGh12345678'
+fails += check_secret('zai (hex32.alnum16)', 'key ' + zai, [zai, '0123456789abcdef' * 2])
+fails += check_secret('ZAI_KEY=', 'ZAI_KEY=' + zai, [zai, '0123456789abcdef' * 2])
+_ant = 'sk-' + 'ant-api03-' + ('x' * 20) + 'YY'
+fails += check_secret('ANTHROPIC_API_KEY=', 'ANTHROPIC_API_KEY=' + _ant, ['sk-ant-api03-' + ('x' * 8), ('x' * 20) + 'YY'])
+_or = 'sk-' + 'or-v1-' + ('y' * 20) + 'YYYY'
+fails += check_secret('OPENROUTER_API_KEY=', 'OPENROUTER_API_KEY=' + _or, ['sk-or-v1-' + ('y' * 8), ('y' * 20) + 'YYYY'])
+aiza = 'AI' + 'za' + ('B' * 35)
+fails += check_secret('GOOGLE AIza', aiza, [aiza, 'AIza' + ('B' * 16)])
+# Classic jwt.io demo JWT, split so gitleaks never sees the joined form.
+jwt = 'eyJ' + 'hbGciOiJIUzI1NiJ9' + '.' + 'eyJ' + 'zdWIiOiIxMjM0NTY3ODkwIn0' + '.' + 'abcDEF123_-xyz'
+fails += check_secret('JWT', jwt, [jwt, 'eyJ' + 'hbGciOiJIUzI1NiJ9', 'abcDEF123_-xyz'])
+fails += check_secret('url userinfo', 'postgres://' + 'user:' + 'hunter2' + 'secret@host/db', ['hunter2' + 'secret', 'user:' + 'hunter2' + 'secret'])
 hx = 'a' * 64
 fails += check_secret('bare hex 64', hx, [hx, 'a' * 40])
-fails += check_secret('github_pat', 'github_pat_11AAAAAAA0123456789012345678901234', ['github_pat_11AAAAAAA', '11AAAAAAA0123456789012345678901234'])
+_pat = 'github' + '_pat_' + '11' + ('A' * 7) + '0123456789012345678901234'
+fails += check_secret('github_pat', _pat, ['github_pat_' + '11' + ('A' * 7), '11' + ('A' * 7) + '0123456789012345678901234'])
 fails += check_cmd('NUL before ::', 'ok\x00\n::error::injected')
 fails += check_cmd('leading space ::', 'ok\n  ::error::injected')
 fails += check_cmd('tab ::', 'ok\n\t::warning::injected')
@@ -747,16 +761,17 @@ EOF
   fi
 
   # --- diag extracts subtype + tool names only; redacts message ---
-  cat >"$tmp/exec.json" <<'EOF'
+  local ghp_diag="gh"'p_'"ABCDEFGHIJKLMNOPQRSTUVWX"
+  cat >"$tmp/exec.json" <<EOF
 {
   "type": "result",
   "subtype": "success",
   "is_error": false,
   "permission_denials_count": 1,
   "permission_denials": [
-    {"tool_name": "Bash", "tool_input": {"command": "git push origin main TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWX"}}
+    {"tool_name": "Bash", "tool_input": {"command": "git push origin main TOKEN=${ghp_diag}"}}
   ],
-  "result": "done; export GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWX and push\n::warning::planted"
+  "result": "done; export GITHUB_TOKEN=${ghp_diag} and push\\n::warning::planted"
 }
 EOF
   print_ship_diag "$tmp/exec.json" >"$tmp/diag.out"
@@ -783,10 +798,11 @@ EOF
   grep -q 'subtype=success' "$tmp/diag.out" && echo "ok    selftest: diag reports result subtype"
 
   # subtype= and denial tool names must also go through redact_patterns.
-  cat >"$tmp/exec-evil.json" <<'EOF'
+  local ghp_evil="gh"'p_'"ABCDEFGHIJKLMNOPQRSTUVWX123456"
+  cat >"$tmp/exec-evil.json" <<EOF
 {
   "type": "result",
-  "subtype": "ok ghp_ABCDEFGHIJKLMNOPQRSTUVWX123456\n::error::planted",
+  "subtype": "ok ${ghp_evil}\\n::error::planted",
   "permission_denials": [
     {"tool_name": "Bash##[add-mask]x"}
   ],
