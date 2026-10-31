@@ -69,7 +69,10 @@ making the wrong run's claim. The settle job's constant stub
 #864) and routine-lock-cleanup.sh's dead-run notice (``brief.withdrawn``
 with ``fields.death``) never count and are never window-attributed: both
 are posted after every agent step, so the only windows that can hold them
-are other runs'. And an
+are other runs'. The picker cooldown the same script posts beside a death
+(or alone, when the run held no lock — #924; ``brief.cooldown``) is in no
+:data:`KIND_ROLES` entry for the same reason, so it is never joined to a
+window at all and stays ``login``. And an
 Actions-bot lock counts toward one routine only, told apart by its body: the
 design-run §2 contract names the design (``fields.design_name``; the
 #860–#864 runs' agent posted it as the Actions bot inside its window), the
@@ -311,6 +314,8 @@ KIND_ROLES: dict[str, frozenset[str]] = {
     "brief.declined": frozenset({"design-run", "backlog-burn"}),
     "brief.deferred": frozenset({"design-run", "backlog-burn"}),
     "brief.withdrawn": frozenset({"design-run", "backlog-burn"}),
+    # brief.cooldown has no entry on purpose: routine-lock-cleanup.sh posts it after every agent
+    # step (§2b), so no window may hold it.
     "pr.opened": frozenset({"design-run", "backlog-burn"}),
     "commit.design": frozenset({"design-run", "backlog-burn"}),
     "commit.fix": frozenset({"design-run", "backlog-burn"}),

@@ -220,6 +220,58 @@
    },
    "episode": "E0:brief:520",
    "fields": {
+    "design_name": null
+   },
+   "head_sha": null,
+   "id": "issuecomment:6204",
+   "issue": 520,
+   "kind": "brief.cooldown",
+   "pr": null,
+   "runtime": {
+    "attempt": null,
+    "chain": null,
+    "chain_link": null,
+    "harness": null,
+    "job": null,
+    "job_id": null,
+    "links_not_served": null,
+    "model": null,
+    "model_basis": "none",
+    "platform": "unknown",
+    "provider": null,
+    "role": null,
+    "run_id": null,
+    "workflow": null
+   },
+   "sha": null,
+   "signals": {
+    "app": null,
+    "commit_author_email": null,
+    "commit_author_name": null,
+    "committer_login": null,
+    "login": "github-actions[bot]",
+    "login_type": "Bot",
+    "marker": null,
+    "regen_identity": false,
+    "status_context": null,
+    "trailer_coauthors": [],
+    "trailer_session": null
+   },
+   "stale_sha": false,
+   "trust": "login",
+   "trust_basis": "login",
+   "ts": "2026-09-04T11:00:01Z",
+   "ts_precision": "second",
+   "tz": "UTC",
+   "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6204"
+  },
+  {
+   "after_merge": false,
+   "edges": {
+    "verifies": []
+   },
+   "episode": "E0:brief:520",
+   "fields": {
     "closed_by_pr": null,
     "design_name": "b-hinge",
     "state_reason": "not_planned"

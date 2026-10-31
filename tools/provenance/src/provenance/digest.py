@@ -16,10 +16,12 @@ shape cannot be applied to frozen units by re-extraction; it needs a
 ``refreeze`` (comments and issues are not under Actions retention, so their
 bodies can be re-read). Every digest therefore records :data:`DIGEST_VERSION`.
 
-Body digest fields (contract ``body-digest@2``; an ``@1`` digest was computed
+Body digest fields (contract ``body-digest@3``; an ``@1`` digest was computed
 before the ``delivered`` alternative of ``shipped`` and the ``ship_lock_settle``
 and ``contract`` classes existed, so its ``lead`` is ``null`` (or ``ship_lock``
-for a settle stub) where ``@2`` would classify differently):
+for a settle stub) where a later version would classify differently, and an
+``@2`` digest before the ``burn_cooldown`` class, so a cooldown's ``lead`` is
+``null`` there):
 
 ``sha256``
     lower-hex SHA-256 of the body's UTF-8 bytes, exactly as the API returned
@@ -101,7 +103,7 @@ import re
 from typing import Any, Optional
 
 #: Recorded in every digest; bump on ANY change to the rules below.
-DIGEST_VERSION = "body-digest@2"
+DIGEST_VERSION = "body-digest@3"
 MESSAGE_DIGEST_VERSION = "message-digest@1"
 
 #: Byte-identical to ``.claude/reviewer-post/reviewer_mcp.py`` FOOTER and to
@@ -155,6 +157,10 @@ SETTLE_LOCK_LINE = "🚢 SHIP-LOCK — settle claim"
 #: first line of the withdrawal it posts for a run that died, after the run's agent steps. Every
 #: other ``SHIP-LOCK WITHDRAWN`` is an agent releasing its own claim, edited or posted in its window.
 DEATH_PREFIX = "🚢 SHIP-LOCK WITHDRAWN — scheduled run died"
+#: scripts/routine-lock-cleanup.sh's ``COOLDOWN_MARKER`` (drift-pinned by tests/test_digest.py): the
+#: first line of the picker cooldown it posts, since #924, for a run that neither delivered nor
+#: declined — after the run's agent steps, like the dead-run notice it often follows.
+COOLDOWN_LINE = "🚢 BURN-COOLDOWN"
 #: The ``- pull request: <url>`` line ``post_success`` writes under the delivered lead.
 DELIVERED_PR_RE = re.compile(
     r"^- pull request: https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/pull/(?P<pr>[0-9]{1,7})$", re.M)
@@ -164,12 +170,14 @@ DELIVERED_PR_RE = re.compile(
 #: DIGEST_VERSION bump. ``contract`` is the unattended design run's §2 scope
 #: contract, posted by the settle job as its own comment since #864 (the
 #: settle SHIP-LOCK is a constant stub with no ``**Design name:**``).
+#: ``burn_cooldown`` is the whole line, exactly (body-digest@3).
 LEAD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ship_lock_withdrawn", re.compile(r"^🚢 SHIP-LOCK WITHDRAWN\b")),
     ("ship_lock_settle", re.compile("^" + re.escape(SETTLE_LOCK_LINE) + "$")),
     ("ship_lock", re.compile(r"^🚢 SHIP-LOCK\b")),
     ("declined", re.compile(r"^🚢 DECLINED\b")),
     ("deferred", re.compile(r"^🚢 DEFERRED\b")),
+    ("burn_cooldown", re.compile("^" + re.escape(COOLDOWN_LINE) + "$")),
     ("shipped", re.compile(r"^(?:✅ \*\*SHIPPED\b.*?#(?P<pr1>[0-9]{1,7})\b|📦 \*\*Draft PR opened: #(?P<pr2>[0-9]{1,7})\*\*"
                            r"|(?P<delivered>" + "|".join(map(re.escape, DELIVERED_LINES)) + r")$)")),
     ("decision_needed", re.compile(r"^🚦 DECISION NEEDED\b")),
@@ -356,7 +364,7 @@ def refs_closes(body: str) -> list[int]:
 
 
 def body_digest(body: Optional[str]) -> dict[str, Any]:
-    """The ``body-digest@2`` object for ``body`` (``None`` digests as ``""``)."""
+    """The ``body-digest@3`` object for ``body`` (``None`` digests as ``""``)."""
     text = body if isinstance(body, str) else ""
     lines = text.split("\n")
     first = lines[0].strip() if lines else ""

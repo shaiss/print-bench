@@ -1,8 +1,8 @@
 {
- "content_sha256": "1907916454c0315e32cd23a6ccdf3da8de705a628c263ad40d5d02b4d534b9e9",
+ "content_sha256": "522984baf58e172bbe22b3aab400fd12349adbe492baadd4f932e964ecddcd35",
  "contract": 1,
  "evidence_sha": "0000000000000000000000000000000000000000",
- "extractor": "provenance-extract 2",
+ "extractor": "provenance-extract 3",
  "format": "bundle@1",
  "main_sha": "521d092813b78a88bd9a74b1052cfef1f230d86b",
  "producer_run": 1,
@@ -1887,7 +1887,7 @@
      "url": "https://github.com/shaiss/print-bench/blob/d63588d44d5248bae73e9487528a9387c269726b/designs/alpha-clip/NOTES.md#L55"
     }
    ],
-   "extractor": "provenance-extract 2",
+   "extractor": "provenance-extract 3",
    "format": "view@1",
    "maintenance": [
     {
@@ -1926,7 +1926,7 @@
     "d63588d44d5248bae73e9487528a9387c269726b"
    ],
    "counts": {
-    "events": 14,
+    "events": 15,
     "jobs_posted_nothing": 0,
     "maintenance": 1,
     "prs": 2,
@@ -1947,6 +1947,7 @@
       "issuecomment:6201",
       "issuecomment:6202",
       "issuecomment:6203",
+      "issuecomment:6204",
       "timeline:4201"
      ],
      "head": null,
@@ -2253,6 +2254,58 @@
      "ts_precision": "second",
      "tz": "UTC",
      "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6203"
+    },
+    {
+     "after_merge": false,
+     "edges": {
+      "verifies": []
+     },
+     "episode": "E0:brief:520",
+     "fields": {
+      "design_name": null
+     },
+     "head_sha": null,
+     "id": "issuecomment:6204",
+     "issue": 520,
+     "kind": "brief.cooldown",
+     "pr": null,
+     "runtime": {
+      "attempt": null,
+      "chain": null,
+      "chain_link": null,
+      "harness": null,
+      "job": null,
+      "job_id": null,
+      "links_not_served": null,
+      "model": null,
+      "model_basis": "none",
+      "platform": "unknown",
+      "provider": null,
+      "role": null,
+      "run_id": null,
+      "workflow": null
+     },
+     "sha": null,
+     "signals": {
+      "app": null,
+      "commit_author_email": null,
+      "commit_author_name": null,
+      "committer_login": null,
+      "login": "github-actions[bot]",
+      "login_type": "Bot",
+      "marker": null,
+      "regen_identity": false,
+      "status_context": null,
+      "trailer_coauthors": [],
+      "trailer_session": null
+     },
+     "stale_sha": false,
+     "trust": "login",
+     "trust_basis": "login",
+     "ts": "2026-09-04T11:00:01Z",
+     "ts_precision": "second",
+     "tz": "UTC",
+     "url": "https://github.com/shaiss/print-bench/issues/520#issuecomment-6204"
     },
     {
      "after_merge": false,
@@ -2782,7 +2835,7 @@
      "url": "https://github.com/shaiss/print-bench/commit/d63588d44d5248bae73e9487528a9387c269726b"
     }
    ],
-   "extractor": "provenance-extract 2",
+   "extractor": "provenance-extract 3",
    "format": "view@1",
    "maintenance": [
     {
@@ -2821,7 +2874,7 @@
    "design": "gamma-stand",
    "episodes": [],
    "events": [],
-   "extractor": "provenance-extract 2",
+   "extractor": "provenance-extract 3",
    "format": "view@1",
    "maintenance": [],
    "prs": [],
@@ -2829,8 +2882,8 @@
   }
  },
  "views_sha256": {
-  "alpha-clip": "b0a028339d89973bf29aa2b9ee3bf4a1eae16ffd187e3327937ef6a64a42e3b8",
-  "beta-hinge": "f2b5a4c92730ec3249a90ae6dec7c20093b6305b3414c1d6d08c6c6bd8ff81d6",
-  "gamma-stand": "27c36645f78fcbea8e6f45faaa997fd4298f1a2fb34279de1de25579f7e17c82"
+  "alpha-clip": "afc5683b0229d59e05103ef79ff3aef95427b0aad9f6b2174aa7537be743b042",
+  "beta-hinge": "0d045a6ccf53e910063647cdbc742b4e5eef4d925eadbbad8f142b687330f24e",
+  "gamma-stand": "80271be94e417b986e932c4765f5f08e635991138b721ebebdaa5a79fa53a907"
  }
 }
