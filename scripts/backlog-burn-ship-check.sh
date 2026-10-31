@@ -65,31 +65,107 @@ DEFER_MARKER='🚢 DEFERRED'
 # first line, never an unlisted Bot.
 SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
 SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss'
+# Stop markers (DECLINED / DECISION NEEDED / DEFERRED) only from this bot
+# login or the repo owner — never any other Bot-type user (MED/LOW on #963).
+STOP_MARKER_BOT_LOGIN='github-actions[bot]'
 MSG_CAP=1000
 
-# Shared redaction patterns (diag_redact + print_ship_diag must stay in sync).
-# Cap is applied by the caller after substitution when needed.
+# Shared redaction (diag_redact + print_ship_diag must stay in sync).
+# Order: strip controls → neutralize workflow cmds → key-shape redact → cap.
+# Key-shape specs below are copied verbatim from PR #953's
+# provenance.gitstore._SECRET_PATTERN_SPECS / redact_patterns (do not import
+# that package from the post-agent path); ship-diag additions follow.
 REDACT_PY='
 import re
+
+# --- verbatim from PR #953 provenance.gitstore (key-shape redactor) ---
+_SECRET_PATTERN_SPECS = (
+    # GitHub fine-grained / classic / app installation / user-to-server /
+    # refresh tokens (ghp_/gho_/ghs_/ghu_/ghr_). Allow . and - — some
+    # server-to-server forms are not pure [A-Za-z0-9_].
+    (r"gh[pousr]_[A-Za-z0-9._\-]{20,}", "***"),
+    (r"github_pat_[A-Za-z0-9._\-]{20,}", "***"),
+    # Actions / OIDC JWTs (ACTIONS_RUNTIME_TOKEN and friends).
+    (r"eyJ[A-Za-z0-9_\-]+=*\.eyJ[A-Za-z0-9_\-]+=*\.[A-Za-z0-9_\-+/=]+", "***"),
+    # OpenRouter / Anthropic API keys.
+    (r"sk-or-[A-Za-z0-9_\-]{20,}", "***"),
+    (r"sk-ant-[A-Za-z0-9_\-]{20,}", "***"),
+    # Documented Z.AI API keys (32 hex + "." + 16 alnum), including when
+    # echoed as ANTHROPIC_AUTH_TOKEN=… from a ship-link env dump. Do NOT use
+    # a blanket 48+ url-safe class — that redacts SHA-256 digests (64 hex).
+    # Leading lookbehind is hex-only so a non-hex letter prefix still redacts;
+    # trailing lookahead omits "." so ``key.`` (key then a dot) still redacts.
+    (r"(?i)(?:ANTHROPIC_AUTH_TOKEN|ZAI_KEY)\s*[=:]\s*[0-9a-f]{32}\.[A-Za-z0-9]{16}", "***"),
+    (r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{32}\.[A-Za-z0-9]{16}(?![A-Za-z0-9])", "***"),
+    # AWS secret access key sitting near an access-key id (40 chars of
+    # base64-ish, within ~80 chars of AKIA/ASIA — catch both orders).
+    # These MUST run before the standalone AKIA/ASIA patterns or the id
+    # is replaced first and the nearby secret is left behind. No
+    # lookbehind on [A-Za-z0-9/+=] — that class includes ``=``, which is
+    # the usual ``secret=…`` separator and would skip the value.
+    (
+        r"(?:AKIA|ASIA)[0-9A-Z]{16}"
+        r"(?:[\s\S]{0,80}?)"
+        r"[A-Za-z0-9/+]{40}",
+        "***",
+    ),
+    (
+        r"[A-Za-z0-9/+]{40}"
+        r"(?:[\s\S]{0,80}?)"
+        r"(?:AKIA|ASIA)[0-9A-Z]{16}",
+        "***",
+    ),
+    # AWS access key ids (after the nearby-secret pairs above).
+    (r"(?:AKIA|ASIA)[0-9A-Z]{16}", "***"),
+    # Authorization Bearer values (header form before bare Bearer).
+    (r"(?i)Authorization\s*:\s*Bearer\s+\S+", "Authorization: Bearer ***"),
+    (r"(?i)\bBearer\s+[A-Za-z0-9._\-+/=]{20,}", "Bearer ***"),
+    # Credentials in URLs (user:pass@ before x-access-token form).
+    (r"(?i)https?://[^\s/@:]+:[^\s/@]+@", "https://***:***@"),
+    (r"(?i)x-access-token:[^\s/@]+@", "x-access-token:***@"),
+    # Base64-encoded x-access-token basic-auth strings (Actions masks the
+    # raw token but not this form — see credential_env / Git.secrets).
+    (r"(?i)(?:AUTHORIZATION:\s*)?basic\s+[A-Za-z0-9+/]{20,}={0,2}", "basic ***"),
+)
+
+# Ship-diag additions on top of the #953 key-shape set (MED-1 on #963).
+_SHIP_DIAG_EXTRA_SPECS = (
+    # Any *_KEY= assignment (covers ZAI_KEY= when the value shape drifts,
+    # plus ANTHROPIC_API_KEY= / OPENROUTER_API_KEY= without relying on
+    # TOKEN/SECRET/API_KEY word classes alone).
+    (r"(?i)\b([A-Za-z0-9_]*_KEY)\s*[=:]\s*\S+", r"\1=***"),
+    # Google API keys.
+    (r"AIza[0-9A-Za-z_\-]{35}", "***"),
+    # URL userinfo for any scheme (postgres://user:pw@ → scheme://[REDACTED]@).
+    (r"(?i)([a-z][a-z0-9+.\-]*://)[^\s/@:]+:[^\s/@]+@", r"\1[REDACTED]@"),
+    # Long bare hex (>=40 chars) — diag excerpts must not leak digests/tokens.
+    (r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{40,}(?![0-9A-Fa-f])", "***"),
+)
+
+_SECRET_PATTERNS = tuple(
+    (re.compile(pat), repl) for pat, repl in _SECRET_PATTERN_SPECS
+) + tuple(
+    (re.compile(pat), repl) for pat, repl in _SHIP_DIAG_EXTRA_SPECS
+)
+
+# C0 except LF, C1, DEL, plus U+2028/U+2029 and zero-width (U+200B-U+200D, U+FEFF).
+_CTRL_RE = re.compile(
+    r"[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029\u200b-\u200d\ufeff]"
+)
+_WF_LINE_RE = re.compile(r"(?m)^([ \t]*)::")
+
+
 def redact_patterns(text, cap=None):
-    # Normalize CR before line-anchored escapes: a bare \r before ::error::
-    # would otherwise rewind the Actions log line and inject a workflow
-    # command (Bugbot on #962).
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    patterns = [
-        (re.compile(r"(?i)\b(gh[pousr]_|github_pat_|xox[baprs]-|sk-|AKIA)[A-Za-z0-9_\-]{8,}"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9\-._~+/]+=*"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY|AUTH)=)(\S+)"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)([\"'\'']?[A-Za-z0-9_\-]*(?:token|secret|password|api[_-]?key|auth)[A-Za-z0-9_\-]*[\"'\'']?\s*[:=]\s*[\"'\'']?)[^\s\"'\'',;]+"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)\b(Basic\s+)[A-Za-z0-9+/=]{8,}"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)(authorization:\s*\S+\s+)\S+"), r"\1[REDACTED]"),
-        (re.compile(r"(?i)\b(bundle contents?|git bundle)[:\s].{0,200}"), r"\1 [REDACTED]"),
-        # Escape workflow-command prefixes so model output cannot inject ::error:: etc.
-        (re.compile(r"(?m)^::"), r"\\::"),
-    ]
-    for rx, repl in patterns:
-        text = rx.sub(repl, text)
-    text = text.replace("\x00", "")
+    text = text or ""
+    # 1) Strip controls first so NUL/CR/LS/ZWSP cannot hide a workflow cmd.
+    text = _CTRL_RE.sub("", text)
+    # 2) Neutralize workflow commands: line-leading :: (optional indent) and
+    #    legacy ##[ anywhere (including ##[add-mask]).
+    text = _WF_LINE_RE.sub(r"\1\\::", text)
+    text = text.replace("##[", "# #[")
+    # 3) Key-shape redaction (#953 verbatim + ship-diag extras).
+    for pat, repl in _SECRET_PATTERNS:
+        text = pat.sub(repl, text)
     if cap is not None and len(text) > cap:
         text = text[:cap] + "…[truncated]"
     return text
@@ -206,7 +282,8 @@ for n in names:
         seen.add(n)
         uniq.append(n)
 
-print('ship-diag: result subtype=%s' % (subtype if subtype is not None else '(missing)'))
+sub_s = str(subtype) if subtype is not None else '(missing)'
+print('ship-diag: result subtype=%s' % redact(sub_s))
 if uniq:
     print('ship-diag: permission_denials tools: %s' % redact('; '.join(uniq[:20])))
 else:
@@ -240,6 +317,7 @@ stop_indicated_from_ndjson() {
   BB_D1="$DECLINE_MARKER_1" BB_D2="$DECLINE_MARKER_2" BB_DF="$DEFER_MARKER" \
   BB_LOCK_HTML="$SHIP_LOCK_HTML_MARKER" \
   BB_LOCK_LOGINS="$SHIP_LOCK_AUTHOR_LOGINS" \
+  BB_STOP_BOT="$STOP_MARKER_BOT_LOGIN" \
   "$PYTHON3" -I -c '
 import json, os, sys
 
@@ -249,6 +327,7 @@ d1 = os.environ["BB_D1"]
 d2 = os.environ["BB_D2"]
 df = os.environ["BB_DF"]
 html_marker = os.environ["BB_LOCK_HTML"]
+stop_bot = (os.environ.get("BB_STOP_BOT") or "github-actions[bot]").strip().lower()
 lock_logins = {
     x.strip().lower()
     for x in os.environ.get("BB_LOCK_LOGINS", "").split()
@@ -269,9 +348,10 @@ def is_stop(body: str) -> bool:
     return first.startswith(d1) or first.startswith(d2) or first.startswith(df)
 
 def stop_trusted(c: dict) -> bool:
-    typ = (c.get("type") or "").strip()
+    # Only github-actions[bot] (by login) or the repo owner — never any
+    # other Bot-type user (a dependabot/renovate DECLINED must not pass).
     login = (c.get("login") or "").strip().lower()
-    if typ == "Bot":
+    if login == stop_bot:
         return True
     if owner and login == owner:
         return True
@@ -480,18 +560,21 @@ selftest() {
   # --- redact + cap ---
   local out
   out="$(BB_IN='see ghp_ABCDEFGHIJKLMNOPQRSTUVWX and ok' diag_redact 1000)"
-  printf '%s' "$out" | grep -q 'ghp_\[REDACTED\]' \
+  printf '%s' "$out" | grep -q '\*\*\*' \
     || { echo "FAIL  selftest: token-like string was not redacted (got: $out)"; fails=$((fails + 1)); }
   printf '%s' "$out" | grep -q 'ghp_ABCDEF' \
     && { echo "FAIL  selftest: raw token leaked after redact"; fails=$((fails + 1)); } \
     || echo "ok    selftest: token-like string is redacted"
 
-  out="$(BB_IN='"authToken": "sekritVALUE123" ANTHROPIC_API_KEY: abcdefghijklmnop Basic YWJjZGVmZ2hpams=' diag_redact 1000)"
-  printf '%s' "$out" | grep -q '\[REDACTED\]' \
-    || { echo "FAIL  selftest: quoted/colon/Basic secrets not redacted (got: $out)"; fails=$((fails + 1)); }
-  printf '%s' "$out" | grep -q 'sekritVALUE' \
-    && { echo "FAIL  selftest: quoted secret leaked (got: $out)"; fails=$((fails + 1)); } \
-    || echo "ok    selftest: quoted/colon/Basic secret shapes are redacted"
+  # Basic pattern from #953 needs >=20 b64 chars; KEY= covers the assignment.
+  out="$(BB_IN='ANTHROPIC_API_KEY=abcdefghijklmnop Basic YWJjZGVmZ2hpamtsbXFxcnN0dXZ3eHl6=' diag_redact 1000)"
+  printf '%s' "$out" | grep -q '\*\*\*' \
+    || { echo "FAIL  selftest: KEY=/Basic secrets not redacted (got: $out)"; fails=$((fails + 1)); }
+  printf '%s' "$out" | grep -q 'abcdefghijklmnop' \
+    && { echo "FAIL  selftest: API key value leaked (got: $out)"; fails=$((fails + 1)); } \
+    || echo "ok    selftest: KEY=/Basic secret shapes are redacted"
+  printf '%s' "$out" | grep -qi 'YWJjZGVmZ2hpamtsbXFxcnN0dXZ3eHl6' \
+    && { echo "FAIL  selftest: Basic credential leaked (got: $out)"; fails=$((fails + 1)); }
 
   out="$(BB_IN="$(printf '::error::planted\nx%.0s' {1..20})" diag_redact 1000)"
   printf '%s' "$out" | grep -q '^\\::' \
@@ -500,13 +583,16 @@ selftest() {
     && { echo "FAIL  selftest: bare :: line survived redact"; fails=$((fails + 1)); } \
     || echo "ok    selftest: :: workflow-command prefixes are escaped"
 
-  # CR before :: must not leave a bare workflow command after log rewind.
+  # CR before :: is stripped as a C0 control so it cannot rewind the Actions
+  # log line; after strip the remnant is mid-line and not a workflow cmd.
   out="$(BB_IN="$(printf 'pre\r::error::planted')" diag_redact 1000)"
-  printf '%s' "$out" | grep -q $'\r::' \
-    && { echo "FAIL  selftest: CR-prefixed :: survived (got: $(printf '%q' "$out"))"; fails=$((fails + 1)); }
-  printf '%s' "$out" | grep -qE '(^|[^\\])::error::' \
-    && { echo "FAIL  selftest: unescaped ::error after CR normalize (got: $(printf '%q' "$out"))"; fails=$((fails + 1)); } \
-    || echo "ok    selftest: CR-prefixed :: workflow commands are escaped"
+  printf '%s' "$out" | grep -q $'\r' \
+    && { echo "FAIL  selftest: CR survived control strip (got: $(printf '%q' "$out"))"; fails=$((fails + 1)); }
+  if printf '%s' "$out" | "$PYTHON3" -I -c 'import re,sys; sys.exit(0 if re.search(r"(?m)^[ \t]*::", sys.stdin.read()) else 1)'; then
+    echo "FAIL  selftest: line-leading :: after CR strip (got: $(printf '%q' "$out"))"; fails=$((fails + 1))
+  else
+    echo "ok    selftest: CR-prefixed :: cannot inject a workflow command"
+  fi
 
   out="$(BB_IN="$(printf 'x%.0s' {1..1500})" diag_redact 1000)"
   local len=${#out}
@@ -518,6 +604,67 @@ selftest() {
   fi
   printf '%s' "$out" | grep -q '\[truncated\]' \
     || { echo "FAIL  selftest: truncation marker missing"; fails=$((fails + 1)); }
+
+  # --- MED-1: every redact_probe.out row (secret AND injected command gone) ---
+  # Inputs mirror the probe; assert secret material and live workflow cmds
+  # cannot appear (neutralized \:: still contains the letters — check the
+  # line-anchored form / ##[ instead).
+  BB_CAP=1000 "$PYTHON3" -I -c "
+${REDACT_PY}
+import re, sys
+
+_live_wf = re.compile(r'(?m)^[ \t]*::')
+
+def check_secret(name, raw, forbidden):
+    out = redact_patterns(raw, 1000)
+    bad = [f for f in forbidden if f in out]
+    if bad:
+        print('FAIL  selftest: probe %s leaked %r in %r' % (name, bad, out))
+        return 1
+    print('ok    selftest: probe %s redacts secret' % name)
+    return 0
+
+def check_cmd(name, raw):
+    out = redact_patterns(raw, 1000)
+    problems = []
+    if _live_wf.search(out):
+        problems.append('live line-leading ::')
+    if '##[' in out:
+        problems.append('live ##[')
+    if _CTRL_RE.search(out):
+        problems.append('control/zw char survived')
+    if problems:
+        print('FAIL  selftest: probe %s kept %s in %r' % (name, problems, out))
+        return 1
+    print('ok    selftest: probe %s neutralizes workflow command' % name)
+    return 0
+
+fails = 0
+fails += check_secret('ghp', 'x ghp_ABCDEFGHIJKLMNOPQRSTUVWX123456', ['ghp_ABCDEF', 'ABCDEFGHIJKLMNOPQRSTUVWX123456'])
+fails += check_secret('sk-or', 'sk-or-v1-abcdefghijklmnopqrstuvwxyz012345', ['sk-or-v1-abcdefgh', 'abcdefghijklmnopqrstuvwxyz012345'])
+fails += check_secret('sk-ant', 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz', ['sk-ant-api03-abcdefgh', 'abcdefghijklmnopqrstuvwxyz'])
+zai = '0123456789abcdef0123456789abcdef.AbCdEfGh12345678'
+fails += check_secret('zai (hex32.alnum16)', 'key ' + zai, [zai, '0123456789abcdef0123456789abcdef'])
+fails += check_secret('ZAI_KEY=', 'ZAI_KEY=' + zai, [zai, '0123456789abcdef0123456789abcdef'])
+fails += check_secret('ANTHROPIC_API_KEY=', 'ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxxxxxxxxxxxxxxYY', ['sk-ant-api03-xxxxxxxx', 'xxxxxxxxxxxxxxxxxxxxYY'])
+fails += check_secret('OPENROUTER_API_KEY=', 'OPENROUTER_API_KEY=sk-or-v1-yyyyyyyyyyyyyyyyyyyyYYYY', ['sk-or-v1-yyyyyyyy', 'yyyyyyyyyyyyyyyyyyyyYYYY'])
+aiza = 'AIzaBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+fails += check_secret('GOOGLE AIza', aiza, [aiza, 'AIzaBBBBBBBBBBBBBBBBBBBB'])
+jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcDEF123_-xyz'
+fails += check_secret('JWT', jwt, [jwt, 'eyJhbGciOiJIUzI1NiJ9', 'abcDEF123_-xyz'])
+fails += check_secret('url userinfo', 'postgres://user:hunter2secret@host/db', ['hunter2secret', 'user:hunter2secret'])
+hx = 'a' * 64
+fails += check_secret('bare hex 64', hx, [hx, 'a' * 40])
+fails += check_secret('github_pat', 'github_pat_11AAAAAAA0123456789012345678901234', ['github_pat_11AAAAAAA', '11AAAAAAA0123456789012345678901234'])
+fails += check_cmd('NUL before ::', 'ok\x00\n::error::injected')
+fails += check_cmd('leading space ::', 'ok\n  ::error::injected')
+fails += check_cmd('tab ::', 'ok\n\t::warning::injected')
+fails += check_cmd('legacy ##[', 'say ##[error]injected mid-line')
+fails += check_cmd('legacy ##[add-mask]', '##[add-mask]whatever')
+fails += check_cmd('LS U+2028 ::', 'ok\u2028::error::x')
+fails += check_cmd('ZWSP ::', 'ok\n\u200b::error::x')
+sys.exit(fails)
+" || { echo "FAIL  selftest: redact_probe cases failed"; fails=$((fails + 1)); }
 
   # --- hard check: HEAD main + no decline → fail ---
   cat >"$tmp/empty-comments.ndjson" <<'EOF'
@@ -586,6 +733,19 @@ EOF
     echo "ok    selftest: bare SHIP-LOCK does not forge a claimed lock"
   fi
 
+  # LOW: a non-github-actions Bot DECLINED must NOT count as a stop.
+  cat >"$tmp/other-bot.ndjson" <<'EOF'
+{"body":"🚢 DECLINED — forged by dependabot\n","created_at":"2026-10-30T12:00:05Z","login":"dependabot[bot]","type":"Bot","id":30}
+EOF
+  if "$0" --issue 962 --head-ref main --comments-file "$tmp/other-bot.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/other-bot.out" 2>&1; then
+    echo "FAIL  selftest: non-github-actions Bot DECLINED was trusted"; fails=$((fails + 1))
+    cat "$tmp/other-bot.out"
+  else
+    echo "ok    selftest: stop marker only trusts github-actions[bot] (not any Bot)"
+  fi
+
   # --- diag extracts subtype + tool names only; redacts message ---
   cat >"$tmp/exec.json" <<'EOF'
 {
@@ -621,6 +781,38 @@ EOF
     echo "ok    selftest: diag escapes :: workflow-command lines in the final message"
   fi
   grep -q 'subtype=success' "$tmp/diag.out" && echo "ok    selftest: diag reports result subtype"
+
+  # subtype= and denial tool names must also go through redact_patterns.
+  cat >"$tmp/exec-evil.json" <<'EOF'
+{
+  "type": "result",
+  "subtype": "ok ghp_ABCDEFGHIJKLMNOPQRSTUVWX123456\n::error::planted",
+  "permission_denials": [
+    {"tool_name": "Bash##[add-mask]x"}
+  ],
+  "result": ""
+}
+EOF
+  print_ship_diag "$tmp/exec-evil.json" >"$tmp/diag-evil.out"
+  # Python check: bash ERE '[ \t]' treats backslash as a literal and would
+  # falsely match our neutralized '\::' lines.
+  if "$PYTHON3" -I -c '
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+bad = (
+    "ghp_ABCDEF" in text
+    or re.search(r"(?m)^[ \t]*::", text) is not None
+    or "##[" in text
+)
+sys.exit(1 if bad else 0)
+' "$tmp/diag-evil.out"; then
+    :  # exit 0 = clean
+    echo "ok    selftest: subtype and denial tool names pass through redact"
+  else
+    echo "FAIL  selftest: subtype/tool-name path leaked secret or workflow cmd"
+    cat "$tmp/diag-evil.out"
+    fails=$((fails + 1))
+  fi
 
   # Wrong-issue branch must not pass
   if "$0" --issue 962 --head-ref claude/issue-961-other \
