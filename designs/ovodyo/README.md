@@ -270,7 +270,10 @@ one fine line. No glue, no dowels, and it unscrews the same way to reach the
 mechanism. **Print the seam coupon first** (`ovodyo-coupon.scad`: a male ring
 and a female puck side by side; the strip is **164 mm wide — needs a ≥170 mm
 bed**; keep it out of the front-left corner on X1/P1 — stock profiles carve an
-exclusion there; print it on the **halves' 0.16 mm profile**) and tune `seam_tol` in
+exclusion there; print it on the **halves' 0.16 mm profile** with **brim off** —
+the flange doesn't need one, and an auto-brim welds the two pucks together at
+the male flange's foot; if one appears, knife between the pucks before
+removal) and tune `seam_tol` in
 0.05 mm steps until the puck runs on by hand with light drag and seats without
 rattle — then render the halves with that value. If the **thread lead-in itself
 binds** through the first half-turn, that *is* the fit — raise `seam_tol` by
@@ -303,8 +306,8 @@ lift from the centre segment so the ends don't peel).
 1. Degrease the Ø2 mm steel shot (IPA, dry fully) — oiled shot defeats the
    later CA lock — then fill each ballast pocket.
 2. Wedge a `base-plug` into each port.
-3. Slide the keel into the **bare** centre segment; check the segment mouths
-   for brim before sliding the keel in; trim flush.
+3. Check the segment mouths for brim and trim flush, then slide the keel into
+   the **bare** centre segment.
 4. Tape both wings on.
 5. Place the assembly where it lives.
 
