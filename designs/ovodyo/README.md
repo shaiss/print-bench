@@ -273,7 +273,9 @@ bed**; keep it out of the front-left corner on X1/P1 — stock profiles carve an
 exclusion there; print it on the **halves' 0.16 mm profile** with **brim off** —
 the flange doesn't need one, and an auto-brim welds the two pucks together at
 the male flange's foot; if one appears, knife between the pucks before
-removal) and tune `seam_tol` in
+removal); set its slicer seam the same way as the halves (painted, **Back** or
+**Random**) — a tick at the same clock angle once per turn is the *Aligned*
+seam riding the groove, not the fit) and tune `seam_tol` in
 0.05 mm steps until the puck runs on by hand with light drag and seats without
 rattle — then render the halves with that value. If the **thread lead-in itself
 binds** through the first half-turn, that *is* the fit — raise `seam_tol` by
@@ -366,7 +368,9 @@ display. A knock should prefer the one-turn seam over cracking a shell —
 unscrew fully and re-seat (expectation, not a guarantee). Low side light
 through the cut numerals is this clock's best look — near a window, out of
 direct afternoon sun (PLA can soften and fade on a hot sill; PETG/ASA tolerate
-it better). Ambient light only; no built-in LEDs.
+it better, but the ~32 mm ridge-chord bridges above are disclosed for PLA and
+will sag past that ~1 mm in PETG/ASA, so a shaded spot beats a material swap).
+Ambient light only; no built-in LEDs.
 
 The real
 clock is driven by a geared stepper through a bevel differential and homed with a
