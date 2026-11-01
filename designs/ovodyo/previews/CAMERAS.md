@@ -21,7 +21,7 @@ fixed once reviewed; a new region gets a new line).
   frame: adjacent numeral = 14 mm cap height; slot = 10 mm wide. The tight
   pass-by a numeral plaque is the measured #768 clearance. Added after Drik R2
   noted `slot-corner` framed numerals; new line, not a reframe.
-- **slot-window** — numeral close-up: "08" sits on its face (~a fifth of the
+- **slot-window** — numeral close-up: the hours "8" sits on its face (~a fifth of the
   frame); the 10 mm helical slot cuts across the lower half. OpenCSG so
   preview-coloured ball_core can read through; cut walls may tint green
   (renderer, not filament). New line; reframed while unfrozen; caption synced

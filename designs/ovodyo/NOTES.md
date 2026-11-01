@@ -493,7 +493,7 @@ a few minutes of print, same material and profile as the halves.
 
 - **#601 eyetest** (when a printed half exists — **promoted above further page
   rounds**): seated ~45° above the desk, ~60 cm reading distance; photograph
-  under **ceiling light and low-side-light glare**; faces **"00"** and **"08"**;
+  under **ceiling light and low-side-light glare**; faces minutes **"00"** and hours **"8"** (neither ball has an "08" face);
   photograph the **current `text()` numerals as the baseline** before the
   stencil-glyph swap. Also: showroom squint; slot-rim polish/patina +
   thumb-drag after a month; dust-in-the-cuts look; **foreshortened-glance

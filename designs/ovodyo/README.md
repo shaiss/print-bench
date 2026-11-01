@@ -73,7 +73,7 @@ crossing story is in `slot-path` above.*
 
 ![Helical window broadside](previews/slot-window.png)
 
-*Numeral close-up — "08" sits on its face (about a fifth of the frame) while
+*Numeral close-up — the hours "8" sits on its face (about a fifth of the frame) while
 the 10 mm helical slot cuts across the lower half. Preview red is the core;
 any green on the cut walls is a preview artifact, not your filament.*
 
@@ -346,9 +346,11 @@ the drive.
 
 **Care:** cut-through numerals, the 10 mm slot, and the airy truss collect desk
 dust — unscrew a ball (one full turn) and wipe the cavity when it looks dull;
-dust the lattice with a soft brush. Where the helical slot crosses the seam,
-the threaded seam ring shows through the window — prints clean, it's expected
-(no committed render shows it; `hours-ball` is the seamless preview). A few
+dust the lattice with a soft brush. The helical slot stops short of the seam
+in each printed half — a solid band (about 5 mm either side of the seam) keeps
+the slot from crossing the mating ring, so it reads as two arcs of one
+interrupted helix (the `hours-ball` preview is seamless and does not show the
+band). A few
 wisps across the numeral voids are normal with dry PLA; clear with a knife tip
 through the slot or the unscrew-and-wipe — print PLA dry. Rotate which numeral
 faces the desk under the putty dab — and under a felt pad or leather coaster —
