@@ -59,7 +59,9 @@ _api_default_branch() {
     cat "${TRUSTED_BASE_RESOLVE_MOCK}/default_branch"
     return 0
   fi
-  gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch
+  # gh api --jq takes the filter as the next arg; do NOT pass -r
+  # (that makes the filter `-r` and leaves the value empty).
+  gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch
 }
 
 _api_ref_sha() {
@@ -73,7 +75,19 @@ _api_ref_sha() {
     echo "" 
     return 0
   fi
-  gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${ref}" --jq -r .object.sha
+  gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${ref}" --jq .object.sha
+}
+
+# persist-credentials: false — GH_TOKEN authenticates gh, not bare git.
+# Same masked, command-scoped extraheader pattern as auto-review.yml.
+_git_authed() {
+  local fetch_auth
+  fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
+  # Mask when running under Actions; harmless locally.
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "::add-mask::${fetch_auth}"
+  fi
+  git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" "$@"
 }
 
 resolve() {
@@ -107,14 +121,14 @@ resolve() {
   # Fetch when needed so ancestor checks and git show can read the object.
   if [[ -z "${TRUSTED_BASE_RESOLVE_MOCK:-}" ]]; then
     if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
-      git fetch --no-tags origin "$tip" || {
+      _git_authed fetch --no-tags origin "$tip" || {
         echo "could not fetch trusted tip ${tip}" >&2
         return 1
       }
     fi
     # Cross-check against a second server view (ls-remote) so a single
     # confused API response cannot pin an attacker-chosen ancestor.
-    ref_tip="$(git ls-remote origin "refs/heads/${base_ref}" | awk '{print $1; exit}')"
+    ref_tip="$(_git_authed ls-remote origin "refs/heads/${base_ref}" | awk '{print $1; exit}')"
     if ! assert_sha "$ref_tip"; then
       echo "ls-remote tip for refs/heads/${base_ref} empty or malformed" >&2
       return 1
@@ -245,33 +259,99 @@ open(os.environ["USER_PATH"], "w", encoding="utf-8").write(json.dumps(user))
     echo "SELFTEST FAIL  user plant served as '${out}'"; pass=0
   fi
 
+  # --- behavioral: gh api --jq must take the filter next (not -r) ---
+  # A fake `gh` on PATH records argv and refuses `--jq -r`; exercising the
+  # real `_api_*` helpers (no TRUSTED_BASE_RESOLVE_MOCK) catches the CI
+  # failure mode where default_branch came back empty.
+  mkdir -p "$tmp/fakebin"
+  cat >"$tmp/fakebin/gh" <<'FAKEGH'
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+for i in "${!args[@]}"; do
+  if [[ "${args[$i]}" == "--jq" ]]; then
+    next="${args[$((i+1))]:-}"
+    if [[ "$next" == "-r" ]]; then
+      echo "accepts 1 arg(s), received 2" >&2
+      exit 1
+    fi
+  fi
+done
+# Emit canned values for the two queries resolve() issues.
+joined="${args[*]}"
+if [[ "$joined" == *"/git/ref/heads/"* ]]; then
+  printf '%s\n' "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  exit 0
+fi
+if [[ "$joined" == *"repos/"* ]]; then
+  printf '%s\n' "main"
+  exit 0
+fi
+echo "fake gh: unexpected argv: $joined" >&2
+exit 1
+FAKEGH
+  chmod +x "$tmp/fakebin/gh"
+  # Also fake git so resolve()'s fetch/ls-remote path is exercised without network.
+  cat >"$tmp/fakebin/git" <<'FAKEGIT'
+#!/usr/bin/env bash
+set -euo pipefail
+# Require the authed extraheader on fetch/ls-remote (private-repo path).
+joined="$*"
+if [[ "$joined" == *"ls-remote"* || "$joined" == *"fetch"* ]]; then
+  if [[ "$joined" != *"extraheader=Authorization: Basic"* ]]; then
+    echo "fake git: missing auth extraheader for: $joined" >&2
+    exit 1
+  fi
+fi
+if [[ "$joined" == *"cat-file"* ]]; then
+  exit 0  # tip already "local"
+fi
+if [[ "$joined" == *"ls-remote"* ]]; then
+  printf '%s\t%s\n' "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "refs/heads/main"
+  exit 0
+fi
+if [[ "$joined" == *"merge-base"* ]]; then
+  exit 0
+fi
+if [[ "$joined" == *"fetch"* ]]; then
+  exit 0
+fi
+# Fall through to real git for anything unexpected? refuse.
+echo "fake git: unexpected: $joined" >&2
+exit 1
+FAKEGIT
+  chmod +x "$tmp/fakebin/git"
+  (
+    export PATH="$tmp/fakebin:/usr/bin:/bin"
+    export GITHUB_REPOSITORY="shaiss/print-bench"
+    export GH_TOKEN="test-token-not-real"
+    unset TRUSTED_BASE_RESOLVE_MOCK
+    tip_out="$(resolve --base-ref main)" || tip_out=""
+    if [[ "$tip_out" == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]]; then
+      echo "selftest ok    behavioral: gh api --jq filter (not -r) + authed git resolve"
+    else
+      echo "SELFTEST FAIL  behavioral resolve got '${tip_out}'"; pass=0
+    fi
+    # NEGCTL: the broken --jq -r form must fail under the same fake gh.
+    if ! gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch >/dev/null 2>"$tmp/jq-r.err"; then
+      if grep -q 'accepts 1 arg' "$tmp/jq-r.err"; then
+        echo "selftest ok    NEGCTL: gh api --jq -r fails closed (behavioral)"
+      else
+        echo "SELFTEST FAIL  NEGCTL --jq -r failed differently: $(cat "$tmp/jq-r.err")"; pass=0
+      fi
+    else
+      echo "SELFTEST FAIL  NEGCTL --jq -r unexpectedly succeeded"; pass=0
+    fi
+  )
+
   # --- workflow drift pin (always-tip + LOW-1 + LOW-2 + no silent #947 exit-2) ---
   wf="$(dirname "$0")/../.github/workflows/auto-review.yml"
   if [[ ! -f "$wf" ]]; then
     echo "SELFTEST FAIL  drift: $wf missing"; pass=0
   else
     local miss=""
-    for lit in \
-      'default_branch' \
-      'TRUSTED_SHA' \
-      'refs/heads/' \
-      'git/ref/heads/' \
-      '[0-9a-f]{40}' \
-      'merge-base --is-ancestor' \
-      'github-actions[bot]' \
-      'printcheck-gate-report' \
-      'user.login' \
-      'user.type' \
-      'marker verb' \
-      'fail closed'
-    do
-      if ! grep -qF -- "$lit" "$wf"; then
-        # soft: some literals appear as regex / jq — check flexibly below
-        :
-      fi
-    done
     if ! grep -qF 'TRUSTED_SHA' "$wf"; then
-      miss="TRUSTED_SHA not used"; 
+      miss="TRUSTED_SHA not used"
     elif ! grep -qE 'default_branch' "$wf"; then
       miss="default_branch validation missing"
     elif ! grep -qE 'git/ref/heads/|ls-remote.*refs/heads/' "$wf"; then
@@ -292,6 +372,20 @@ open(os.environ["USER_PATH"], "w", encoding="utf-8").write(json.dumps(user))
       miss="printcheck sticky not filtered to github-actions[bot]"
     elif ! grep -qF 'user.type // "") == "Bot"' "$wf"; then
       miss="printcheck sticky not filtered to type Bot"
+    elif grep -qE -- '--jq -r' "$wf"; then
+      miss="gh api still uses broken --jq -r"
+    elif ! grep -qF 'trusted_sha=${TRUSTED_SHA}' "$wf"; then
+      miss="coach ready step does not publish trusted_sha via GITHUB_OUTPUT"
+    elif grep -qE 'TRUSTED_SHA=.*GITHUB_ENV' "$wf"; then
+      miss="TRUSTED_SHA still exported via GITHUB_ENV (coach-overwriteable)"
+    elif ! grep -qF 'TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}' "$wf"; then
+      miss="consumers do not bind TRUSTED_SHA from ready step output"
+    elif grep -qE 'git checkout "\$BASE_SHA" --' "$wf"; then
+      miss="coach overlay still checks out from BASE_SHA"
+    elif ! grep -qE 'git checkout "\$TRUSTED_SHA" --' "$wf"; then
+      miss="coach overlay does not checkout from TRUSTED_SHA"
+    elif ! grep -qF 'extraheader=Authorization: Basic ${fetch_auth}' "$wf"; then
+      miss="resolve_trusted_sha missing authenticated git fetch/ls-remote"
     fi
     if [[ -z "$miss" ]]; then
       echo "selftest ok    auto-review.yml always-tip restore + LOW-1/LOW-2 pins"

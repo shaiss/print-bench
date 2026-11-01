@@ -69,7 +69,8 @@ BASE_SHA = "${{ github.event.pull_request.base.sha }}"
 # Trust-script restores (reviewer-posted / coach-lock / signoff) use the
 # server tip of the default branch (TRUSTED_SHA), never event base.sha.
 TRUSTED_SHA_NAME = "TRUSTED_SHA"
-COACH_RESTORE_MARKER = 'git checkout "$BASE_SHA" --'
+TRUSTED_SHA_OUTPUT = "${{ steps.ready.outputs.trusted_sha }}"
+COACH_RESTORE_MARKER = 'git checkout "$TRUSTED_SHA" --'
 COACH_POST_BLOB = '${TRUSTED_SHA}:.claude/reviewer-post/reviewer_mcp.py'
 COACH_RESTORE_PATHS = (
     ".claude/reviewer-post",
@@ -231,7 +232,7 @@ def _assert_coach_checks_out_full_history(text: str) -> None:
     assert _checkout_ref(block) != BASE_REF, (
         "auto-review.yml [design-coach] checks out base.ref — the coach "
         "must keep the PR branch local for git push; overlay the posting "
-        "surface from base.sha instead")
+        "surface from TRUSTED_SHA instead")
 
 
 COACH_ABS_SHELL = "shell: /usr/bin/bash --noprofile --norc -e {0}"
@@ -245,8 +246,11 @@ def _assert_one_restore_step(restore: str, *, at: str) -> None:
         "write from an earlier Bash link would make the runner look up a "
         "shim bash before PATH is reset in-script")
     env = _env_map(restore, 8)
-    assert env.get("BASE_SHA") == BASE_SHA, (
-        f"{at} does not take the PR base sha")
+    assert env.get("TRUSTED_SHA") == TRUSTED_SHA_OUTPUT, (
+        f"{at} does not bind TRUSTED_SHA from steps.ready.outputs.trusted_sha "
+        "— a GITHUB_ENV value is coach-overwriteable")
+    assert "BASE_SHA" not in env, (
+        f"{at} still takes event BASE_SHA — overlay must use the tip pin")
     for key in ("LD_PRELOAD", "BASH_ENV", "ENV", "NODE_OPTIONS", "NODE_PATH"):
         assert env.get(key) == "", (
             f"{at} YAML env does not pin {key} to empty — GITHUB_ENV from "
@@ -276,17 +280,18 @@ def _assert_one_restore_step(restore: str, *, at: str) -> None:
         "would redirect the trusted checkout into an attacker work tree")
     for path in COACH_RESTORE_PATHS:
         assert path in run, (
-            f"{at} no longer overlays {path} from base.sha")
+            f"{at} no longer overlays {path} from TRUSTED_SHA")
 
 
 def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     """The coach cannot checkout base wholesale (it git-pushes the PR).
-    The posting MCP / settings / skill are overlaid from base.sha by a
+    The posting MCP / settings / skill are overlaid from TRUSTED_SHA (the
+    server tip of the default branch, published as a ready-step output) by a
     trusted step immediately before EACH ship step (a failed first link
     with Write/Edit/Bash must not leave a rewritten MCP for the next
     spawn), and ship steps are gated on that surface existing on the
     trusted tip (Jane's first-landing skip). Trust scripts restore from
-    TRUSTED_SHA (server tip of default_branch), never event base.sha.
+    TRUSTED_SHA, never event base.sha and never a coach-writable GITHUB_ENV.
     """
     block = _without_comments(_job_blocks(text)["design-coach"])
     steps = _steps(block)
@@ -295,12 +300,12 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     restore_at = [i for i, c in enumerate(steps) if COACH_RESTORE_MARKER in c]
     assert restore_at, (
         "auto-review.yml [design-coach] has no trusted step restoring the "
-        "posting surface from base.sha — the MCP would be the PR's copy")
+        "posting surface from TRUSTED_SHA — the MCP would be the PR's copy")
     assert ship_at, "auto-review.yml [design-coach]: no ship step found"
     for n, idx in enumerate(ship_at, 1):
         assert idx > 0 and COACH_RESTORE_MARKER in steps[idx - 1], (
             f"auto-review.yml [design-coach] ship step {n} is not preceded "
-            "by a trusted overlay of the posting surface from base.sha — "
+            "by a trusted overlay of the posting surface from TRUSTED_SHA — "
             "a failed earlier link could rewrite the MCP the next spawn loads")
         _assert_one_restore_step(
             steps[idx - 1], at=f"auto-review.yml [design-coach] restore before ship {n}")
@@ -310,19 +315,19 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
         "posting MCP blob on TRUSTED_SHA — a working-tree check would accept "
         "the PR's copy")
     assert ready_at[0] < restore_at[0], (
-        "auto-review.yml [design-coach] probes the base posting surface "
+        "auto-review.yml [design-coach] probes the tip posting surface "
         "after restoring it")
     ready = steps[ready_at[0]]
     ready_env = _env_map(ready, 8)
-    assert ready_env.get("BASE_SHA") == BASE_SHA, (
-        "auto-review.yml [design-coach] ready step does not take the PR "
-        "base sha (still used for the MCP overlay fetch)")
+    assert "BASE_SHA" not in ready_env, (
+        "auto-review.yml [design-coach] ready step still takes event "
+        "BASE_SHA — tip resolve + tip overlay no longer need it")
     assert ready_env.get("BASE_REF") == BASE_REF, (
         "auto-review.yml [design-coach] ready step does not take base.ref "
         "for the trusted-tip resolve")
     assert ready_env.get("GH_TOKEN") == "${{ github.token }}", (
         "auto-review.yml [design-coach] ready step has no job token for "
-        "the authenticated base fetch (a private-repo anonymous fetch 403s)")
+        "the authenticated tip fetch (a private-repo anonymous fetch 403s)")
     ready_run = ready.split("run:", 1)[1]
     assert "${{" not in ready_run, (
         "auto-review.yml [design-coach] ready step interpolates an "
@@ -330,15 +335,21 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     assert 'echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"' in ready_run, (
         "auto-review.yml [design-coach] ready step does not record "
         "started_at — the lock-check cannot bound the pin to this run")
-    assert 'fetch --no-tags origin "$BASE_SHA"' in ready_run, (
-        "auto-review.yml [design-coach] ready step does not fetch the base "
-        "SHA when it is not already local")
     assert TRUSTED_SHA_NAME in ready_run and "resolve_trusted_sha" in ready_run, (
         "auto-review.yml [design-coach] ready step does not resolve "
         "TRUSTED_SHA from the server tip of the default branch")
-    assert 'echo "TRUSTED_SHA=' in ready_run or "TRUSTED_SHA=${TRUSTED_SHA}" in ready_run, (
-        "auto-review.yml [design-coach] ready step does not export "
-        "TRUSTED_SHA to GITHUB_ENV for later restores")
+    assert 'echo "trusted_sha=${TRUSTED_SHA}" >> "$GITHUB_OUTPUT"' in ready_run, (
+        "auto-review.yml [design-coach] ready step does not publish "
+        "trusted_sha via GITHUB_OUTPUT for later restores")
+    assert 'echo "TRUSTED_SHA=${TRUSTED_SHA}" >> "$GITHUB_ENV"' not in ready_run, (
+        "auto-review.yml [design-coach] ready step still exports TRUSTED_SHA "
+        "via GITHUB_ENV — a Write/Edit/Bash coach link can overwrite it")
+    assert 'extraheader=Authorization: Basic ${fetch_auth}' in ready_run, (
+        "auto-review.yml [design-coach] ready step resolve lacks authenticated "
+        "git fetch/ls-remote (persist-credentials: false private-repo path)")
+    assert '--jq -r' not in ready_run, (
+        "auto-review.yml [design-coach] ready step still uses broken "
+        "gh api --jq -r (filter becomes `-r`, default_branch empty)")
     assert 'started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)' in ready_run, (
         "auto-review.yml [design-coach] ready step does not stamp "
         "started_at — the lock-check could accept a COACH-LOCK from an "
@@ -351,7 +362,7 @@ def _assert_coach_restores_posting_surface_from_base(text: str) -> None:
     for n, chunk in enumerate(_ship_chunks(block), 1):
         assert "steps.ready.outputs.ready" in chunk, (
             f"auto-review.yml [design-coach] ship step {n} is not gated on "
-            "the base posting surface being present — a first landing "
+            "the tip posting surface being present — a first landing "
             "would run the PR's copy")
         assert "show_full_output" not in chunk, (
             f"auto-review.yml [design-coach] ship step {n} sets "
@@ -412,6 +423,10 @@ def _assert_coach_lock_check_runs_base_copy(text: str) -> None:
         "auto-review.yml [design-coach] lock-check step does not take "
         "started_at through SINCE — a lock from an earlier coach run "
         "would satisfy the pin")
+    assert env.get("TRUSTED_SHA") == TRUSTED_SHA_OUTPUT, (
+        "auto-review.yml [design-coach] lock-check does not bind TRUSTED_SHA "
+        "from steps.ready.outputs.trusted_sha — a GITHUB_ENV value is "
+        "coach-overwriteable")
     run = check.split("run:", 1)[1]
     assert COACH_LOCK_CHECK_SHOW in run, (
         "auto-review.yml [design-coach] lock-check does not git-show "
@@ -701,9 +716,48 @@ def test_coach_guard_rejects_an_interpolated_restore_script():
 def test_coach_guard_rejects_a_path_git_on_restore():
     tampered = _job_replace(
         _workflow_text(), "design-coach",
-        '          /usr/bin/git checkout "$BASE_SHA" -- \\\n',
-        '          git checkout "$BASE_SHA" -- \\\n')
+        '          /usr/bin/git checkout "$TRUSTED_SHA" -- \\\n',
+        '          git checkout "$TRUSTED_SHA" -- \\\n')
     with pytest.raises(AssertionError, match="/usr/bin/git"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_trusted_sha_via_github_env():
+    """NEGCTL: publishing TRUSTED_SHA through GITHUB_ENV lets a Bash coach
+    overwrite it with the PR head before later restores run."""
+    text = _workflow_text()
+    assert 'echo "trusted_sha=${TRUSTED_SHA}" >> "$GITHUB_OUTPUT"' in text
+    tampered = text.replace(
+        'echo "trusted_sha=${TRUSTED_SHA}" >> "$GITHUB_OUTPUT"',
+        'echo "TRUSTED_SHA=${TRUSTED_SHA}" >> "$GITHUB_ENV"',
+        1,
+    )
+    assert tampered != text, "tamper did not land — the fixture is stale"
+    with pytest.raises(AssertionError, match="GITHUB_ENV|GITHUB_OUTPUT|trusted_sha"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_overlay_from_event_base_sha():
+    """NEGCTL: readiness on tip + overlay from stale event base.sha."""
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        '          /usr/bin/git checkout "$TRUSTED_SHA" -- \\\n',
+        '          /usr/bin/git checkout "$BASE_SHA" -- \\\n')
+    # Marker move also requires env rebind so the restore is still found…
+    # After checkout rewrite the COACH_RESTORE_MARKER no longer matches, so
+    # the guard must report a missing restore step (or a BASE_SHA env pin).
+    with pytest.raises(AssertionError, match="TRUSTED_SHA|no trusted step restoring|BASE_SHA"):
+        _assert_coach_restores_posting_surface_from_base(tampered)
+
+
+def test_coach_guard_rejects_restore_without_ready_output_binding():
+    """NEGCTL: a restore that reads TRUSTED_SHA from ambient env (GITHUB_ENV)
+    rather than steps.ready.outputs.trusted_sha is coach-overwriteable."""
+    tampered = _job_replace(
+        _workflow_text(), "design-coach",
+        "          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}\n",
+        "          TRUSTED_SHA: ${{ github.event.pull_request.base.sha }}\n")
+    with pytest.raises(AssertionError, match="trusted_sha|TRUSTED_SHA"):
         _assert_coach_restores_posting_surface_from_base(tampered)
 
 

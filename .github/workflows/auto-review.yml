@@ -362,28 +362,36 @@ jobs:
           # "tip when base.sha predates it") so one path cannot fail open and
           # a race against a main push cannot restore a pre-marker checker.
           resolve_trusted_sha() {
-            local want_ref="$1" default_branch tip ref_tip
-            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch)"
+            local want_ref="$1" default_branch tip ref_tip fetch_auth
+            # gh api --jq takes the filter as the next arg; do NOT pass -r
+            # (that makes the filter `-r` and leaves default_branch empty).
+            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
             default_branch="${default_branch//$'\r'/}"
             default_branch="${default_branch//$'\n'/}"
             if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
               echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
               return 1
             fi
-            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq -r .object.sha)"
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq .object.sha)"
             tip="${tip//$'\r'/}"
             tip="${tip//$'\n'/}"
             if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::trusted tip sha empty or malformed: '${tip}' — fail closed" >&2
               return 1
             fi
+            # persist-credentials: false — GH_TOKEN authenticates gh, not git.
+            # Same masked, command-scoped extraheader as the head-staging fetches.
+            fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
+            echo "::add-mask::${fetch_auth}"
             if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
-              git fetch --no-tags origin "$tip" || {
+              git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+                fetch --no-tags origin "$tip" || {
                 echo "::error::could not fetch trusted tip ${tip} — fail closed" >&2
                 return 1
               }
             fi
-            ref_tip="$(git ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
+            ref_tip="$(git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+              ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
             if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
               return 1
@@ -2164,7 +2172,6 @@ jobs:
         id: ready
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -2177,28 +2184,36 @@ jobs:
           # "tip when base.sha predates it") so one path cannot fail open and
           # a race against a main push cannot restore a pre-marker checker.
           resolve_trusted_sha() {
-            local want_ref="$1" default_branch tip ref_tip
-            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch)"
+            local want_ref="$1" default_branch tip ref_tip fetch_auth
+            # gh api --jq takes the filter as the next arg; do NOT pass -r
+            # (that makes the filter `-r` and leaves default_branch empty).
+            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
             default_branch="${default_branch//$'\r'/}"
             default_branch="${default_branch//$'\n'/}"
             if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
               echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
               return 1
             fi
-            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq -r .object.sha)"
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq .object.sha)"
             tip="${tip//$'\r'/}"
             tip="${tip//$'\n'/}"
             if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::trusted tip sha empty or malformed: '${tip}' — fail closed" >&2
               return 1
             fi
+            # persist-credentials: false — GH_TOKEN authenticates gh, not git.
+            # Same masked, command-scoped extraheader as the head-staging fetches.
+            fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
+            echo "::add-mask::${fetch_auth}"
             if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
-              git fetch --no-tags origin "$tip" || {
+              git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+                fetch --no-tags origin "$tip" || {
                 echo "::error::could not fetch trusted tip ${tip} — fail closed" >&2
                 return 1
               }
             fi
-            ref_tip="$(git ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
+            ref_tip="$(git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+              ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
             if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
               return 1
@@ -2227,15 +2242,10 @@ jobs:
             echo "::error::TRUSTED_SHA empty or malformed — fail closed" >&2
             exit 1
           fi
-          echo "TRUSTED_SHA=${TRUSTED_SHA}" >> "$GITHUB_ENV"
-          # Fetch event base.sha too — posting-surface overlay still uses it
-          # for the MCP/settings tree until those overlays move to tip.
-          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-            echo "::add-mask::${FETCH_AUTH}"
-            git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
-              fetch --no-tags origin "$BASE_SHA"
-          fi
+          # Publish via step output — never GITHUB_ENV. A Write/Edit/Bash
+          # coach link can overwrite GITHUB_ENV with the PR head SHA; every
+          # later restore would then execute PR-controlled checkers.
+          echo "trusted_sha=${TRUSTED_SHA}" >> "$GITHUB_OUTPUT"
           # Presence of the coach surface: tip must carry it (always-tip), so
           # a stale event base.sha cannot skip a coach that main already has.
           if git cat-file -e "${TRUSTED_SHA}:.claude/reviewer-post/reviewer_mcp.py" 2>/dev/null \
@@ -2252,7 +2262,7 @@ jobs:
       - name: Restore the coach posting surface from the base branch (before chain link 1)
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2299,7 +2309,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -2375,7 +2385,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -2463,7 +2473,7 @@ jobs:
       - name: Restore the coach posting surface from the base branch (before chain link 2)
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2510,7 +2520,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -2586,7 +2596,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -2674,7 +2684,7 @@ jobs:
       - name: Restore the coach posting surface from the base branch (before chain link 3)
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2721,7 +2731,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -2797,7 +2807,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -2890,7 +2900,7 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2937,7 +2947,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -3015,7 +3025,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -3109,7 +3119,7 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -3156,7 +3166,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -3235,7 +3245,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -3330,7 +3340,7 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -3377,7 +3387,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -3458,7 +3468,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -3547,8 +3557,9 @@ jobs:
         # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
         # A ship-step success is not a completed coach round unless the
         # marker is on the thread. Fail here so review-stamp cannot mark
-        # the round complete. Extract the pin from base.sha AFTER the
-        # agent (Write/Edit/Bash): the workspace copy is not trusted.
+        # the round complete. Extract the pin from TRUSTED_SHA (ready
+        # step output — never GITHUB_ENV) AFTER the agent: the workspace
+        # copy is not trusted.
         #
         # Success-only on purpose (Bugbot on #820): the #770 artifact walk
         # widened this to success|failure, so a chain where every provider
@@ -3568,7 +3579,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PR: ${{ github.event.pull_request.number }}
           SINCE: ${{ steps.ready.outputs.started_at }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
@@ -3914,28 +3925,36 @@ jobs:
           # "tip when base.sha predates it") so one path cannot fail open and
           # a race against a main push cannot restore a pre-marker checker.
           resolve_trusted_sha() {
-            local want_ref="$1" default_branch tip ref_tip
-            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq -r .default_branch)"
+            local want_ref="$1" default_branch tip ref_tip fetch_auth
+            # gh api --jq takes the filter as the next arg; do NOT pass -r
+            # (that makes the filter `-r` and leaves default_branch empty).
+            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
             default_branch="${default_branch//$'\r'/}"
             default_branch="${default_branch//$'\n'/}"
             if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
               echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
               return 1
             fi
-            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq -r .object.sha)"
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq .object.sha)"
             tip="${tip//$'\r'/}"
             tip="${tip//$'\n'/}"
             if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::trusted tip sha empty or malformed: '${tip}' — fail closed" >&2
               return 1
             fi
+            # persist-credentials: false — GH_TOKEN authenticates gh, not git.
+            # Same masked, command-scoped extraheader as the head-staging fetches.
+            fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
+            echo "::add-mask::${fetch_auth}"
             if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
-              git fetch --no-tags origin "$tip" || {
+              git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+                fetch --no-tags origin "$tip" || {
                 echo "::error::could not fetch trusted tip ${tip} — fail closed" >&2
                 return 1
               }
             fi
-            ref_tip="$(git ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
+            ref_tip="$(git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+              ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
             if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
               echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
               return 1
