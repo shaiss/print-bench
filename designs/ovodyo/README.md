@@ -367,9 +367,11 @@ a felt pad or leather coaster under each ball is the re-set-friendly interim
 display. A knock should prefer the one-turn seam over cracking a shell —
 unscrew fully and re-seat (expectation, not a guarantee). Low side light
 through the cut numerals is this clock's best look — near a window, out of
-direct afternoon sun (PLA can soften and fade on a hot sill; PETG/ASA tolerate
-it better, but the ~32 mm ridge-chord bridges above are disclosed for PLA and
-will sag past that ~1 mm in PETG/ASA, so a shaded spot beats a material swap).
+direct afternoon sun. A shaded spot beats a material swap: PLA can soften and
+fade on a hot sill, and PETG/ASA tolerate it better, but the ~32 mm ridge-chord
+bridges above are disclosed for PLA and will sag past that ~1 mm in PETG/ASA.
+If you do print it in another material, re-run the coupon in that filament —
+PETG runs looser on fits than PLA, ASA runs tighter.
 Ambient light only; no built-in LEDs.
 
 The real
