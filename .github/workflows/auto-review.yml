@@ -382,7 +382,7 @@ jobs:
             # persist-credentials: false — GH_TOKEN authenticates gh, not git.
             # Same masked, command-scoped extraheader as the head-staging fetches.
             fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
-            echo "::add-mask::${fetch_auth}"
+            echo "::add-mask::${fetch_auth}" >&2
             if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
               git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
                 fetch --no-tags origin "$tip" || {
@@ -2204,7 +2204,7 @@ jobs:
             # persist-credentials: false — GH_TOKEN authenticates gh, not git.
             # Same masked, command-scoped extraheader as the head-staging fetches.
             fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
-            echo "::add-mask::${fetch_auth}"
+            echo "::add-mask::${fetch_auth}" >&2
             if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
               git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
                 fetch --no-tags origin "$tip" || {
@@ -3945,7 +3945,7 @@ jobs:
             # persist-credentials: false — GH_TOKEN authenticates gh, not git.
             # Same masked, command-scoped extraheader as the head-staging fetches.
             fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
-            echo "::add-mask::${fetch_auth}"
+            echo "::add-mask::${fetch_auth}" >&2
             if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
               git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
                 fetch --no-tags origin "$tip" || {

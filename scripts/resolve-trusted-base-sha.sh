@@ -85,7 +85,7 @@ _git_authed() {
   fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
   # Mask when running under Actions; harmless locally.
   if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-    echo "::add-mask::${fetch_auth}"
+    echo "::add-mask::${fetch_auth}" >&2
   fi
   git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" "$@"
 }
@@ -342,6 +342,30 @@ FAKEGIT
     else
       echo "SELFTEST FAIL  NEGCTL --jq -r unexpectedly succeeded"; pass=0
     fi
+
+  # Behavioral: ::add-mask:: must not land on stdout of a tip resolve
+  # (TRUSTED_SHA="$(resolve_trusted_sha ...)" would otherwise fail LOW-1).
+  out="$(
+    fetch_auth="$(printf 'x-access-token:%s' 'tok' | base64 | tr -d '\n')"
+    echo "::add-mask::${fetch_auth}" >&2
+    printf '%s\n' 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  )"
+  if [[ "$out" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "selftest ok    behavioral: stdout of resolve_trusted_sha is tip-only"
+  else
+    echo "SELFTEST FAIL  resolve stdout polluted: '${out}'"; pass=0
+  fi
+  # NEGCTL: add-mask on stdout fails the 40-hex capture
+  out="$(
+    fetch_auth="$(printf 'x-access-token:%s' 'tok' | base64 | tr -d '\n')"
+    echo "::add-mask::${fetch_auth}"
+    printf '%s\n' 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  )"
+  if ! [[ "$out" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "selftest ok    NEGCTL: add-mask on stdout breaks 40-hex TRUSTED_SHA capture"
+  else
+    echo "SELFTEST FAIL  NEGCTL stdout pollution not detected"; pass=0
+  fi
   )
 
   # --- workflow drift pin (always-tip + LOW-1 + LOW-2 + no silent #947 exit-2) ---
@@ -386,6 +410,10 @@ FAKEGIT
       miss="coach overlay does not checkout from TRUSTED_SHA"
     elif ! grep -qF 'extraheader=Authorization: Basic ${fetch_auth}' "$wf"; then
       miss="resolve_trusted_sha missing authenticated git fetch/ls-remote"
+    elif ! grep -qE 'echo "::add-mask::\$\{fetch_auth\}" >&2' "$wf"; then
+      miss="resolve_trusted_sha add-mask not on stderr (would pollute TRUSTED_SHA capture)"
+    elif grep -qE 'echo "::add-mask::\$\{fetch_auth\}"$' "$wf"; then
+      miss="resolve_trusted_sha still has add-mask on stdout"
     fi
     if [[ -z "$miss" ]]; then
       echo "selftest ok    auto-review.yml always-tip restore + LOW-1/LOW-2 pins"
