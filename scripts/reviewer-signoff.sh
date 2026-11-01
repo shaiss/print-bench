@@ -872,9 +872,12 @@ No fusecheck STRONG WARN is not the cell.
 
 _fuse_warn_yaml_pin() {  # _fuse_warn_yaml_pin <auto-review.yml>
   local f="$1" lit
+  # fuse-warn runs from the base.sha restore into RUNNER_TEMP ($SIGNOFF),
+  # never a PR-head scripts/reviewer-signoff.sh copy.
   for lit in \
     'startswith("<!-- printcheck-gate-report -->")' \
-    'scripts/reviewer-signoff.sh fuse-warn'; do
+    '"$SIGNOFF" fuse-warn' \
+    'BASE_SHA}:scripts/reviewer-signoff.sh'; do
     grep -qF -- "$lit" "$f" || { printf '%s' "$lit"; return 1; }
   done
   # The two #634 bugs: contains() last picks a reviewer mention; grep of
@@ -884,6 +887,13 @@ _fuse_warn_yaml_pin() {  # _fuse_warn_yaml_pin <auto-review.yml>
   fi
   if grep -qE 'grep[[:space:]]+-qi[[:space:]]+"STRONG WARN"' "$f"; then
     printf '%s' 'grep -qi "STRONG WARN"'; return 1
+  fi
+  # A PR-head checkout path must not return on a runnable line (comments
+  # naming the script are fine): that was the pre-restore hole. Optional
+  # closing quote after .sh covers `"scripts/reviewer-signoff.sh" fuse-warn`.
+  if grep -vE '^[[:space:]]*#' "$f" \
+       | grep -qE 'scripts/reviewer-signoff\.sh["'"'"']?[[:space:]]+(fuse-warn|key|decide|round)'; then
+    printf '%s' 'scripts/reviewer-signoff.sh (PR-head path)'; return 1
   fi
 }
 
@@ -914,11 +924,18 @@ selftest_fuse_warn_drift() {
   else
     echo "selftest ok    fuse-warn-drift NEGCTL a YAML that reverted to contains() fails the pin"
   fi
-  grep -vF 'scripts/reviewer-signoff.sh fuse-warn' "$wf" > "$tmp" || true
+  grep -vF '"$SIGNOFF" fuse-warn' "$wf" > "$tmp" || true
   if _fuse_warn_yaml_pin "$tmp" >/dev/null; then
     echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML with no fuse-warn call"; pass=0
   else
     echo "selftest ok    fuse-warn-drift NEGCTL a YAML that dropped fuse-warn fails the pin"
+  fi
+  # Quoted PR-head path must also fail the pin (closing quote before the verb).
+  { cat "$wf"; printf '%s\n' '          "scripts/reviewer-signoff.sh" fuse-warn'; } > "$tmp"
+  if _fuse_warn_yaml_pin "$tmp" >/dev/null; then
+    echo "SELFTEST FAIL  fuse-warn-drift NEGCTL: pin passed a YAML with a PR-head fuse-warn call"; pass=0
+  else
+    echo "selftest ok    fuse-warn-drift NEGCTL a YAML with a PR-head fuse-warn call fails the pin"
   fi
   rm -f "$tmp"
 }

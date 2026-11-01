@@ -137,13 +137,45 @@ _RUN_URL_RE = re.compile(r"https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/act
 
 
 def is_actions_bot(login: Optional[str]) -> bool:
-    """REST ``github-actions[bot]`` or GraphQL ``github-actions`` (case-insensitive, stripped)."""
+    """Login-only Actions-bot check (REST ``github-actions[bot]`` or bare GraphQL).
+
+    Comment-shaped trust (:func:`served`, :func:`marker`, :func:`coach_lock_served`)
+    uses :func:`_comment_is_actions_bot`, which accepts a bare ``github-actions``
+    login only when ``user.type`` / ``__typename`` is ``Bot``. Login-only callers
+    (tiers, unknown-family accounting) have no type field and keep the bare form.
+    """
     if not isinstance(login, str):
         return False
     name = login.strip().lower()
     if name.endswith("[bot]"):
         name = name[:-5]
     return name == ACTIONS_BOT
+
+
+def _comment_is_actions_bot(comment: Any) -> bool:
+    """reviewer-posted.sh ``is_actions_bot`` over a comment dict.
+
+    REST ``github-actions[bot]`` always qualifies. Bare GraphQL
+    ``github-actions`` qualifies only when ``user.type`` or ``__typename``
+    is exactly ``Bot`` — a User (or missing type) with that login does not.
+    """
+    if not isinstance(comment, dict):
+        return False
+    user = comment.get("user") or {}
+    if not isinstance(user, dict):
+        return False
+    login = user.get("login") or ""
+    if not isinstance(login, str):
+        return False
+    name = login.strip().lower()
+    if name.endswith("[bot]"):
+        return name[:-5] == ACTIONS_BOT
+    if name != ACTIONS_BOT:
+        return False
+    kind = user.get("type") or user.get("__typename") or ""
+    if not isinstance(kind, str):
+        return False
+    return kind.strip() == "Bot"
 
 
 def _same_login(a: Optional[str], b: Optional[str]) -> bool:
@@ -238,7 +270,7 @@ def served(comments: list[dict[str, Any]], *, reviewer: str, sha: str,
     since = _check_since(since)
     wanted = _mcp_markers(REVIEWER_FAMILIES[reviewer], sha)
     for comment in _flatten(list(comments)):
-        if not isinstance(comment, dict) or not is_actions_bot(_author(comment)):
+        if not isinstance(comment, dict) or not _comment_is_actions_bot(comment):
             continue
         if _suffix_last(_digest.body_digest(_body(comment))) not in wanted:
             continue
@@ -246,6 +278,57 @@ def served(comments: list[dict[str, Any]], *, reviewer: str, sha: str,
             continue
         return True
     return False
+
+
+def marker(comments: list[dict[str, Any]], *, reviewer: str, sha: str,
+           currency: bool = False) -> str:
+    """reviewer-posted.sh ``marker`` — last qualifying marker HTML for ``sha``, or empty.
+
+    Same Actions-bot + MCP-suffix trust as :func:`served`. With ``currency=True``,
+    when no marker names ``sha``, falls back to the last qualifying any-sha
+    marker of the family (signoff-status currency carry-forward).
+    """
+    if reviewer not in REVIEWER_FAMILIES:
+        raise ValueError(f"reviewer must be jane, drik, pm or coach (got: {reviewer or 'empty'})")
+    if not isinstance(sha, str) or _SHA_RE.fullmatch(sha) is None:
+        raise ValueError(f"sha must be 40 hex chars (got: {sha or 'empty'})")
+    family = REVIEWER_FAMILIES[reviewer]
+    wanted = _mcp_markers(family, sha)
+    # any-sha suffix for the family (currency fallback), matching the script's ANY_SUFFIX_RE
+    if family.endswith("_SIGNOFF"):
+        any_re = re.compile(
+            r"<!-- " + re.escape(family)
+            + r" sha=([0-9a-f]{40}) verdict=(?:pass|block) fuse=(?:none|acknowledged) -->"
+            + r"\n\n" + re.escape(_digest.FOOTER) + r"\Z"
+        )
+    else:
+        any_re = re.compile(
+            r"<!-- " + re.escape(family) + r" sha=([0-9a-f]{40}) -->"
+            + r"\n\n" + re.escape(_digest.FOOTER) + r"\Z"
+        )
+    head_hit: Optional[str] = None
+    any_hit: Optional[str] = None
+    footer_tail = "\n\n" + _digest.FOOTER
+    for comment in _flatten(list(comments)):
+        if not isinstance(comment, dict) or not _comment_is_actions_bot(comment):
+            continue
+        body = _body(comment)
+        d = _digest.body_digest(body)
+        last = _suffix_last(d)
+        if last in wanted:
+            head_hit = last
+            any_hit = last
+            continue
+        if currency:
+            m = any_re.search(body)
+            if m is not None:
+                # Strip the trailing "\n\n{FOOTER}" the same way the script does.
+                any_hit = m.group(0)[: -len(footer_tail)]
+    if head_hit is not None:
+        return head_hit
+    if currency and any_hit is not None:
+        return any_hit
+    return ""
 
 
 def _coach_pair(d: dict[str, Any]) -> Optional[str]:
@@ -261,7 +344,7 @@ def coach_lock_served(comments: list[dict[str, Any]], *, since: Optional[str] = 
     """coach-lock-check.sh over raw comments."""
     since = _check_since(since)
     for comment in _flatten(list(comments)):
-        if not isinstance(comment, dict) or not is_actions_bot(_author(comment)):
+        if not isinstance(comment, dict) or not _comment_is_actions_bot(comment):
             continue
         if _coach_pair(_digest.body_digest(_body(comment))) is None:
             continue
