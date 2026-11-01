@@ -479,6 +479,11 @@ a few minutes of print, same material and profile as the halves.
   lead-in itself binds** (drag stays through the first half-turn) → raise
   `seam_tol` by 0.05 and reprint the coupon — that is the fit the halves
   will get.
+  Coupon-green is not ball-green: the coupon proves the thread on a flat
+  flange, not the groove seat in a 2.2 mm curved shell wall, so each ball's
+  first real close is a checked event, not an assumed one. The 0.05
+  `seam_tol` ladder and the cross-thread restart diagnostic (README, Assembly & use)
+  stay.
 - Then render the four halves with the winning value and print them
   pole-down (see Key decisions: Ball seam).
 

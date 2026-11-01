@@ -303,7 +303,8 @@ lift from the centre segment so the ends don't peel).
 1. Degrease the Ø2 mm steel shot (IPA, dry fully) — oiled shot defeats the
    later CA lock — then fill each ballast pocket.
 2. Wedge a `base-plug` into each port.
-3. Slide the keel into the **bare** centre segment.
+3. Slide the keel into the **bare** centre segment; check the segment mouths
+   for brim before sliding the keel in; trim flush.
 4. Tape both wings on.
 5. Place the assembly where it lives.
 
