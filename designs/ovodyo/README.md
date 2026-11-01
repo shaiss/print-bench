@@ -58,7 +58,8 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 
 *The same single-material set from desk level and to the side, so you can see
 it's separate parts: both balls rest on a pole pentagon on the same desk line as
-the truss underside, standing apart from each other in front of the base.
+the truss underside, standing apart from each other with daylight between them,
+in front of the base.
 Nothing is fused and nothing hangs off the truss. Green inside the cuts is the
 renderer's inside-face colour, not a second filament.*
 

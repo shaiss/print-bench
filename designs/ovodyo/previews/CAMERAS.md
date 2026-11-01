@@ -39,9 +39,11 @@ fixed once reviewed; a new region gets a new line).
   not filament). Beside the v0 banner; must not replace the hero.
 - **what-ships-side** — companion to the frozen `what-ships` shot, added after
   Jane's PR #975 round read the balls as merged into the truss: level (90°
-  elevation), turned 42° and orthographic, so both balls rest on their pole
+  elevation), turned 25° and orthographic, so both balls rest on their pole
   pentagons on one desk line with the truss chord undersides, standing apart with
-  daylight between them. Re-framed from 86°/75° while still unfrozen, because at
-  that turn the two balls stacked into one read. It proves what the `what-ships`
-  caption claims. New line; `what-ships` is untouched. Inside-face green is
+  daylight between them. Re-framed from 86°/75° and then 42° while still
+  unfrozen, because at those turns the two balls overlapped into one read; frozen
+  at 25°. The frozen `what-ships` still reads the balls as touching the truss, so
+  this is the page's only separation witness: don't soften or drop it. It proves
+  what the `what-ships` caption claims. New line; `what-ships` is untouched. Inside-face green is
   renderer tint, not filament.
