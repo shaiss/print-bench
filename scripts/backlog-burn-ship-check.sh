@@ -78,17 +78,37 @@ MSG_CAP=1000
 REDACT_INPUT_CAP=20480
 
 # Shared sanitizer for subtype + denial tool names (diag_redact +
-# print_ship_diag must stay in sync). Order: hard-cap → strip Unicode
-# space/format/controls → neutralize workflow cmds → key-shape redact →
-# optional output cap. Key-shape specs are copied verbatim from PR #953's
-# provenance.gitstore._SECRET_PATTERN_SPECS (do not import that package
-# from the post-agent path); ship-diag additions follow.
+# print_ship_diag must stay in sync). Order: scrub lone UTF-16 surrogates
+# (#966) → hard-cap → strip Unicode space/format/controls → neutralize
+# workflow cmds → key-shape redact → optional output cap. Key-shape specs
+# are copied verbatim from PR #953's provenance.gitstore._SECRET_PATTERN_SPECS
+# (do not import that package from the post-agent path); ship-diag
+# additions follow. Subtype + tool names additionally pass an allowlist
+# (^ [A-Za-z0-9_.:()-]{1,64} $) before redact — anything else is
+# emitted as the fixed placeholder <invalid> (#966 Cipher LOW).
 REDACT_PY='
 import re
 import unicodedata
 
 _INPUT_CAP = '"${REDACT_INPUT_CAP}"'
 _DROP_CATS = frozenset({"Zs", "Zl", "Zp", "Cf", "Cc"})
+# Cipher #966: subtype / denial tool names must be this shape or <invalid>.
+_DIAG_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:()-]{1,64}$")
+
+
+def scrub_surrogates(text: str) -> str:
+    """Replace lone UTF-16 surrogates so encode/print never crash (#966)."""
+    if not text:
+        return text or ""
+    return text.encode("utf-8", errors="replace").decode("utf-8")
+
+
+def allowlist_diag_token(text: str) -> str:
+    """Emit a subtype/tool name only when it matches the #966 allowlist."""
+    text = scrub_surrogates(text or "")
+    if _DIAG_TOKEN_RE.fullmatch(text):
+        return text
+    return "<invalid>"
 
 # --- verbatim from PR #953 provenance.gitstore (key-shape redactor) ---
 _SECRET_PATTERN_SPECS = (
@@ -182,7 +202,9 @@ def _strip_space_format_controls(text: str) -> str:
 
 
 def redact_patterns(text, cap=None):
-    text = text or ""
+    # 0a) Lone UTF-16 surrogates → U+FFFD so later encode/print cannot crash
+    #     (Cipher #966). Must run before any other transform.
+    text = scrub_surrogates(text or "")
     # 0) Hard-cap BEFORE any regex (MED-B ReDoS bound).
     if len(text) > _INPUT_CAP:
         text = text[:_INPUT_CAP]
@@ -223,7 +245,10 @@ sys.stdout.write(redact_patterns(text, cap))
 
 # Extract subtype + denial tool names (sanitized) and final-message
 # length/sha256 from an execution log. Never prints message text, never
-# prints denial inputs/args. Never enables show_full_output.
+# prints denial inputs/args. Never enables show_full_output. Subtype and
+# each tool name must match the #966 allowlist or become <invalid>; lone
+# UTF-16 surrogates are replaced so the diag step cannot crash the ship
+# outcome.
 print_ship_diag() {
   local log="$1"
   if [[ -z "$log" || ! -f "$log" ]]; then
@@ -304,15 +329,17 @@ for d in denials:
         m = re.match(r'(Bash\([^):\s]+|Write|Edit|Skill|mcp__\w+|NotebookEdit|Agent)', d.strip())
         names.append(m.group(1) if m else d.strip().split()[0][:80])
 
-# Dedup preserving order
+# Dedup preserving order, then allowlist each name (#966).
 seen = set()
 uniq = []
 for n in names:
     if n not in seen:
         seen.add(n)
-        uniq.append(n)
+        uniq.append(allowlist_diag_token(n))
 
-sub_s = str(subtype) if subtype is not None else '(missing)'
+sub_s = allowlist_diag_token(
+    str(subtype) if subtype is not None else '(missing)'
+)
 print('ship-diag: result subtype=%s' % redact(sub_s))
 if uniq:
     print('ship-diag: permission_denials tools: %s' % redact('; '.join(uniq[:20])))
@@ -321,9 +348,14 @@ else:
         'ship-diag: permission_denials tools: (none listed in execution log; '
         'count may still be >0 when show_full_output is false)'
     )
-# MED-C: never emit message text — length + sha256 of the raw body only.
+# MED-C: never emit message text — length + sha256 of the scrubbed body
+# only. errors=replace keeps a lone surrogate from crashing the diag step
+# (Cipher #966) so the ship-outcome verdict still lands.
+final_msg = scrub_surrogates(final_msg)
 msg_len = len(final_msg)
-msg_sha = hashlib.sha256(final_msg.encode('utf-8')).hexdigest()
+msg_sha = hashlib.sha256(
+    final_msg.encode('utf-8', errors='replace')
+).hexdigest()
 if final_msg:
     print('ship-diag: final message: len=%d sha256=%s' % (msg_len, msg_sha))
 else:
@@ -490,7 +522,11 @@ run_check() {
   if [[ -z "$head_ref" ]]; then
     head_ref="$(git symbolic-ref -q --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
   fi
-  echo "ship-check: HEAD=${head_ref:-"(unknown)"}"
+  # Cipher #966: branch name is untrusted (agent can rename) — same diag_redact
+  # path as subtype / tool names. Matching still uses the raw head_ref.
+  local head_print
+  head_print="$(BB_IN="${head_ref:-"(unknown)"}" diag_redact "$MSG_CAP")"
+  echo "ship-check: HEAD=${head_print}"
 
   local on_branch=0 on_stop=0
   if head_is_ship_branch "$issue" "$head_ref"; then
@@ -584,7 +620,7 @@ run_check() {
     return 0
   fi
 
-  echo "::error::backlog-burn ship walk ended with HEAD='${head_ref}' (not claude/issue-${issue}-*) and no 🚢 DECLINED / 🚦 DECISION NEEDED / 🚢 DEFERRED stop — refusing to treat subtype=success as an outcome (issue #962)"
+  echo "::error::backlog-burn ship walk ended with HEAD='${head_print}' (not claude/issue-${issue}-*) and no 🚢 DECLINED / 🚦 DECISION NEEDED / 🚢 DEFERRED stop — refusing to treat subtype=success as an outcome (issue #962)"
   return 1
 }
 
@@ -1105,6 +1141,231 @@ EOF
   else
     echo "ok    selftest: planted GIT_EXEC_PATH is cleared before git"
   fi
+
+  # --- #966 Cipher LOW 1: allowlist subtype + tool names (behavioral) ---
+  # Feed real exec JSON through print_ship_diag: valid tokens survive,
+  # anything outside ^[A-Za-z0-9_.:()-]{1,64}$ becomes <invalid>, and the
+  # ship-outcome gate exit code is unchanged.
+  cat >"$tmp/exec-allow.json" <<'EOF'
+{
+  "type": "result",
+  "subtype": "success",
+  "permission_denials": [
+    {"tool_name": "Bash"},
+    {"tool_name": "mcp__oracle__post_oracle_review"},
+    {"tool_name": "Bash(git)"},
+    {"tool_name": "Evil Tool; rm -rf /"},
+    {"tool_name": "Write\n::error::planted"},
+    {"tool_name": "overlong_tool_name_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+  ],
+  "result": ""
+}
+EOF
+  print_ship_diag "$tmp/exec-allow.json" >"$tmp/diag-allow.out"
+  if ! grep -q 'subtype=success' "$tmp/diag-allow.out"; then
+    echo "FAIL  selftest: allowlist dropped a valid subtype=success"
+    cat "$tmp/diag-allow.out"
+    fails=$((fails + 1))
+  elif ! grep -q 'permission_denials tools:.*Bash' "$tmp/diag-allow.out" \
+      || ! grep -q 'mcp__oracle__post_oracle_review' "$tmp/diag-allow.out" \
+      || ! grep -q 'Bash(git)' "$tmp/diag-allow.out"; then
+    echo "FAIL  selftest: allowlist dropped a valid tool name"
+    cat "$tmp/diag-allow.out"
+    fails=$((fails + 1))
+  elif ! grep -q '<invalid>' "$tmp/diag-allow.out"; then
+    echo "FAIL  selftest: allowlist did not emit <invalid> for bad tool names"
+    cat "$tmp/diag-allow.out"
+    fails=$((fails + 1))
+  elif grep -q 'rm -rf' "$tmp/diag-allow.out" \
+      || grep -q '::error::planted' "$tmp/diag-allow.out" \
+      || grep -q 'overlong_tool_name' "$tmp/diag-allow.out" \
+      || grep -q 'Evil Tool' "$tmp/diag-allow.out"; then
+    echo "FAIL  selftest: allowlist leaked a rejected tool-name payload"
+    cat "$tmp/diag-allow.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: allowlist keeps valid subtype/tool names, rejects others"
+  fi
+  # Invalid subtype (spaces / workflow cmd) → <invalid>, gate still fails on main.
+  cat >"$tmp/exec-allow-bad-sub.json" <<'EOF'
+{
+  "type": "result",
+  "subtype": "ok with spaces\n::error::planted",
+  "permission_denials": [],
+  "result": ""
+}
+EOF
+  set +e
+  "$0" --issue 962 --head-ref main --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log "$tmp/exec-allow-bad-sub.json" \
+      >"$tmp/allow-bad-sub.out" 2>&1
+  local allow_bad_rc=$?
+  set -e
+  if [[ "$allow_bad_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: allowlist path changed ship-outcome (main should still fail)"
+    cat "$tmp/allow-bad-sub.out"
+    fails=$((fails + 1))
+  elif ! grep -q 'subtype=<invalid>' "$tmp/allow-bad-sub.out"; then
+    echo "FAIL  selftest: invalid subtype was not emitted as <invalid>"
+    cat "$tmp/allow-bad-sub.out"
+    fails=$((fails + 1))
+  elif grep -q '::error::planted' "$tmp/allow-bad-sub.out"; then
+    echo "FAIL  selftest: invalid subtype payload leaked into diag"
+    cat "$tmp/allow-bad-sub.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: invalid subtype → <invalid>; ship-outcome still fails on main"
+  fi
+  # Valid diag must not flip a passing ship-branch outcome.
+  set +e
+  "$0" --issue 962 --head-ref claude/issue-962-allowlist \
+      --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log "$tmp/exec-allow.json" \
+      >"$tmp/allow-pass.out" 2>&1
+  local allow_pass_rc=$?
+  set -e
+  if [[ "$allow_pass_rc" -ne 0 ]]; then
+    echo "FAIL  selftest: allowlist path broke a passing ship-branch outcome"
+    cat "$tmp/allow-pass.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: allowlist path leaves a passing ship-branch outcome intact"
+  fi
+
+  # --- #966 Cipher LOW 2: HEAD= goes through diag_redact (behavioral) ---
+  local ghp_head="gh"'p_'"ABCDEFGHIJKLMNOPQRSTUVWX123456"
+  # Newline + ::error:: would inject a workflow command if printed raw.
+  local evil_head="main ${ghp_head}"$'\n'"::error::planted-head"
+  set +e
+  "$0" --issue 962 --head-ref "$evil_head" --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-10-30T12:00:00Z --execution-log /nonexistent \
+      >"$tmp/head-redact.out" 2>&1
+  local head_redact_rc=$?
+  set -e
+  if [[ "$head_redact_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: evil HEAD= still passed the hard check"; fails=$((fails + 1))
+    cat "$tmp/head-redact.out"
+  elif ! grep -q '^ship-check: HEAD=' "$tmp/head-redact.out"; then
+    echo "FAIL  selftest: HEAD= line missing after redaction path"
+    cat "$tmp/head-redact.out"
+    fails=$((fails + 1))
+  elif grep -q 'ghp_ABCDEF' "$tmp/head-redact.out" \
+      || "$PYTHON3" -I -c '
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+# Live line-leading :: (not the neutralized \:: form) must be absent.
+sys.exit(0 if re.search(r"(?m)^[ \t]*::error::planted-head", text) else 1)
+' "$tmp/head-redact.out"; then
+    echo "FAIL  selftest: HEAD= line leaked token or live workflow command"
+    cat "$tmp/head-redact.out"
+    fails=$((fails + 1))
+  elif ! grep -q '\*\*\*' "$tmp/head-redact.out"; then
+    echo "FAIL  selftest: HEAD= line did not redact the planted token shape"
+    cat "$tmp/head-redact.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: HEAD= branch line goes through diag_redact"
+  fi
+
+  # --- #966 Cipher LOW 3: lone UTF-16 surrogates (behavioral) ---
+  # JSON \uD800 / \uDFFF decode to lone surrogates; encode('utf-8') used to
+  # crash the diag step. High and low cases must keep the ship-outcome
+  # verdict intact (pass on ship branch, fail on main).
+  "$PYTHON3" -I -c '
+import json, sys
+high = json.loads("\"hi\\ud800\"")
+low = json.loads("\"lo\\udfff\"")
+body_h = json.loads("\"body\\ud800x\"")
+body_l = json.loads("\"body\\udfffx\"")
+for path, sub, body in (
+    (sys.argv[1], high, body_h),
+    (sys.argv[2], low, body_l),
+):
+    with open(path, "w", encoding="utf-8") as f:
+        # ensure_ascii so the file carries \\u escapes; json.load recreates
+        # the lone surrogate the way an execution log would.
+        json.dump(
+            {
+                "type": "result",
+                "subtype": sub,
+                "permission_denials": [],
+                "result": body,
+            },
+            f,
+            ensure_ascii=True,
+        )
+' "$tmp/exec-surr-high.json" "$tmp/exec-surr-low.json"
+  # Confirm the fixture really carries a lone surrogate (test is falsifiable).
+  if ! "$PYTHON3" -I -c '
+import json, sys
+o = json.load(open(sys.argv[1], encoding="utf-8"))
+s = o["subtype"]
+sys.exit(0 if any(0xD800 <= ord(c) <= 0xDFFF for c in s) else 1)
+' "$tmp/exec-surr-high.json"; then
+    echo "FAIL  selftest: high-surrogate fixture did not contain a lone surrogate"
+    fails=$((fails + 1))
+  fi
+  if ! "$PYTHON3" -I -c '
+import json, sys
+o = json.load(open(sys.argv[1], encoding="utf-8"))
+s = o["subtype"]
+sys.exit(0 if any(0xD800 <= ord(c) <= 0xDFFF for c in s) else 1)
+' "$tmp/exec-surr-low.json"; then
+    echo "FAIL  selftest: low-surrogate fixture did not contain a lone surrogate"
+    fails=$((fails + 1))
+  fi
+  # Diag alone must not crash on either surrogate.
+  set +e
+  print_ship_diag "$tmp/exec-surr-high.json" >"$tmp/diag-surr-high.out" 2>"$tmp/diag-surr-high.err"
+  local surr_high_diag_rc=$?
+  print_ship_diag "$tmp/exec-surr-low.json" >"$tmp/diag-surr-low.out" 2>"$tmp/diag-surr-low.err"
+  local surr_low_diag_rc=$?
+  set -e
+  if [[ "$surr_high_diag_rc" -ne 0 || "$surr_low_diag_rc" -ne 0 ]]; then
+    echo "FAIL  selftest: lone-surrogate diag crashed (high_rc=$surr_high_diag_rc low_rc=$surr_low_diag_rc)"
+    cat "$tmp/diag-surr-high.out" "$tmp/diag-surr-high.err" "$tmp/diag-surr-low.out" "$tmp/diag-surr-low.err"
+    fails=$((fails + 1))
+  elif ! grep -q 'final message: len=' "$tmp/diag-surr-high.out" \
+      || ! grep -q 'final message: len=' "$tmp/diag-surr-low.out"; then
+    echo "FAIL  selftest: lone-surrogate diag missing len+sha256"
+    cat "$tmp/diag-surr-high.out" "$tmp/diag-surr-low.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: lone high/low surrogate diag completes (no crash)"
+  fi
+  # Ship-outcome verdict intact: ship branch passes, main fails — for BOTH.
+  local surr_label surr_log surr_rc
+  for surr_label in high low; do
+    surr_log="$tmp/exec-surr-${surr_label}.json"
+    set +e
+    "$0" --issue 962 --head-ref claude/issue-962-surr-${surr_label} \
+        --comments-file "$tmp/empty-comments.ndjson" \
+        --run-started-at 2026-10-30T12:00:00Z --execution-log "$surr_log" \
+        >"$tmp/surr-${surr_label}-pass.out" 2>&1
+    surr_rc=$?
+    set -e
+    if [[ "$surr_rc" -ne 0 ]]; then
+      echo "FAIL  selftest: lone ${surr_label} surrogate broke a passing ship-branch outcome"
+      cat "$tmp/surr-${surr_label}-pass.out"
+      fails=$((fails + 1))
+    else
+      echo "ok    selftest: lone ${surr_label} surrogate keeps ship-branch pass"
+    fi
+    set +e
+    "$0" --issue 962 --head-ref main \
+        --comments-file "$tmp/empty-comments.ndjson" \
+        --run-started-at 2026-10-30T12:00:00Z --execution-log "$surr_log" \
+        >"$tmp/surr-${surr_label}-fail.out" 2>&1
+    surr_rc=$?
+    set -e
+    if [[ "$surr_rc" -eq 0 ]]; then
+      echo "FAIL  selftest: lone ${surr_label} surrogate made main pass (verdict flipped)"
+      cat "$tmp/surr-${surr_label}-fail.out"
+      fails=$((fails + 1))
+    else
+      echo "ok    selftest: lone ${surr_label} surrogate keeps main fail"
+    fi
+  done
 
   if [[ "$fails" -ne 0 ]]; then
     echo "FAIL  backlog-burn-ship-check selftest: $fails failure(s)" >&2
