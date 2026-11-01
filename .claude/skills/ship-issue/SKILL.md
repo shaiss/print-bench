@@ -273,7 +273,8 @@ executed. The success comment is posted only after both of these are true:
 Before you end the turn:
 
 1. Check out `claude/issue-<N>-<slug>` (create it from the default branch
-   if you have not already). Any other name, including the default branch,
+   if you have not already — `git checkout -b` / `git switch -c` are
+   allowed; local only). Any other name, including the default branch,
    is not pushed.
 2. Commit the work. The delivery step commits the dirty files you left
    behind too — but only outside the protected prefixes. Both backlog-burn
@@ -298,6 +299,15 @@ Before you end the turn:
    `🚦 DECISION NEEDED`, or `🚢 DEFERRED` comment from this run is a hard
    stop: the delivery step does not bundle that work, does not push it,
    and does not post success.
+
+**Hard terminal rule (issue #962):** ending the turn is not itself an
+outcome. Before you stop you MUST have either (a) HEAD on
+`claude/issue-<N>-*` with the commits to deliver, or (b) posted an
+explicit first-line stop (`🚢 DECLINED` / `🚦 DECISION NEEDED` /
+`🚢 DEFERRED`). Finishing on `main` (or any other branch) with no stop
+is a failed ship — the workflow's post-agent check will red the run.
+claude-code-action's `subtype: success` only means the model ended
+without an API error; it does not mean the burn delivered.
 
 Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
 The delivery workflow opens it, and that PR does not exist yet when your

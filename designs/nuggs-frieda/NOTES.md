@@ -33,10 +33,13 @@ made of letters … the word is Frieda. you can mix case … as needed."
 | 2026-08-11 | **Double wall: the letters are a cage OUTSIDE a full standard tube, never the bore wall itself** | The load-bearing decision. A stencil tube (letters as the enclosure wall) puts every inter-glyph void within the animal's reach: anything between ~10 mm (cage-bar safe) and 70 mm (N1 full-passage floor) is a head-trap, and every glyph edge becomes reachable chew-initiation geometry (N6). Legible 55 mm letters cannot keep every void under 10 mm. The double wall keeps the bore a continuous standard NUGGS bore and every letter edge outside the enclosure, in the same reachability class as the straight's outer wall |
 | 2026-08-11 | All-caps FRIEDA, not mixed case | Structure, not taste: every capital spans baseline to cap line, so every glyph anchors into both rails; x-height glyphs would miss the cap rail and a lowercase i's dot floats. The glyph table refuses non-caps with this argument in the message |
 | 2026-08-11 | Glyphs are conformal: radial prisms intersected with the cage annulus | A flat letter chord across a 25°+ arc has a multi-mm sagitta — proud outside or shy inside. The intersection makes every letter exactly `sleeve_t` thick, following the cylinder |
-| 2026-08-11 | `letter_kern` welds F→R and E→D (8 mm each) | F's and E's free arm ends otherwise print as ~25 mm one-end-anchored cantilevers — the arm underside is a flat face appearing in mid-air. Welded to the next stem it becomes a short two-end bridge. The `weld-fr` preview camera watches this junction |
+| 2026-08-11 | `letter_kern` welds F→R and E→D (was 8 mm each; now 12 + mid-arm rib) | F's and E's free arm ends otherwise print as ~25 mm one-end-anchored cantilevers — the arm underside is a flat face appearing in mid-air. Welded to the next stem it becomes a short two-end bridge. The `weld-fr` preview camera watches this junction |
+| 2026-10-23 | `letter_kern` 8→12 on F→R and E→D; mid-arm `weld_rib` | Jane round on `1013ffa`: fresh renders (not only committed previews) showed E as a three-tine comb and F's middle arm 3–5 mm short of R on the outer face — flat radial prisms meet at an angle, so kern that lands the top into the rail/neighbour can still leave the shorter middle arm open outside. Fix: kern 8→12 plus a circumferential `weld_rib` (rotate_extrude in the cage annulus at mid-arm height, spanning centre-to-centre + margin; no bore protrusion). A flat-prism arm extender cannot close a circumferential gap. Wordpair coupon prints the F→R junction for plastic confirmation |
 | 2026-08-11 | Base/cap rails inset 0.2 mm radially from the letter faces | No rail surface is ever coincident with a glyph surface; coincident cylinder pairs have produced non-watertight meshes in this repo twice (`nuggs_sector()` header, nuggs-yard defect 3) |
-| 2026-08-11 | Cage skirts are 50° cones, rooted 0.8 mm into the tube wall | >45° keeps both skirt undersides self-supporting printed upright; 50° is the house angle. The root bite is the fuse (a kiss contact leaves CGAL counting bodies) |
+| 2026-08-11 | Cage skirts are 50° cones, rooted past the bore into the tube wall | >45° keeps both skirt undersides self-supporting printed upright; 50° is the house angle. The root bite is the fuse (a kiss contact leaves CGAL counting bodies). `cone_bite` was raised from 0.8 to wall+eps (2.41) in #542 so Manifold's bore cut trims a clean skirt root instead of exporting a zero-area bore triangle |
+| 2026-10-22 | No modelled brim ears; recommend a slicer brim and deburr | Removable ears cleared printcheck's small-bed-contact warning, but snipped ears leave nubs on the outer-sector tips that the animal can chew or rub — a welfare risk that depends on the owner deburring. Letter_kern welds, upright-on-port orientation, and `cone_bite = 2.41` stay. |
 | 2026-08-11 | Marks engraved on the exposed tube bands, never on the cage | Same two rules as the straight: recessed never proud (N6), and only on faces that look at the room. Bottom band: `NUGGS PORT R1`; top band: `MAX RUN 360MM` / `COUPLINGS DONT RESET` — this module *will* mate with more of itself, so the per-run rule rides on the part |
+| 2026-10-23 | `mark_h` 5→8, `mark_adv` 4.8→7.2 | Engraved welfare text at 5 mm was ~0.5 mm grooves — coin-flip on a 0.4 nozzle. 8 mm keeps stroke ≥ 0.8 mm so MAX RUN / COUPLINGS DONT RESET stay legible; advance scaled with height. Top mark band still has ~22 mm of tube (assert holds at `mark_band` 17) |
 | 2026-08-11 | `cap_factor = 0.688` (Liberation Sans Bold) with a font-fallback assert | If the font falls back (DejaVu Bold, 0.729) glyph tops move +3.3 mm; the CAGE FIT assert proves they still land inside the 6 mm cap rail, so a fallback render fuses instead of poking through |
 
 ## Defects found this session
@@ -49,23 +52,34 @@ made of letters … the word is Frieda. you can mix case … as needed."
    design's cage from `--render` shots or the exported STL, not from F5
    previews.
 
-## Gate results (2026-08-11, local CGAL 2021.01)
+## Gate results (2026-10-23, issue #542 — weld close + mark_h + wordpair)
 
-- **bridge**: 76/100 PRINTABLE WITH CAVEATS — watertight, 1 body,
-  24,416 triangles, slices clean (204.6 g PLA-equivalent, ~15 h 45 m).
-  The caveats, all accepted: 3,822 mm² of >45° downward surface (the port
-  sectors, the cap-rail underside between glyph tops, arm undersides and
-  counter ceilings — all short two-end bridges by construction, none
-  cantilevers after the kern welds); 527 mm² bed contact on the sector tips
-  (identical to the nuggs straight — brim recommended); 4 zero-area
-  triangles (the known `nuggs_port()` sliver class, nuggs backlog B1b).
-- **coupon**: 84/100 PRINTABLE WITH CAVEATS — watertight, 2 bodies (two
-  stubs, intentional), slices clean (66.5 g, ~5 h).
+Reeve's daily score-regression detector reads CI `gate-run` telemetry, which
+is rendered with **openscad-nightly `--backend=manifold`**. Local
+`openscad` 2021.01 (CGAL) differs on the library-port sliver class — report
+both. Manifold nightly was not available in this session; CGAL numbers below
+are measured. Prior Manifold bridge was **84/100** on `1013ffa` (same
+overhang area 1343 mm² and bed contact ~528 mm² this edit does not change) —
+expect CI Manifold ≥80.
+
+| Part | Renderer | Score | Remaining warnings |
+|---|---|---|---|
+| bridge | CGAL 2021.01 (local) | **76/100** | 1% unbridgeable overhang (1343 mm²) — letter-arm / weld-rib bridges; accepted. Small bed contact (527 mm² / 5% footprint) — slicer brim recommended. 8 zero-area triangles (shared `nuggs_port()` sliver class + rib unions; Manifold clears the port class) |
+| bridge | Manifold nightly (CI / prior) | **84/100** on `1013ffa`; re-check on this head | same overhang + bed contact class |
+| coupon | CGAL 2021.01 | **92/100** | 4 zero-area `nuggs_port()` triangles; 2 intentional bodies |
+| wordpair coupon | CGAL 2021.01 | **92/100** | thin-wall sample on letter edges (coupon only) |
+
+Before #542 the bridge was 76/100 on both renderers. Path 1 cleared the
+Manifold bore degenerate (`cone_bite` past the bore). Removable brim ears
+briefly cleared bed-contact (Manifold 92) but were removed on PM ruling;
+with `cone_bite` alone Manifold is 84 and CGAL is 76. This round's weld rib
+does not change the overhang mm² or bed-contact class.
+
 - **Bore floor measured on the STL**, not trusted from the assert (the
   nuggs-yard lesson): inscribed bore ≥ **79.96 mm** at every enclosed
   station (z = 0, 20, 60, 75, 100, 140), against the 70 mm floor.
 
-## Print this first — the coupon
+## Print this first — the coupons
 
 `nuggs-frieda-coupon.scad` prints two bore-clean 25 mm port stubs
 (`nuggs_neck`) side by side. Mate them by hand: push at the insertion
@@ -77,6 +91,17 @@ clocking, twist either way.
   `lib/nuggs-coupling-mates.conf`, never yet tuned in plastic).
 - Caliper the bore: under 79.0 mm means your printer is shrinking.
 
+`nuggs-frieda-wordpair-coupon.scad` prints junction 0–1 of whatever `name`
+is set (`part = "wordpair"` — include-and-override, no copied geometry).
+For FRIEDA that is F→R at the production kern; a rename prints *that*
+name's glyphs 0–1. Hold it up to the light along the whole junction height
+(the mid-arm rib covers only ~0.46–0.70 of cap height): the free arm must
+fuse into the next stem (same check `previews/weld-fr.png` watches for
+F→R). On the finished bridge, give every other junction — including
+FRIEDA's E→D — the same light check. CI's printcheck sticky prices the
+coupon at **2 h 25 m / 26.16 g** against the ~16 h / ~206 g bridge; brim
+the coupon too (one curved wall-arc under a ~65 mm part).
+
 ## Print settings
 
 - **Orientation:** upright, bore axis vertical, standing on one port's
@@ -84,21 +109,35 @@ clocking, twist either way.
   self-supporting.
 - **Supports:** none. Letter-band internals (arm undersides, counter
   ceilings, the cap-rail underside between glyph tops) print as short
-  bridges anchored at both ends — that is what the F→R / E→D welds are for.
-- **Material:** PETG preferred (N7 thermal reasoning); PLA prints the same
-  geometry.
+  bridges anchored at both ends — that is what the F→R / E→D welds and
+  mid-arm ribs are for. Keep auto-supports OFF: supports under the letter
+  band land in the 1.6 mm sleeve gap and cannot be removed.
+- **Material:** PETG preferred (N7 thermal reasoning); PLA prints the letter
+  cage cleaner. In PETG expect slight underside droop on the letter bridges
+  and weld ribs — cosmetic, not a failed print; slow bridge speed on the
+  letter band and weld ribs.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle; tube wall 2.4 mm = 6 perimeters,
-  cage shell 2.4 mm.
-- **Brim:** recommended. The part stands 180 mm tall on three sector tips
-  with the cage's mass at mid-height.
+  cage shell 2.4 mm. Almost all walls — no infill to hide under-extrusion;
+  calibrate flow before the ~16 h bridge.
+- **Seam:** Back or scarfed — avoids a full-height ridge on the word or a
+  port sector.
+- **Brim:** a slicer brim is recommended on the bridge (180 mm tall on three
+  small sector tips) and on the wordpair coupon (one curved wall-arc under
+  a ~65 mm part). After the print: snap the brim, then deburr each sector
+  tip until a fingernail drags across without catching.
+- **Orientation:** upright as rendered. Bridge on sector tips; wordpair on
+  its wall-arc.
 
 ## Open items
 
+*(Numbered **O1–O3** — the charter's F1–F3 are this module's added
+non-negotiables in `PM.md`; do not reuse those letters here.)*
+
 | # | Item | Why |
 |---|---|---|
-| F1 | Print the coupon and tune `port_tol` | Inherited standing item from the standard: the fit is proven in geometry, not yet in plastic |
-| F2 | Print the bridge and inspect the F→R / E→D weld bridges at 0.2 mm layers | The weld turns cantilevers into bridges; bridge quality over ~8-15 mm spans at 2.4 mm thickness is printer-dependent |
-| F3 | Other names | `name` + the A–Z advance table make any capital name renderable; the wrap assert bounds length (~7-8 caps at `letter_size = 80`, more at smaller sizes). A per-name kern review is manual: any glyph with free-ended horizontal arms (E, F, and to a lesser degree L, T) wants a weld to its right neighbour |
+| O1 | Print the coupon and tune `port_tol` | Inherited standing item from the standard: the fit is proven in geometry, not yet in plastic |
+| O2 | Print the wordpair coupon, then the bridge; inspect weld bridges at 0.2 mm layers along the whole junction height (incl. E→D on the bridge) | The weld turns cantilevers into bridges; bridge quality over ~8-15 mm spans at 2.4 mm thickness is printer-dependent. Wordpair coupon rehearses junction 0–1 of `name` (~2 h 25 m / 26 g per CI sticky) |
+| O3 | Other names | `name` + the A–Z advance table make any capital name renderable; the wrap assert bounds length (~7-8 caps at `letter_size = 80`, more at smaller sizes). A per-name kern review is manual: any glyph with free-ended horizontal arms (E, F, and to a lesser degree L, T) wants a weld to its right neighbour. Names *ending* on E/F/L/T have no right-hand weld target — check junctions against `previews/weld-fr.png`. The wordpair coupon follows `name` (glyphs 0–1); hold the printed bridge to the light for the other junctions |
 
 ## Product-shot provenance
 

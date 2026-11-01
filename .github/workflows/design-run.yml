@@ -1206,6 +1206,14 @@ jobs:
         # off-issue and non-allowlisted intents are dropped with a
         # ::warning:: and never posted. It runs BEFORE the lock cleanup so
         # the claim (and any stop) is on the thread lock cleanup reads.
+        #
+        # #895: a hung gh POST here must die before the settle job does, so
+        # the always() cleanup below (strip labels + SHIP-LOCK withdrawal)
+        # still runs. Arithmetic: job timeout 10 − cleanup margin 4 = 6 →
+        # this step is 5 (< 6). Preceding checkout/download are themselves
+        # capped at 2 each; the invariant is the hung-apply case Cipher
+        # named on #892, not the stacked-worst sum of every prior step.
+        timeout-minutes: 5
         if: >-
           always()
           && needs.run.outputs.enabled == 'true'

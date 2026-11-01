@@ -1,5 +1,20 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(git checkout -b claude/issue-*)",
+      "Bash(git checkout -b claude/issue-:*)",
+      "Bash(git switch -c claude/issue-*)",
+      "Bash(git switch -c claude/issue-:*)",
+      "Bash(git branch claude/issue-*)",
+      "Bash(git branch claude/issue-:*)",
+      "Bash(git commit:*)",
+      "Bash(git add:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git symbolic-ref:*)"
+    ],
     "deny": [
       "Bash(git push)",
       "Bash(git push:*)",

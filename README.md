@@ -85,6 +85,7 @@ _These parts come off the bed ready to move — free each one as its card says, 
 | Design | |
 |---|---|
 | <a href="designs/alcove-rod-socket/"><img src="designs/alcove-rod-socket/previews/contact-sheet.png" width="320" alt="alcove-rod-socket previews"></a> | **[alcove-rod-socket](designs/alcove-rod-socket/)** — A parametric, two-part **screw-together end socket** for a 40 mm round curtain/closet rod spanning a recess or alcove, used in pairs: a wall boss screwed flat to each facing wall, the rod's ends plugging into knurled collars that hand-thread onto the bosses. Removing the rod for washing = unthread the collar, no tools. Brief: issue #355 (reworked from MakerWorld #1200171, a 2-part fixed-STL 25 mm holder, scaled intent not mesh). |
+| <a href="designs/battery-caddy/"><img src="designs/battery-caddy/previews/contact-sheet.png" width="320" alt="battery-caddy previews"></a> | **[battery-caddy](designs/battery-caddy/)** — A one-piece wall-mounted AA/AAA cell caddy (brief: issue #704). Vertical lanes store a gravity-fed column of cells; the bottom cell of each lane is pinched by printed compliant spring blades and pulls out one-handed against a tunable release force. 4 × AA + 4 × AAA on a spine, 2 × M4 wall screws. Style: `workshop-utility`. |
 | <a href="designs/calibration-cube/"><img src="designs/calibration-cube/previews/contact-sheet.png" width="320" alt="calibration-cube previews"></a> | **[calibration-cube](designs/calibration-cube/)** — Simple dimensional-accuracy test print; also serves as the repo's starter design demonstrating the parameter conventions. |
 | <a href="designs/desiccant-capsule/"><img src="designs/desiccant-capsule/previews/contact-sheet.png" width="320" alt="desiccant-capsule previews"></a> | **[desiccant-capsule](designs/desiccant-capsule/)** — Refillable two-part capsule for loose silica gel beads, lived-in filament dry-boxes. Perforated body lets air/moisture reach the beads; screw-on lid with real threads (not press-fit) and a ribbed grip edge so it can be opened with dry-box gloves on. Must print on FDM with no supports on either part. |
 | <a href="designs/extrusion-shelf-bracket/"><img src="designs/extrusion-shelf-bracket/previews/contact-sheet.png" width="320" alt="extrusion-shelf-bracket previews"></a> | **[extrusion-shelf-bracket](designs/extrusion-shelf-bracket/)** — A shelf corner bracket that locks into the **side slot of standard 2020 T-slot aluminum extrusion**: hammer-head lugs on the back of the plate slide along the slot, so a shelf board attaches anywhere along a rail with no T-nuts and no frame teardown. Horizontal arm carries the board between 45° gussets and a front stop lip. One printable part + a fit coupon. Brief: issue #283 (design-brief, `workshop-utility` style). |
@@ -392,6 +393,13 @@ surfaces studies awaiting a read live in
     the HTML does not count; those jobs share github-actions[bot];
     a lock from an earlier coach run does not either; claude-code-action
     exits 0 on a denial-only turn; issue #806)
+  - `backlog-burn-ship-check.sh` — post-agent outcome gate for
+    `backlog-burn.yml` (issue #962): fails clearly unless HEAD is on
+    `claude/issue-<N>-*` or the thread carries a trusted
+    `🚢 DECLINED` / `🚦 DECISION NEEDED` / `🚢 DEFERRED` stop, and prints
+    bounded redacted ship diag (result subtype, `permission_denials`
+    tool names only, final message capped ~1000 chars) without enabling
+    `show_full_output`; `--selftest` run by check.sh
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):
