@@ -337,21 +337,27 @@ module seam_fit(ctrl = false) {
   }
 }
 
-// "Print this first": the male ring on a thin chamfered flange (the seam face
+// "Print this first": the male ring on a chamfered flange (the seam face
 // stand-in) beside a chamfered puck carrying the female cut, mouth UP the way
 // the top half prints — both from the production seam modules, nothing copied.
 // Tune seam_tol on this pair before printing four ball halves.
+// Male flange is tall enough that the thread lead-in clears the bed's
+// first-layer squish / elephant-foot zone (a 1.5 mm flange sat the start of
+// the ring inside that influence and could fake a "too tight" reading the
+// production half — whose ring prints at the *top* of a pole-down half —
+// never gets). Not a full flip onto supports: taller flange only.
 module seam_coupon() {
   gap      = 6;
+  flange_h = 4.0;                            // clears first-layer squish (~1–2 mm zone)
   flange_r = _seam_r_maj + seam_tol + 2;     // 2 mm past the female crest, like the seam face
   puck_r   = _seam_r_maj + seam_tol + 3;     // 3 mm of wall around the groove crest
   puck_h   = _seam_boss_top;
   translate([-(puck_r + gap), 0, 0]) {
     difference() {
-      chamfered_cylinder(d = 2 * flange_r, h = 1.5, chamfer1 = 0.6, chamfer2 = 0);
-      translate([0, 0, -1]) cylinder(r = _seam_r_in, h = 4, $fn = 96);
+      chamfered_cylinder(d = 2 * flange_r, h = flange_h, chamfer1 = 0.6, chamfer2 = 0);
+      translate([0, 0, -1]) cylinder(r = _seam_r_in, h = flange_h + 2, $fn = 96);
     }
-    translate([0, 0, 1.5 - 0.01]) _seam_neck();
+    translate([0, 0, flange_h - 0.01]) _seam_neck();
   }
   translate([puck_r + gap, 0, puck_h]) rotate([180, 0, 0])
     difference() {

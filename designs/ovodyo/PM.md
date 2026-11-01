@@ -96,7 +96,7 @@ on geometry-true renders until a PM deliberately asks for one.
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
 | Owner `/decide yes` on #768 / merge PR #914? | Yes (merge) | Stay ready-for-review; geometry + page honesty land together |
-| Household measure for ~20 g ball heft? | No | Keep grams until someone weighs a spoonful once |
+| Household measure for ~20 g ball heft? | No — retired | Weigh the felt wrap on the pour scale (page clause); grams stay until a builder records one |
 | Bumper-recess lead-in chamfer on next base touch? | No | Queued to #603 |
 
 ## Decision log (recent)
@@ -136,3 +136,11 @@ on geometry-true renders until a PM deliberately asks for one.
 | 2026-10-24 | #601 eyetest gains showroom-squint evidence (render "4"/"00" misread) + rim-wear look | Drik / PM queue |
 | 2026-10-24 | Pour-order single path; brim bumper-recess hedge; smooth-plate pole stencil; ~1700-ball shopping; fingernail grip; embed slot-corner | Jane/Drik / PM triage |
 | 2026-10-24 | #604 test note: bare-keel `ci.cog` stance — if STABLE, pour optional on the page | Drik hunch / PM queue |
+| 2026-10-30 | Head `3f8ac07` landed: `slot-window` caption reworded to "about a fifth of the frame" (three-description sync); Care additions (seam-ring expectation, wisp finish line, putty-consumable/coaster, numeral-rotation wear, felt re-centre); #601 eyetest gains (foreshortened glance, close-by-palm lever check); render one-looks; coupon male top-down as priority follow-up | PM triage / owner quick round |
+| 2026-10-30 | Queue: Ø1.6 mm ballast-pocket vent → #603; red-felt demo photo → #601 evidence | Jane/Drik / PM triage |
+| 2026-10-31 | **Docs-convergence declared** (Drik U2 / PM triage at `33a654f`): further ovodyo rounds are physical evidence (print coupon + one ball; #601 reading-distance photo set), not page wordsmithing — unless a reviewer finds a defect | PM triage / owner round-shape ruling |
+| 2026-10-31 | **#601 photo evidence promoted** above further page-prose rounds; eyetest conditions recorded (seated ~45°, ~60 cm, ceiling + low-side glare; faces "00"/"08"; `text()` baseline before stencil swap; bridge-bar wear) | Drik/Jane / PM triage |
+| 2026-10-31 | **Coupon fidelity landed:** `seam_coupon()` male flange raised 1.5 → 4.0 mm so the thread lead-in clears bed first-layer squish (taller flange, not a full flip); README first-layer-squish hedge deleted | Jane/Drik / PM triage act-now |
+| 2026-10-31 | Jane's 1.5–2.5 mm ridge-chord sag expectation recorded as a **field-test check** against the page's ~1 mm — do not promote unmeasured | Jane bench-sense / PM triage |
+| 2026-10-31 | Queue notes: #768 measure slot-to-plaque wall strip (≥2 mm fine / <1.5 mm nudge); #603 Jane ×2 endorsements (vent + bumper chamfer); #599 PEI-plate note for insert show faces; #600 `base-core` accent as cheapest two-tone | Jane/Drik / PM triage |
+| 2026-10-31 | Owner option at freeze look: new `hero-wide` camera line (never reframe frozen hero). Open decisions unchanged — owner `/decide`/merge on #768/#914 remains the blocking call | Jane decline → owner option / PM triage |
