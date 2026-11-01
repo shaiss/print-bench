@@ -54,6 +54,13 @@ renderer's inside-face colour, not a second filament. Balls sit on their pole
 pentagons in front of the base (clear of the wing tips), the interim display
 until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained mount. The two-tone hero above is the intent.*
 
+![What ships, from the side](previews/what-ships-side.png)
+
+*The same single-material set from low and to the side, so you can see it's
+separate parts: both balls rest on a pole pentagon on the same desk line as the
+truss underside, with a gap between them and the base. Nothing is fused and
+nothing hangs off the truss.*
+
 ![4-view contact sheet](previews/contact-sheet.png)
 
 ![A single ball](previews/hours-ball.png)
@@ -131,6 +138,25 @@ segment + both ends + core + the plugs on a second plate that packs tightly —
 lay it out in the slicer first (the coffee-break plate). If your printer's
 profile greys out the front-left corner (stock X1/P1 carve an exclusion there),
 nudge the layout up-left before slicing.
+
+**Print budget** (rounded from the CI slice estimate at this head, PLA, stock
+profile; re-run the slicer for your own printer):
+
+| Part | Qty | ≈ time each | ≈ filament each |
+|---|---|---|---|
+| `hours-top` | 1 | 3 h | 40 g |
+| `hours-bottom` | 1 | 3½ h | 40 g |
+| `minutes-top` | 1 | 3¼ h | 30 g |
+| `minutes-bottom` | 1 | 3¾ h | 40 g |
+| `base-segment` | 1 | 1½ h | 10 g |
+| `base-end` | 2 | 1 h | 10 g |
+| `base-core` | 1 | 3 h | 30 g |
+| `base-plug` | 4 | ~1 min | <1 g |
+| seam coupon (print first) | 1 | 1 h | 10 g |
+
+The production set comes to **about 20 h and ~210 g** of PLA; with the seam
+coupon it's **about 21 h and ~220 g**. That's a weekend of print time spread
+over two plates plus the coupon, not one evening.
 
 The base drivetrain (gear-trains, steppers, bevels, PCB) and the balls' red
 interior are **preview-only** — colours are ignored on STL export, so they are

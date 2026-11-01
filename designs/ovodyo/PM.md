@@ -82,6 +82,7 @@ new region = new camera line.
 |---|---|---|---|---|
 | hero | assembled clock intent (two-tone) | three-quarter | red preview + white | assembled |
 | what-ships | single-material honesty | three-quarter | monochrome | `part="what-ships"` |
+| what-ships-side | separate parts on one ground line (companion) | low side, ortho | monochrome | `part="what-ships"` |
 | hours-ball | one faceted die, numerals + slot | three-quarter | shell | `part="hours-ball"` |
 | slot-path | #768 corner-crossing band | near-equator | shell (`render`) | `part="hours-ball"` |
 | slot-window | aperture as a window | into the slot | OpenCSG red core | `part="hours-ball"` |
@@ -95,7 +96,6 @@ on geometry-true renders until a PM deliberately asks for one.
 
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
-| Owner `/decide yes` on #768 / merge PR #914? | Yes (merge) | Stay ready-for-review; geometry + page honesty land together |
 | Household measure for ~20 g ball heft? | No — retired | Weigh the felt wrap on the pour scale (page clause); grams stay until a builder records one |
 | Bumper-recess lead-in chamfer on next base touch? | No | Queued to #603 |
 

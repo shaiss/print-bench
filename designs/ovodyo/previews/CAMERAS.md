@@ -37,3 +37,8 @@ fixed once reviewed; a new region gets a new line).
   wing tips — an earlier on-axis placement nested the nose under the pole).
   CGAL `render` (inside-face green may still show in the voids — renderer tint,
   not filament). Beside the v0 banner; must not replace the hero.
+- **what-ships-side** — companion to the frozen `what-ships` shot, added after
+  Jane's PR #975 round read the balls as merged into the truss: near-horizontal,
+  turned 75° and orthographic, so both balls rest on their pole pentagons on the
+  same line as the truss chord undersides, with daylight between balls and base.
+  It proves what the `what-ships` caption claims. New line; `what-ships` is untouched.
