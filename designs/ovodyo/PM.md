@@ -82,7 +82,7 @@ new region = new camera line.
 |---|---|---|---|---|
 | hero | assembled clock intent (two-tone) | three-quarter | red preview + white | assembled |
 | what-ships | single-material honesty | three-quarter | monochrome | `part="what-ships"` |
-| what-ships-side | separate parts on one ground line (companion) | low side, ortho | monochrome | `part="what-ships"` |
+| what-ships-side | separate parts on one ground line (companion) | desk-level side, ortho | monochrome | `part="what-ships"` |
 | hours-ball | one faceted die, numerals + slot | three-quarter | shell | `part="hours-ball"` |
 | slot-path | #768 corner-crossing band | near-equator | shell (`render`) | `part="hours-ball"` |
 | slot-window | aperture as a window | into the slot | OpenCSG red core | `part="hours-ball"` |
@@ -144,3 +144,7 @@ on geometry-true renders until a PM deliberately asks for one.
 | 2026-10-31 | Jane's 1.5–2.5 mm ridge-chord sag expectation recorded as a **field-test check** against the page's ~1 mm — do not promote unmeasured | Jane bench-sense / PM triage |
 | 2026-10-31 | Queue notes: #768 measure slot-to-plaque wall strip (≥2 mm fine / <1.5 mm nudge); #603 Jane ×2 endorsements (vent + bumper chamfer); #599 PEI-plate note for insert show faces; #600 `base-core` accent as cheapest two-tone | Jane/Drik / PM triage |
 | 2026-10-31 | Owner option at freeze look: new `hero-wide` camera line (never reframe frozen hero). Open decisions unchanged — owner `/decide`/merge on #768/#914 remains the blocking call | Jane decline → owner option / PM triage |
+| 2026-11-01 | **`what-ships-side` re-framed while unfrozen** (Jane at `1f46774`: at 86°/75° the two balls stacked into one blob): now 90° elevation (one literal desk line), rz 42°, ortho; `what-ships` untouched. Owner-at-freeze alternative: Drik's receding matched pair ("two dice, one of each") | Jane/Drik / PM triage act-now |
+| 2026-11-01 | `what-ships-side` caption gains the inside-face green clause its siblings carry (renderer tint, not filament); caption freezes with the camera | Jane / PM triage act-now |
+| 2026-11-01 | Queued: Care line on leveling the pole rim (v0 always rests on a bed face) — rides the first FIELD-TEST / #601 prose touch with the spill line and leftover-shot parenthetical | Jane bench-sense / PM triage |
+| 2026-11-01 | Standing guard: v0 copy never sells the 10 mm slot as the interaction — it is a grip assist and a look. #604 note: landing behavior (a die that parks crooked reads as broken) is v0 hot-path, not post-#604 | Drik R3 / PM triage |

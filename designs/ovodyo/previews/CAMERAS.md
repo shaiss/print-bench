@@ -38,7 +38,10 @@ fixed once reviewed; a new region gets a new line).
   CGAL `render` (inside-face green may still show in the voids — renderer tint,
   not filament). Beside the v0 banner; must not replace the hero.
 - **what-ships-side** — companion to the frozen `what-ships` shot, added after
-  Jane's PR #975 round read the balls as merged into the truss: near-horizontal,
-  turned 75° and orthographic, so both balls rest on their pole pentagons on the
-  same line as the truss chord undersides, with daylight between balls and base.
-  It proves what the `what-ships` caption claims. New line; `what-ships` is untouched.
+  Jane's PR #975 round read the balls as merged into the truss: level (90°
+  elevation), turned 42° and orthographic, so both balls rest on their pole
+  pentagons on one desk line with the truss chord undersides, standing apart with
+  daylight between them. Re-framed from 86°/75° while still unfrozen, because at
+  that turn the two balls stacked into one read. It proves what the `what-ships`
+  caption claims. New line; `what-ships` is untouched. Inside-face green is
+  renderer tint, not filament.

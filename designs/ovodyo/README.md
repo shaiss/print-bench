@@ -56,10 +56,11 @@ until [#604](https://github.com/shaiss/print-bench/issues/604) lands a retained 
 
 ![What ships, from the side](previews/what-ships-side.png)
 
-*The same single-material set from low and to the side, so you can see it's
-separate parts: both balls rest on a pole pentagon on the same desk line as the
-truss underside, with a gap between them and the base. Nothing is fused and
-nothing hangs off the truss.*
+*The same single-material set from desk level and to the side, so you can see
+it's separate parts: both balls rest on a pole pentagon on the same desk line as
+the truss underside, standing apart from each other in front of the base.
+Nothing is fused and nothing hangs off the truss. Green inside the cuts is the
+renderer's inside-face colour, not a second filament.*
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
