@@ -21,10 +21,11 @@ fixed once reviewed; a new region gets a new line).
   frame: adjacent numeral = 14 mm cap height; slot = 10 mm wide. The tight
   pass-by a numeral plaque is the measured #768 clearance. Added after Drik R2
   noted `slot-corner` framed numerals; new line, not a reframe.
-- **slot-window** — looking into the 10 mm helical window (aperture as a
-  window, not a slit). OpenCSG so preview-coloured ball_core can read through
-  the cut; cut walls may tint green (renderer, not filament). New line;
-  reframed while unfrozen so the aperture fills the frame.
+- **slot-window** — numeral close-up: the hours "8" sits on its face (~a fifth of the
+  frame); the 10 mm helical slot cuts across the lower half. OpenCSG so
+  preview-coloured ball_core can read through; cut walls may tint green
+  (renderer, not filament). New line; reframed while unfrozen; caption synced
+  to the frozen framing (camera held).
 - **base-mech** — the base drivetrain alone: geared stepper + reduction train at
   each pod, bevel take-off up each stalk, central electronics bay.
 - **base-mech-in-situ** — the same drivetrain seated in the truss so the gears
@@ -36,3 +37,13 @@ fixed once reviewed; a new region gets a new line).
   wing tips — an earlier on-axis placement nested the nose under the pole).
   CGAL `render` (inside-face green may still show in the voids — renderer tint,
   not filament). Beside the v0 banner; must not replace the hero.
+- **what-ships-side** — companion to the frozen `what-ships` shot, added after
+  Jane's PR #975 round read the balls as merged into the truss: level (90°
+  elevation), turned 25° and orthographic, so both balls rest on their pole
+  pentagons on one desk line with the truss chord undersides, standing apart with
+  daylight between them. Re-framed from 86°/75° and then 42° while still
+  unfrozen, because at those turns the two balls overlapped into one read; frozen
+  at 25°. The frozen `what-ships` still reads the balls as touching the truss, so
+  this is the page's only separation witness: don't soften or drop it. It proves
+  what the `what-ships` caption claims. New line; `what-ships` is untouched. Inside-face green is
+  renderer tint, not filament.

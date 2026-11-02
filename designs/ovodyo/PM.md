@@ -82,6 +82,7 @@ new region = new camera line.
 |---|---|---|---|---|
 | hero | assembled clock intent (two-tone) | three-quarter | red preview + white | assembled |
 | what-ships | single-material honesty | three-quarter | monochrome | `part="what-ships"` |
+| what-ships-side | separate parts on one ground line (companion) | desk-level side, ortho | monochrome | `part="what-ships"` |
 | hours-ball | one faceted die, numerals + slot | three-quarter | shell | `part="hours-ball"` |
 | slot-path | #768 corner-crossing band | near-equator | shell (`render`) | `part="hours-ball"` |
 | slot-window | aperture as a window | into the slot | OpenCSG red core | `part="hours-ball"` |
@@ -95,8 +96,7 @@ on geometry-true renders until a PM deliberately asks for one.
 
 | Question | Blocking? | Assumption if unanswered |
 |---|---|---|
-| Owner `/decide yes` on #768 / merge PR #914? | Yes (merge) | Stay ready-for-review; geometry + page honesty land together |
-| Household measure for ~20 g ball heft? | No | Keep grams until someone weighs a spoonful once |
+| Household measure for ~20 g ball heft? | No — retired | Weigh the felt wrap on the pour scale (page clause); grams stay until a builder records one |
 | Bumper-recess lead-in chamfer on next base touch? | No | Queued to #603 |
 
 ## Decision log (recent)
@@ -136,3 +136,19 @@ on geometry-true renders until a PM deliberately asks for one.
 | 2026-10-24 | #601 eyetest gains showroom-squint evidence (render "4"/"00" misread) + rim-wear look | Drik / PM queue |
 | 2026-10-24 | Pour-order single path; brim bumper-recess hedge; smooth-plate pole stencil; ~1700-ball shopping; fingernail grip; embed slot-corner | Jane/Drik / PM triage |
 | 2026-10-24 | #604 test note: bare-keel `ci.cog` stance — if STABLE, pour optional on the page | Drik hunch / PM queue |
+| 2026-10-30 | Head `3f8ac07` landed: `slot-window` caption reworded to "about a fifth of the frame" (three-description sync); Care additions (seam-ring expectation, wisp finish line, putty-consumable/coaster, numeral-rotation wear, felt re-centre); #601 eyetest gains (foreshortened glance, close-by-palm lever check); render one-looks; coupon male top-down as priority follow-up | PM triage / owner quick round |
+| 2026-10-30 | Queue: Ø1.6 mm ballast-pocket vent → #603; red-felt demo photo → #601 evidence | Jane/Drik / PM triage |
+| 2026-10-31 | **Docs-convergence declared** (Drik U2 / PM triage at `33a654f`): further ovodyo rounds are physical evidence (print coupon + one ball; #601 reading-distance photo set), not page wordsmithing — unless a reviewer finds a defect | PM triage / owner round-shape ruling |
+| 2026-10-31 | **#601 photo evidence promoted** above further page-prose rounds; eyetest conditions recorded (seated ~45°, ~60 cm, ceiling + low-side glare; faces minutes "00" / hours "8"; `text()` baseline before stencil swap; bridge-bar wear) | Drik/Jane / PM triage |
+| 2026-10-31 | **Coupon fidelity landed:** `seam_coupon()` male flange raised 1.5 → 4.0 mm so the thread lead-in clears bed first-layer squish (taller flange, not a full flip); README first-layer-squish hedge deleted | Jane/Drik / PM triage act-now |
+| 2026-10-31 | Jane's 1.5–2.5 mm ridge-chord sag expectation recorded as a **field-test check** against the page's ~1 mm — do not promote unmeasured | Jane bench-sense / PM triage |
+| 2026-10-31 | Queue notes: #768 measure slot-to-plaque wall strip (≥2 mm fine / <1.5 mm nudge); #603 Jane ×2 endorsements (vent + bumper chamfer); #599 PEI-plate note for insert show faces; #600 `base-core` accent as cheapest two-tone | Jane/Drik / PM triage |
+| 2026-10-31 | Owner option at freeze look: new `hero-wide` camera line (never reframe frozen hero). Open decisions unchanged — owner `/decide`/merge on #768/#914 remains the blocking call | Jane decline → owner option / PM triage |
+| 2026-11-01 | **`what-ships-side` re-framed while unfrozen** (Jane at `1f46774`: at 86°/75° the two balls stacked into one blob): now 90° elevation (one literal desk line), rz 42°, ortho; `what-ships` untouched. Owner-at-freeze alternative: Drik's receding matched pair ("two dice, one of each") | Jane/Drik / PM triage act-now |
+| 2026-11-01 | `what-ships-side` caption gains the inside-face green clause its siblings carry (renderer tint, not filament); caption freezes with the camera | Jane / PM triage act-now |
+| 2026-11-01 | **`what-ships-side` final reframe and FREEZE** (Jane/Drik at `43435a5`: at rz 42° the balls still overlapped, 110·cos42° ≈ 82 mm vs ~88 mm across-points): rz 42 → 25, target z 20 → 40, 90° elevation + ortho kept; three descriptions synced to the pixels. Last unfrozen touch; any later change is a new camera line. Pose-widening declined (would repaint frozen `what-ships`) | Jane/Drik / PM triage act-now |
+| 2026-11-01 | Standing guard: frozen `what-ships` still reads the balls as touching / against the truss, so `what-ships-side` is the page's only separation witness — never soften or drop it | Jane re-check / PM triage |
+| 2026-11-01 | Owner-at-freeze options on `what-ships-side` (taste, not a gate): Drik's trade-off — the balls sit in front of the truss, so the balls-vs-base daylight proof is not in this frame; alternatives are the receding matched pair, a turn past the truss's left end, or the caption carrying it | Drik / PM triage queue |
+| 2026-11-01 | Deliberate-until answers: felt heft stays ~20 g until a builder weighs one (rides #601); `base-mech-in-situ` pod clipping stays a disclosure until #604 re-seats it | Drik / PM triage |
+| 2026-11-01 | Queued: Care line on leveling the pole rim (v0 always rests on a bed face) — rides the first FIELD-TEST / #601 prose touch with the spill line and leftover-shot parenthetical | Jane bench-sense / PM triage |
+| 2026-11-01 | Standing guard: v0 copy never sells the 10 mm slot as the interaction — it is a grip assist and a look. #604 note: landing behavior (a die that parks crooked reads as broken) is v0 hot-path, not post-#604 | Drik R3 / PM triage |
