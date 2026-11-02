@@ -309,6 +309,18 @@ is a failed ship — the workflow's post-agent check will red the run.
 claude-code-action's `subtype: success` only means the model ended
 without an API error; it does not mean the burn delivered.
 
+**Permission denial → `🚢 DEFERRED` (issue #962):** if any tool call is
+denied by the permission backstop (for example `WebFetch`, or any other
+tool not on the allow list), do **not** keep walking and do **not** end
+quietly on `main`. Immediately post a stop whose first line is
+`🚢 DEFERRED — permission denial: <tool-name>` (tool name only — never
+inputs, args, URLs, or command text), withdraw any claim you posted
+(§0.6), and stop. The post-agent check maps `permission_denials > 0`
+with no delivery to this same deferred outcome when the marker is
+missing, so settle does not red with the opaque "neither delivered nor
+declined" failure. Never ask to widen the allow list mid-run — that
+needs a separate security clearance.
+
 Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
 The delivery workflow opens it, and that PR does not exist yet when your
 turn ends.

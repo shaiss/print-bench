@@ -14,6 +14,13 @@
 # the message text (MED-C on #963: shape redaction cannot beat /proc env
 # dumps or split/encoded keys).
 #
+# Denied-tool path (issue #962 follow-up): when the execution log lists
+# permission_denials and there is no ship branch / stop marker, this is a
+# clear 🚢 DEFERRED outcome — not the opaque settle failure. Live mode
+# posts the deferred stop (tool names only) so settle's decline detector
+# fires; offline / --comments-file mode accepts the same path without
+# posting. Never widens the allow list.
+#
 # Live:
 #   ./scripts/backlog-burn-ship-check.sh --issue <N> \
 #       [--run-started-at <ISO8601Z>] \
@@ -366,6 +373,133 @@ else:
 "
 }
 
+# Print sanitized unique denial tool names from an execution log, one per
+# line (stdout). Empty stdout = none listed. Same allowlist / scrub path as
+# print_ship_diag — never inputs/args.
+list_denial_tools() {
+  local log="$1"
+  if [[ -z "$log" || ! -f "$log" ]]; then
+    return 0
+  fi
+  BB_LOG="$log" "$PYTHON3" -I -c "
+${REDACT_PY}
+import json, os, re, sys
+
+path = os.environ['BB_LOG']
+try:
+    raw = open(path, encoding='utf-8', errors='replace').read()
+except OSError:
+    raise SystemExit(0)
+
+objs = []
+raw_s = raw.strip()
+if raw_s.startswith('['):
+    try:
+        objs = json.loads(raw_s)
+    except json.JSONDecodeError:
+        objs = []
+elif raw_s.startswith('{'):
+    try:
+        objs = [json.loads(raw_s)]
+    except json.JSONDecodeError:
+        objs = []
+if not objs:
+    dec = json.JSONDecoder()
+    idx = 0
+    while idx < len(raw_s):
+        while idx < len(raw_s) and raw_s[idx].isspace():
+            idx += 1
+        if idx >= len(raw_s):
+            break
+        try:
+            obj, end = dec.raw_decode(raw_s, idx)
+        except json.JSONDecodeError:
+            break
+        objs.append(obj)
+        idx = end
+
+denials = []
+for obj in objs:
+    if not isinstance(obj, dict):
+        continue
+    for key in ('permission_denials', 'permissionDenials'):
+        dens = obj.get(key)
+        if isinstance(dens, list):
+            denials.extend(dens)
+
+names = []
+for d in denials:
+    if isinstance(d, dict):
+        n = d.get('tool_name') or d.get('toolName') or d.get('name') or d.get('tool')
+        if n:
+            names.append(str(n))
+    elif isinstance(d, str) and d.strip():
+        m = re.match(r'(Bash\([^):\s]+|Write|Edit|Skill|mcp__\w+|NotebookEdit|Agent|WebFetch|WebSearch)', d.strip())
+        names.append(m.group(1) if m else d.strip().split()[0][:80])
+
+seen = set()
+for n in names:
+    tok = allowlist_diag_token(n)
+    if tok not in seen:
+        seen.add(tok)
+        print(tok)
+"
+}
+
+# Live: post a 🚢 DEFERRED stop for a denied-tool walk so settle's decline
+# detector fires (github.token → github-actions[bot]). Tool names only.
+# Returns 0 on success, 1 on post failure. Offline callers must not invoke.
+post_deferred_denial_stop() {
+  local issue="$1"
+  local tools_csv="$2"
+  local body
+  # Keep body free of workflow-command injection / secret shapes: tools_csv
+  # is already allowlist-sanitized. Cap length.
+  if [[ ${#tools_csv} -gt 200 ]]; then
+    tools_csv="${tools_csv:0:200}…"
+  fi
+  body="🚢 DEFERRED — permission denial: ${tools_csv}
+
+<!-- burn-deferred-denial:v1 -->
+
+The ship walk hit a permission denial and left no \`claude/issue-${issue}-*\` branch and no agent-posted stop. Deferred so settle classifies a clear deferred outcome instead of \"neither delivered nor declined\" (issue #962). Tool names only — no inputs/args. Do not widen the allow list without a separate security clearance."
+
+  unset GH_ENTERPRISE_TOKEN GH_FORCE_TTY HTTP_PROXY HTTPS_PROXY ALL_PROXY \
+    http_proxy https_proxy all_proxy \
+    SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
+    NODE_EXTRA_CA_CERTS || true
+  export GH_PAGER=cat PAGER=cat
+  unset GH_FORCE_TTY || true
+  local gh_cfg
+  gh_cfg="$(mktemp -d "${TMPDIR:-/tmp}/bb-gh-defer.XXXXXX")"
+  if [[ -L "$gh_cfg" || ! -d "$gh_cfg" ]]; then
+    echo "ship-check: refusing GH_CONFIG_DIR through a symlink for deferred post" >&2
+    return 1
+  fi
+  if [[ -n "$(ls -A -- "$gh_cfg" 2>/dev/null || true)" ]]; then
+    echo "ship-check: refusing non-empty GH_CONFIG_DIR for deferred post" >&2
+    rm -rf -- "$gh_cfg"
+    return 1
+  fi
+  chmod 700 "$gh_cfg" || true
+  local gh_bin=/usr/bin/gh
+  if ! GH_HOST=github.com GH_CONFIG_DIR="$gh_cfg" \
+      GH_PAGER=cat PAGER=cat \
+      GH_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN}}" \
+      env -u GH_FORCE_TTY \
+      "$gh_bin" api --hostname github.com \
+        --method POST \
+        "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+        -f body="$body" >/dev/null; then
+    rm -rf -- "$gh_cfg"
+    echo "ship-check: failed to post 🚢 DEFERRED for permission denial" >&2
+    return 1
+  fi
+  rm -rf -- "$gh_cfg"
+  echo "ship-check: posted 🚢 DEFERRED — permission denial: ${tools_csv}"
+  return 0
+}
+
 # NDJSON comments {body, created_at, login?, type?, id?} on stdin.
 # Optional $1 = run-started-at. Prints true/false.
 # Mirrors design-run-deliver hard_stop_from_comments / settle:
@@ -509,6 +643,16 @@ run_check() {
   echo "::group::backlog-burn ship outcome + diag (#${issue})"
   print_ship_diag "${log:-}"
 
+  # Denied-tool names from the same execution log (allowlisted). Used when
+  # HEAD is not a ship branch and no stop marker was posted — map to a
+  # clear 🚢 DEFERRED outcome instead of the opaque settle failure (#962).
+  local denial_tools_raw denial_tools_csv denial_count=0
+  denial_tools_raw="$(list_denial_tools "${log:-}" || true)"
+  if [[ -n "$denial_tools_raw" ]]; then
+    denial_count="$(printf '%s\n' "$denial_tools_raw" | grep -c . || true)"
+    denial_tools_csv="$(printf '%s\n' "$denial_tools_raw" | paste -sd';' -)"
+  fi
+
   # Behavioral selftest hook: record whether a planted GIT_EXEC_PATH survived
   # the startup unset to the git call site. symbolic-ref/rev-parse are often
   # builtins (so a helper plant would never run); the probe is the falsifiable
@@ -617,6 +761,25 @@ run_check() {
 
   if [[ "$on_branch" -eq 1 || "$on_stop" -eq 1 ]]; then
     echo "ship-check: ok (branch=${on_branch} stop=${on_stop})"
+    return 0
+  fi
+
+  # Denied-tool → clear deferred outcome (issue #962). Prefer an
+  # agent-posted stop; when missing, post one in live mode so settle's
+  # decline detector fires, and accept offline (--comments-file) without
+  # posting. Never treat a denial as the opaque "neither delivered nor
+  # declined" failure.
+  if [[ "$denial_count" -gt 0 ]]; then
+    echo "ship-check: permission_denials=${denial_count} tools=${denial_tools_csv} with no ship branch/stop — deferred outcome"
+    if [[ -z "$comments_file" && -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+      if ! post_deferred_denial_stop "$issue" "$denial_tools_csv"; then
+        echo "::error::backlog-burn ship walk hit permission denial (${denial_tools_csv}) but could not post 🚢 DEFERRED — refusing opaque success (issue #962)"
+        return 1
+      fi
+    else
+      echo "ship-check: offline/no-token — accepting deferred outcome without posting"
+    fi
+    echo "ship-check: ok (deferred-on-denial tools=${denial_tools_csv})"
     return 0
   fi
 
@@ -1366,6 +1529,129 @@ sys.exit(0 if any(0xD800 <= ord(c) <= 0xDFFF for c in s) else 1)
       echo "ok    selftest: lone ${surr_label} surrogate keeps main fail"
     fi
   done
+
+  # --- #962 denied-tool path: permission_denials + HEAD main → deferred ---
+  # Mirrors run 41351544033 (WebFetch denied, subtype=success, HEAD=main,
+  # no stop) — must NOT fail as the opaque "neither delivered nor declined"
+  # path; offline mode accepts deferred without posting.
+  cat >"$tmp/exec-webfetch.json" <<'EOF'
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "permission_denials_count": 1,
+  "permission_denials": [
+    {"tool_name": "WebFetch", "tool_input": {"url": "https://example.invalid/secret"}}
+  ],
+  "result": "looked up docs then stopped on main without a marker"
+}
+EOF
+  set +e
+  "$0" --issue 925 --head-ref main --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-11-01T21:21:01Z --execution-log "$tmp/exec-webfetch.json" \
+      >"$tmp/deny-defer.out" 2>&1
+  local deny_rc=$?
+  set -e
+  if [[ "$deny_rc" -ne 0 ]]; then
+    echo "FAIL  selftest: WebFetch denial on main did not accept deferred outcome"
+    cat "$tmp/deny-defer.out"
+    fails=$((fails + 1))
+  elif ! grep -q 'deferred-on-denial' "$tmp/deny-defer.out" \
+      || ! grep -q 'WebFetch' "$tmp/deny-defer.out"; then
+    echo "FAIL  selftest: deferred-on-denial / WebFetch missing from outcome"
+    cat "$tmp/deny-defer.out"
+    fails=$((fails + 1))
+  elif grep -q 'example.invalid' "$tmp/deny-defer.out" \
+      || grep -q 'tool_input' "$tmp/deny-defer.out"; then
+    echo "FAIL  selftest: denial tool_input / URL leaked into deferred path"
+    cat "$tmp/deny-defer.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: permission denial on main → deferred outcome (offline)"
+  fi
+
+  # Denial must not flip a real ship-branch delivery into deferred-only.
+  set +e
+  "$0" --issue 925 --head-ref claude/issue-925-ship \
+      --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-11-01T21:21:01Z --execution-log "$tmp/exec-webfetch.json" \
+      >"$tmp/deny-branch.out" 2>&1
+  local deny_branch_rc=$?
+  set -e
+  if [[ "$deny_branch_rc" -ne 0 ]]; then
+    echo "FAIL  selftest: denial + ship branch should still pass"
+    cat "$tmp/deny-branch.out"
+    fails=$((fails + 1))
+  elif grep -q 'deferred-on-denial' "$tmp/deny-branch.out"; then
+    echo "FAIL  selftest: denial path overrode a ship-branch delivery"
+    cat "$tmp/deny-branch.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: denial + ship branch still delivers (branch wins)"
+  fi
+
+  # Denial + agent-posted DEFERRED: stop path wins (no deferred-on-denial).
+  cat >"$tmp/defer-stop.ndjson" <<'EOF'
+{"body":"🚢 DEFERRED — permission denial: WebFetch\n","created_at":"2026-11-01T21:25:00Z","login":"github-actions[bot]","type":"Bot","id":40}
+EOF
+  set +e
+  "$0" --issue 925 --head-ref main --comments-file "$tmp/defer-stop.ndjson" \
+      --run-started-at 2026-11-01T21:21:01Z --execution-log "$tmp/exec-webfetch.json" \
+      >"$tmp/deny-stop.out" 2>&1
+  local deny_stop_rc=$?
+  set -e
+  if [[ "$deny_stop_rc" -ne 0 ]]; then
+    echo "FAIL  selftest: denial + agent DEFERRED stop should pass"
+    cat "$tmp/deny-stop.out"
+    fails=$((fails + 1))
+  elif ! grep -q 'explicit decline/defer/decision stop marker present' "$tmp/deny-stop.out"; then
+    echo "FAIL  selftest: agent DEFERRED stop was not recognized"
+    cat "$tmp/deny-stop.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: denial + agent-posted DEFERRED uses stop path"
+  fi
+
+  # Control: no denials + main + no stop still fails (must not weaken gate).
+  cat >"$tmp/exec-no-deny.json" <<'EOF'
+{
+  "type": "result",
+  "subtype": "success",
+  "permission_denials": [],
+  "result": "ended quietly"
+}
+EOF
+  set +e
+  "$0" --issue 925 --head-ref main --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-11-01T21:21:01Z --execution-log "$tmp/exec-no-deny.json" \
+      >"$tmp/no-deny.out" 2>&1
+  local no_deny_rc=$?
+  set -e
+  if [[ "$no_deny_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: no-denial main walk unexpectedly passed"
+    cat "$tmp/no-deny.out"
+    fails=$((fails + 1))
+  elif grep -q 'deferred-on-denial' "$tmp/no-deny.out"; then
+    echo "FAIL  selftest: no-denial walk took deferred-on-denial path"
+    cat "$tmp/no-deny.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: no-denial main walk still fails hard check"
+  fi
+
+  # list_denial_tools helper: WebFetch extracted, input not.
+  list_denial_tools "$tmp/exec-webfetch.json" >"$tmp/deny-list.out"
+  if ! grep -qx 'WebFetch' "$tmp/deny-list.out"; then
+    echo "FAIL  selftest: list_denial_tools missed WebFetch"
+    cat "$tmp/deny-list.out"
+    fails=$((fails + 1))
+  elif grep -q 'example.invalid' "$tmp/deny-list.out"; then
+    echo "FAIL  selftest: list_denial_tools leaked tool_input URL"
+    cat "$tmp/deny-list.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: list_denial_tools returns WebFetch only"
+  fi
 
   if [[ "$fails" -ne 0 ]]; then
     echo "FAIL  backlog-burn-ship-check selftest: $fails failure(s)" >&2

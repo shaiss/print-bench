@@ -396,9 +396,12 @@ surfaces studies awaiting a read live in
   - `backlog-burn-ship-check.sh` — post-agent outcome gate for
     `backlog-burn.yml` (issue #962): fails clearly unless HEAD is on
     `claude/issue-<N>-*` or the thread carries a trusted
-    `🚢 DECLINED` / `🚦 DECISION NEEDED` / `🚢 DEFERRED` stop, and prints
-    bounded redacted ship diag (result subtype, `permission_denials`
-    tool names only, final message capped ~1000 chars) without enabling
+    `🚢 DECLINED` / `🚦 DECISION NEEDED` / `🚢 DEFERRED` stop; maps
+    `permission_denials > 0` with no delivery to a clear `🚢 DEFERRED`
+    outcome (posts the stop live so settle does not red with
+    "neither delivered nor declined"); prints bounded redacted ship
+    diag (result subtype, `permission_denials` tool names only, final
+    message length+sha256 — never message text) without enabling
     `show_full_output`; `--selftest` run by check.sh
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
