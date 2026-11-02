@@ -456,7 +456,8 @@ female cut, mouth up the way the top half prints. Both come from the same
 `_seam_neck` / `_seam_female_cut` modules the ball halves use, so the
 `seam_tol` that fits here is the one the four halves get. It is 164 mm wide
 (two Ø70 rings side by side) and ~9 mm tall on the male side — a ≥ 170 mm bed,
-a few minutes of print, same material and profile as the halves.
+about an hour of print (the README budget's 1 h / 10 g row), so each
+0.05 mm retune costs an hour, same material and profile as the halves.
 
 - **What to tune:** `seam_tol`, the radial thread clearance, in **0.05 mm
   steps** (`-D 'seam_tol=0.30'` on the coupon, then on every half). Default

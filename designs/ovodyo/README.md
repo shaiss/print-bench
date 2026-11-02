@@ -335,11 +335,15 @@ lift from the centre segment so the ends don't peel).
 
 1. Degrease the Ø2 mm steel shot (IPA, dry fully) — oiled shot defeats the
    later CA lock — then fill each ballast pocket.
-2. Wedge a `base-plug` into each port.
-3. Check the segment mouths for brim and trim flush, then slide the keel into
+2. Run the tip check on the final fill; go on only when it lands STABLE.
+3. Lock the fill that lands STABLE: a few drops of CA (or epoxy) through each
+   port — loose shot can resettle and quietly eat tip clearance. This is
+   permanent (you can't pour some out afterward).
+4. Wedge a `base-plug` into each port.
+5. Check the segment mouths for brim and trim flush, then slide the keel into
    the **bare** centre segment.
-4. Tape both wings on.
-5. Place the assembly where it lives.
+6. Tape both wings on.
+7. Place the assembly where it lives.
 
 Fill and plug *on the bench before* you slide — a seated keel has no port
 access, and taped wings block the keel's path into the centre. Print the plugs
@@ -352,12 +356,8 @@ funnel with the tip cut to ~3 mm keeps shot off the desk — the Ø3.2 mm port i
 only about one and a half pellets wide, so shot will jam and arch. A strong
 magnet held against the pocket wall settles an arch and drags shot around
 through a couple of mm of plastic — worth a try (chrome-steel shot only;
-stainless bearing balls won't follow a magnet). Once the fill that lands STABLE
-is final, a few drops of CA (or epoxy) through each port before the plug locks
-the CoG you measured — loose shot can resettle and quietly eat tip clearance.
-This is permanent (you can't pour some out afterward), so do it only after the
-tip check passes. Affix a Ø5 mm × 1.5 mm hemispherical stick-on silicone bumper
-in each of the four foot recesses (adhesive on the recess floor); if
+stainless bearing balls won't follow a magnet). Affix a Ø5 mm × 1.5 mm
+hemispherical stick-on silicone bumper in each of the four foot recesses (adhesive on the recess floor); if
 elephant-foot narrowed the mouth, open it slightly with a drill bit first.
 
 **Heft (v0 interim):** the shells are light for their size — the reference's
