@@ -258,16 +258,13 @@ module lid() { //! printed lid: plate, register lip (notched around the posts), 
     }
 }
 
-module fan_grille_cut2d() { //! hole pattern clipped to fan_bore_d; used by lid()
+module fan_grille_cut2d() { //! hole pattern inside fan_bore_d; used by lid()
     r = fan_bore_d / 2;
     n = ceil(r / grille_pitch) + 1;
-    intersection() {
-        translate(fan_center) circle(d = fan_bore_d);
-        for (ix = [-n:n], iy = [-n:n])
-            if (norm([ix * grille_pitch, iy * grille_pitch]) <= r + grille_hole_d / 2)
-                translate([fan_center[0] + ix * grille_pitch, fan_center[1] + iy * grille_pitch])
-                    circle(d = grille_hole_d);
-    }
+    for (ix = [-n:n], iy = [-n:n])
+        if (norm([ix * grille_pitch, iy * grille_pitch]) <= r - grille_hole_d / 2)
+            translate([fan_center[0] + ix * grille_pitch, fan_center[1] + iy * grille_pitch])
+                circle(d = grille_hole_d);
 }
 
 // ── Shared sub-modules (coupon and fitchecks reuse these, never copies) ────
@@ -358,6 +355,17 @@ module coupon() { //! two crops of the -X,+Y corner: the base's (wall, skirt, po
     }
 }
 
+module grille_coupon() { //! fan-zone lid plate at print pose — same grille cut as the full lid, cropped for a fast grille_hole_d / grille_web tune (B12)
+    margin = 4;  // solid plate outside the vitamin bore clip (mm)
+    half = fan_bore_d / 2 + margin;
+    translate([0, 0, lid_top_z]) rotate([180, 0, 0])
+        intersection() {
+            lid();
+            translate([fan_center[0] - half, fan_center[1] - half, base_top_z])
+                cube([2 * half, 2 * half, lid_t + 0.02]);
+        }
+}
+
 // ── Boolean fit checks (ci.fitchecks) ───────────────────────────────────────
 // fit-pins: pins at the vitamin's hole positions rise through the standoff
 // pilots — empty proves the standoff pattern is generated from pcb_holes().
@@ -405,7 +413,7 @@ module gpio_printed() {
     }
 }
 
-part = "assembled"; // [assembled, base, base-board, lid, coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush, fit-gpio-occupied, fit-gpio-leads]
+part = "assembled"; // [assembled, base, base-board, lid, coupon, grille-coupon, fit-pins, fit-pins-shift, fit-lid, fit-lid-crush, fit-gpio-occupied, fit-gpio-leads]
 
 if (part == "assembled") {
     base();
@@ -426,6 +434,8 @@ if (part == "assembled") {
     translate([0, 0, lid_top_z]) rotate([180, 0, 0]) lid();
 } else if (part == "coupon") {
     coupon();
+} else if (part == "grille-coupon") {
+    grille_coupon();
 } else if (part == "fit-pins") {
     intersection() { base(); fit_pins(); }
 } else if (part == "fit-pins-shift") {

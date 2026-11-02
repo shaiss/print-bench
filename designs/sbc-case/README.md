@@ -34,11 +34,19 @@ view lower down shows the green board and gold header pins seated just below the
   (~95 × 76 × 2.5 mm plate + 7 mm bosses)
 - `sbc-case-coupon` — two crops of the same case corner that nest; print it
   first to tune the fits (~33 × 76 × 26 mm)
+- `sbc-case-grille-coupon` — a lid-plate crop over the fan bore at the same
+  outer-face-down pose as `lid`; **plate only** (`lid_t` thick): co-planar
+  grille plus the four M3 fan screw holes on 32 mm pitch, **without** the inner
+  heat-set insert bosses. You can hold a 40 mm fan on the outer face and nut the
+  screws to check pattern and frame coverage; M3 × 20 screws meant for inserts
+  have nothing to bite. Print it to compare `grille_hole_d` / `grille_web`
+  without a full lid (~45 × 45 × 2.5 mm)
 
 Plus the hardware on the bill of materials (see
 [ASSEMBLY.md](ASSEMBLY.md)): 8 × M3 heat-set inserts, 4 × M2.5 screws, 4 × M3
 cap screws, 4 × M3 × 20 dome screws + washers, one 40 mm 5 V fan, and four
-adhesive rubber feet. The screws come out of one standard **M2.5 / M3
+adhesive rubber feet — plus 4 × M3 nuts if you'll run the grille-coupon fan
+check. The screws come out of one standard **M2.5 / M3
 assortment**; add one bag of **M3 heat-set inserts**, that single fan, and a
 strip of **adhesive feet** — **four carts, not five** separate hardware orders.
 
@@ -79,7 +87,9 @@ strip of **adhesive feet** — **four carts, not five** separate hardware orders
   through-holes are normal — clear them with a needle or fingernail before
   assembly.
 - **Grille tone:** a faint blade-pass hum at full fan speed is normal for a
-  close co-planar grille — step the fan curve down if it bothers you at night.
+  close co-planar grille on a 5 V + GND hookup (constant speed) — unplug the
+  fan lead at the GPIO header when silence matters, or add a separate PWM or
+  buck controller if you want variable speed.
 
 The as-printed pose — iso, top, front and bottom-iso of the sliced parts:
 
@@ -138,18 +148,29 @@ so what you feel there is what the full parts do.
   header before you lift the lid, or a set-aside lid hangs by two wires.
 - **Closed ceiling over the fan bore.** The fan bolts to the lid's **outer**
   face (above the plate); the grille is co-planar holes in the plate, not a
-  blade guard from outside.   It closes the case ceiling over the Ø37 zone so **fingers and larger dropped
+  blade guard from outside. It closes the case ceiling over the Ø37 zone so **fingers and larger dropped
   objects** (coins, washers) meet the 2 mm webs instead of falling through a bare
   bore — not protection against small hardware: **Ø5 mm** holes still pass M2.5/M3
   screws (~2.5–3 mm shank), paperclips, and stiff wire. With the lid **off the
   case**, a **pencil tip** fits a hole where a fingertip meets the web (assembled,
-  the fan bolts to the outer face and covers the grille). Airflow is reduced
-  versus a bare bore (~40 % of the old free area at the default 5.0 / 2.0 mm
-  holes and webs). Tune `grille_hole_d` / `grille_web` in the Customizer and
-  **reprint the lid** if your fan needs more pull (for example Ø6 holes on
-  7.6 mm pitch — 1.6 mm webs, ~49 % open — stays above the 1.2 mm web floor).
-  The coupon still proves lip, post, and screw fit only; it does not include the
-  fan-zone grille.
+  the fan bolts to the outer face and covers the grille). Geometric open area
+  inside the bore is ~38 % of an unobstructed Ø37 disc at the default 5.0 / 2.0 mm
+  holes and webs — 21 full holes, no partials at the rim (~62 % less open area
+  than a bare bore; not a measured airflow figure). Open **`sbc-case.scad`**, set **`part` to `grille-coupon`**, and
+  tune **`grille_hole_d` / `grille_web`** in the Customizer (the wrapper
+  `sbc-case-grille-coupon.scad` does not list those sliders — OpenSCAD only
+  exposes variables assigned in the file you opened, not in an `include`), then
+  **reprint the grille coupon** to compare presets on the bench (for
+  example Ø6 holes on 7.6 mm pitch — 1.6 mm webs, ~49 % open — stays above the
+  1.2 mm web floor) before committing to a full `lid` reprint. The grille coupon
+  proves hole size, web width, and printability of the co-planar pattern only —
+  it does **not** measure airflow, thermals, or noise, and the fit coupon still
+  proves register lip, post, and board-pilot fit only (no grille).
+
+![Lid at print pose (outer face down): co-planar Ø5 mm grille over the fan bore — full holes only, no rim crescents](previews/lid-grille.png)
+
+*Lid `part` at print pose; the fan mounts on the opposite face in use.*
+
 - **Keep it breathing.** The fan still blows *in* through the grille and the
   open-skirted case, so it is an intake for dust too — on an always-on build,
   blow through the grille and the vent row out every few months.
