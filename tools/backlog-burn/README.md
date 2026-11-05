@@ -58,41 +58,43 @@ branch), `select` returns **at most one** issue, applying, in order:
    §0.3, `/design-run` §0.3 and `scripts/routine-lock-cleanup.sh`'s
    `delivered` disposition apply the identical rule.
 4. **not freshly declined** (issue #530) — excluded while the thread's
-   *latest* `🚢 DECLINED` comment is inside a 24 h cooldown: a run already
-   looked at the brief and walked away (a blocking open question nobody has
-   answered), so an unanswered decline must not monopolize every hourly
-   firing while the runnable briefs behind it starve — #515 measured seven
-   declines in three days. Two properties hold by construction: a decline
+   *latest authentic* `🚢 DECLINED` comment is inside a 24 h cooldown: a run
+   already looked at the brief and walked away (a blocking open question
+   nobody has answered), so an unanswered decline must not monopolize every
+   hourly firing while the runnable briefs behind it starve — #515 measured
+   seven declines in three days. Authenticity (issue #925) matches SHIP-LOCK:
+   first-line lead + `<!-- burn-declined:v1 -->` + trusted author
+   (`ownerLogin` or `SHIP_LOCK_AUTHOR_LOGINS`); mid-body backtick quotes do
+   not authenticate. Two more properties hold by construction: a decline
    **expires, never buries** — after the window the brief is eligible again,
-   and each later decline restarts it — and **any owner activity re-arms
-   immediately**: a comment newer than the latest decline that is not
-   machine-posted makes the brief eligible regardless of the window.
-   Because the routines post through the same PAT identity as the owner
-   (#515: the declines, the withdrawals and the owner's own answer are all
-   one login), "machine-posted" cannot be an author test — it is a first-line
-   marker test (`🚢`/`🚦`/`🏷`/`🧩` prefixes) plus GitHub's `Bot` author type.
+   and each later decline restarts it — and **owner activity re-arms
+   immediately**: a non-run comment newer than the latest decline whose
+   `authorLogin` matches `ownerLogin` (when both are present) makes the brief
+   eligible regardless of the window. Because the routines post through the
+   same PAT identity as the owner (#515), "machine-posted" is still a
+   first-line marker test (`🚢`/`🚦`/`🏷`/`🧩`) plus GitHub's `Bot` author
+   type; the ownerLogin gate only blocks *outsiders*.
 5. **not freshly deferred** (issue #694, the optional half of #690) —
-   excluded while the thread's *latest* `🚢 DEFERRED` comment is inside a
-   24 h cooldown: a run took the brief, found its dependencies unlanded and
-   deferred — the #641 loop, where the burn re-picked the same blocked issue
-   every firing, the agent re-deferred, and 20+ firings shipped nothing
-   before the spin was parked by hand. The same expiry semantics as the
-   decline cooldown beside it (both run one shared implementation, so the
-   twin guards cannot drift): it **expires** — after the window the next
-   firing re-checks whether the dependencies landed, never buries — the
-   latest defer restarts it, and any owner activity re-arms immediately.
-   The marker is the same first-line `🚢 DEFERRED` the red-gate's
-   disposition classification reads (`scripts/routine-lock-cleanup.sh`,
-   PR #695), so the selector and the cleanup never disagree about what a
-   defer is.
+   excluded while the thread's *latest authentic* `🚢 DEFERRED` comment is
+   inside a 24 h cooldown: a run took the brief, found its dependencies
+   unlanded and deferred — the #641 loop, where the burn re-picked the same
+   blocked issue every firing, the agent re-deferred, and 20+ firings shipped
+   nothing before the spin was parked by hand. Same expiry / authenticity /
+   owner-only re-arm semantics as the decline cooldown (HTML
+   `<!-- burn-deferred:v1 -->` or the #981 denial form
+   `<!-- burn-deferred-denial:v1 -->`). The marker is the same first-line
+   `🚢 DEFERRED` the red-gate's disposition classification reads
+   (`scripts/routine-lock-cleanup.sh`, PR #695), so the selector and the
+   cleanup never disagree about what a defer is.
 6. **not freshly burn-cooled** (issue #923) — excluded while the thread's
-   *latest* `🚢 BURN-COOLDOWN` comment is inside a 24 h cooldown:
-   `scripts/routine-lock-cleanup.sh` posts that marker when a ship walk
-   recorded neither delivered nor declined (the #885 spin: agent
-   `success`, no PR, no decline, re-picked every hour). Same expiry
-   semantics as decline/defer — it **expires, never buries**, and owner
-   activity re-arms — and it does **not** set `declined=true`, so the
-   settle job still goes red on that death.
+   *latest authentic* `🚢 BURN-COOLDOWN` comment is inside a 24 h cooldown:
+   `scripts/routine-lock-cleanup.sh` posts that marker (with
+   `<!-- burn-cooldown:v1 -->`) when a **backlog-burn** ship walk recorded
+   neither delivered nor declined (the #885 spin; gated on
+   `ROUTINE=backlog-burn` since #925 so a design-run death does not park the
+   brief out of the burn). Same expiry / authenticity / owner-only re-arm
+   semantics as decline/defer — and it does **not** set `declined=true`, so
+   the settle job still goes red on that death.
 7. **oldest-first** — among what survives, the oldest issue by creation time
    (tie-broken by number, so the pick is deterministic across runs).
 8. **cap of one** — everything past the first eligible issue is deferred to

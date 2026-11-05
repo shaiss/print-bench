@@ -14,10 +14,20 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backlog_burn.select import render_summary, select_issue
+from backlog_burn.select import (
+    BURN_COOLDOWN_HTML_MARKER,
+    DECLINED_HTML_MARKER,
+    DEFERRED_DENIAL_HTML_MARKER,
+    DEFERRED_HTML_MARKER,
+    render_summary,
+    select_issue,
+)
 
 LABEL = "autonomy-ok"
 NOW = datetime(2026, 8, 8, 12, 0, 0, tzinfo=timezone.utc)
+# Default trusted author for authentic stop fixtures (issue #925): owner
+# login matches authorLogin, which is also on SHIP_LOCK_AUTHOR_LOGINS.
+OWNER = "shaiss"
 
 
 def _iso(dt):
@@ -34,34 +44,74 @@ def issue(number, created, *, labels=(LABEL,), comments=()):
     }
 
 
+def _stop_defaults(**extra):
+    """Trusted-author defaults for an authentic stop; ``extra`` overrides."""
+    out = {
+        "authorLogin": OWNER,
+        "authorType": "User",
+        "ownerLogin": OWNER,
+    }
+    out.update(extra)
+    return out
+
+
 def decline(hours_ago, **extra):
-    """A 🚢 DECLINED marker comment `hours_ago` before NOW."""
+    """An authentic 🚢 DECLINED marker comment `hours_ago` before NOW."""
+    body = extra.pop(
+        "body",
+        "🚢 DECLINED — needs a decision (blocking question unanswered).\n\n"
+        f"{DECLINED_HTML_MARKER}",
+    )
     return {
-        "body": "🚢 DECLINED — needs a decision (blocking question unanswered).",
+        "body": body,
         "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
-        **extra,
+        **_stop_defaults(**extra),
     }
 
 
 def deferred(hours_ago, **extra):
-    """A 🚢 DEFERRED marker comment `hours_ago` before NOW — the stop shape
-    the /ship-issue walk posts when a brief's dependencies are unlanded (the
-    exact first line observed on #641)."""
+    """An authentic 🚢 DEFERRED marker comment `hours_ago` before NOW — the
+    stop shape the /ship-issue walk posts when a brief's dependencies are
+    unlanded (the exact first line observed on #641)."""
+    body = extra.pop(
+        "body",
+        "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n"
+        f"{DEFERRED_HTML_MARKER}",
+    )
     return {
-        "body": "🚢 DEFERRED (re-check) — dependencies still not landed.",
+        "body": body,
         "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
-        **extra,
+        **_stop_defaults(**extra),
     }
 
 
 def burn_cooldown(hours_ago, **extra):
-    """A 🚢 BURN-COOLDOWN marker comment `hours_ago` before NOW — posted by
-    routine-lock-cleanup when a ship walk neither delivered nor declined
-    (issue #923)."""
+    """An authentic 🚢 BURN-COOLDOWN marker comment `hours_ago` before NOW —
+    posted by routine-lock-cleanup when a backlog-burn ship walk neither
+    delivered nor declined (issue #923)."""
+    body = extra.pop(
+        "body",
+        "🚢 BURN-COOLDOWN — neither delivered nor declined; skip for picking.\n\n"
+        f"{BURN_COOLDOWN_HTML_MARKER}",
+    )
     return {
-        "body": "🚢 BURN-COOLDOWN — neither delivered nor declined; skip for picking.",
+        "body": body,
         "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
+        "authorLogin": "github-actions[bot]",
+        "authorType": "Bot",
+        "ownerLogin": OWNER,
         **extra,
+    }
+
+
+def owner_reply(hours_ago, body="Owner answering — please take this."):
+    """A markerless owner comment that re-arms a stop cooldown."""
+    return {
+        "body": body,
+        "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
+        "authorLogin": OWNER,
+        "authorType": "User",
+        "ownerLogin": OWNER,
     }
 
 
@@ -471,8 +521,7 @@ def test_owner_reply_re_arms_regardless_of_window():
     # firing should take the brief (the #515 "Bottle answer" shape).
     answered = issue(103, "2026-08-01T00:00:00Z", comments=[
         decline(2),
-        {"body": "**Bottle answer — the blocking question is closed: PCO-1881.**",
-         "createdAt": _iso(NOW - timedelta(hours=1))},
+        owner_reply(1, "**Bottle answer — the blocking question is closed: PCO-1881.**"),
     ])
     assert select_issue(snap([answered]), now=NOW)["selected"] == 103
 
@@ -501,7 +550,8 @@ def test_run_comment_newer_than_the_decline_does_not_re_arm():
     ):
         chattered = issue(105, "2026-08-01T00:00:00Z", comments=[
             decline(2),
-            {"body": body, "createdAt": _iso(NOW - timedelta(hours=1))},
+            {"body": body, "createdAt": _iso(NOW - timedelta(hours=1)),
+             "authorLogin": OWNER, "authorType": "User", "ownerLogin": OWNER},
         ])
         assert select_issue(snap([chattered]), now=NOW)["selected"] is None, body
 
@@ -582,8 +632,7 @@ def test_owner_reply_re_arms_a_defer_regardless_of_window():
     # firing should take the brief, not after the window.
     answered = issue(113, "2026-08-01T00:00:00Z", comments=[
         deferred(2),
-        {"body": "The dependency landed in #700 — please re-check.",
-         "createdAt": _iso(NOW - timedelta(hours=1))},
+        owner_reply(1, "The dependency landed in #700 — please re-check."),
     ])
     assert select_issue(snap([answered]), now=NOW)["selected"] == 113
 
@@ -605,14 +654,15 @@ def test_run_comment_newer_than_the_defer_does_not_re_arm():
     # DEFERRED is the state restarting the window, not the owner answering.
     for body in (
         "🚢 SHIP-LOCK WITHDRAWN — yielding.\n\n<!-- design-run-ship-lock:v1 -->",
-        "🚢 DECLINED — needs a decision.",
+        f"🚢 DECLINED — needs a decision.\n\n{DECLINED_HTML_MARKER}",
         "🚦 DECISION NEEDED — `which-bottle`",
         "🏷️ Triaged: `autonomy-ok` — still blocked.",
         "🧩 CHUNKED — sub-issues filed.",
     ):
         chattered = issue(115, "2026-08-01T00:00:00Z", comments=[
             deferred(2),
-            {"body": body, "createdAt": _iso(NOW - timedelta(hours=1))},
+            {"body": body, "createdAt": _iso(NOW - timedelta(hours=1)),
+             "authorLogin": OWNER, "authorType": "User", "ownerLogin": OWNER},
         ])
         assert select_issue(snap([chattered]), now=NOW)["selected"] is None, body
 
@@ -700,8 +750,7 @@ def test_burn_cooldown_expires():
 def test_owner_reply_re_arms_a_burn_cooldown():
     answered = issue(133, "2026-08-01T00:00:00Z", comments=[
         burn_cooldown(2),
-        {"body": "please retry this one — the agent just stalled.",
-         "createdAt": _iso(NOW - timedelta(hours=1))},
+        owner_reply(1, "please retry this one — the agent just stalled."),
     ])
     assert select_issue(snap([answered]), now=NOW)["selected"] == 133
 
@@ -713,6 +762,194 @@ def test_burn_cooldown_is_not_a_decline_or_defer():
     assert "burn-cool" in r["excluded"]["134"]
     assert "declin" not in r["excluded"]["134"]
     assert "defer" not in r["excluded"]["134"]
+
+
+# --------------------------------------------------------------------------
+# Guard: stop authenticity + owner-only re-arm (issue #925)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "make_stop, html, noun, number",
+    [
+        (decline, DECLINED_HTML_MARKER, "decline", 140),
+        (deferred, DEFERRED_HTML_MARKER, "defer", 141),
+        (burn_cooldown, BURN_COOLDOWN_HTML_MARKER, "burn-cool", 142),
+    ],
+)
+def test_outsider_authored_stop_is_ignored(make_stop, html, noun, number):
+    # An outsider who posts the first-line lead + HTML marker must not park
+    # the picker — same trusted-author allowlist SHIP-LOCK uses (#925).
+    spoof = make_stop(
+        2,
+        authorLogin="attacker",
+        authorType="User",
+        ownerLogin=OWNER,
+    )
+    runnable = issue(number + 10, "2026-08-02T00:00:00Z")
+    blocked = issue(number, "2026-08-01T00:00:00Z", comments=[spoof])
+    r = select_issue(snap([blocked, runnable]), now=NOW)
+    assert r["selected"] == number  # outsider stop ignored → oldest eligible
+    assert str(number) not in r["excluded"]
+
+
+@pytest.mark.parametrize(
+    "make_stop, noun, number",
+    [
+        (decline, "declin", 150),
+        (deferred, "defer", 151),
+        (burn_cooldown, "burn-cool", 152),
+    ],
+)
+def test_owner_authored_stop_is_honored(make_stop, noun, number):
+    blocked = issue(number, "2026-08-01T00:00:00Z", comments=[make_stop(2)])
+    runnable = issue(number + 10, "2026-08-02T00:00:00Z")
+    r = select_issue(snap([blocked, runnable]), now=NOW)
+    assert r["selected"] == number + 10
+    assert noun in r["excluded"][str(number)]
+
+
+def test_settle_bot_authored_stop_is_honored():
+    # github-actions[bot] is on SHIP_LOCK_AUTHOR_LOGINS — settle-posted
+    # DECLINED / DEFERRED / BURN-COOLDOWN must park the picker.
+    for make_stop, noun, number in (
+        (decline, "declin", 160),
+        (deferred, "defer", 161),
+        (burn_cooldown, "burn-cool", 162),
+    ):
+        stop = make_stop(
+            2,
+            authorLogin="github-actions[bot]",
+            authorType="Bot",
+            ownerLogin=OWNER,
+        )
+        blocked = issue(number, "2026-08-01T00:00:00Z", comments=[stop])
+        r = select_issue(snap([blocked]), now=NOW)
+        assert r["selected"] is None
+        assert noun in r["excluded"][str(number)]
+
+
+@pytest.mark.parametrize(
+    "lead, html, noun, number",
+    [
+        ("🚢 DECLINED — needs a decision", DECLINED_HTML_MARKER, "declin", 170),
+        ("🚢 DEFERRED (re-check)", DEFERRED_HTML_MARKER, "defer", 171),
+        ("🚢 BURN-COOLDOWN", BURN_COOLDOWN_HTML_MARKER, "burn-cool", 172),
+    ],
+)
+def test_mid_body_html_quote_does_not_authenticate_a_stop(lead, html, noun, number):
+    # #872 shape for stops: quoting the HTML marker mid-body (even by the
+    # owner) without the first-line lead must not park the picker.
+    quote = {
+        "body": (
+            f"A spec quotes the marker in backticks: `{html}`.\n\n"
+            f"Also mentions {lead} mid-prose."
+        ),
+        "createdAt": _iso(NOW - timedelta(hours=2)),
+        "authorLogin": OWNER,
+        "authorType": "User",
+        "ownerLogin": OWNER,
+    }
+    # First-line lead but HTML only inside backticks mid-body elsewhere —
+    # actually the lead IS first line below; the fail-closed case is lead
+    # absent. Bare lead without HTML:
+    bare = {
+        "body": f"{lead}\n\nno authenticity marker here",
+        "createdAt": _iso(NOW - timedelta(hours=2)),
+        "authorLogin": OWNER,
+        "authorType": "User",
+        "ownerLogin": OWNER,
+    }
+    for comment in (quote, bare):
+        iss = issue(number, "2026-08-01T00:00:00Z", comments=[comment])
+        r = select_issue(snap([iss]), now=NOW)
+        assert r["selected"] == number, comment["body"][:40]
+        assert str(number) not in r["excluded"] or noun not in r["excluded"].get(
+            str(number), ""
+        )
+
+
+def test_deferred_denial_html_marker_authenticates():
+    # The #981 permission-denial form carries burn-deferred-denial:v1 — still
+    # an authentic DEFERRED for picking.
+    stop = deferred(
+        2,
+        body=(
+            "🚢 DEFERRED — permission denial: WebFetch\n\n"
+            f"{DEFERRED_DENIAL_HTML_MARKER}"
+        ),
+        authorLogin="github-actions[bot]",
+        authorType="Bot",
+    )
+    blocked = issue(180, "2026-08-01T00:00:00Z", comments=[stop])
+    r = select_issue(snap([blocked]), now=NOW)
+    assert r["selected"] is None
+    assert "defer" in r["excluded"]["180"]
+
+
+@pytest.mark.parametrize(
+    "make_stop, noun, number",
+    [
+        (decline, "declin", 190),
+        (deferred, "defer", 191),
+        (burn_cooldown, "burn-cool", 192),
+    ],
+)
+def test_outsider_markerless_comment_does_not_re_arm(make_stop, noun, number):
+    # CodeRabbit MED on #924 / issue #925: a newer markerless comment from
+    # another user must not cancel the cooldown.
+    cooled = issue(number, "2026-08-01T00:00:00Z", comments=[
+        make_stop(2),
+        {
+            "body": "please retry — I am not the owner.",
+            "createdAt": _iso(NOW - timedelta(hours=1)),
+            "authorLogin": "attacker",
+            "authorType": "User",
+            "ownerLogin": OWNER,
+        },
+    ])
+    r = select_issue(snap([cooled]), now=NOW)
+    assert r["selected"] is None
+    assert noun in r["excluded"][str(number)]
+
+
+@pytest.mark.parametrize(
+    "make_stop, number",
+    [
+        (decline, 200),
+        (deferred, 201),
+        (burn_cooldown, 202),
+    ],
+)
+def test_owner_markerless_comment_does_re_arm(make_stop, number):
+    answered = issue(number, "2026-08-01T00:00:00Z", comments=[
+        make_stop(2),
+        owner_reply(1),
+    ])
+    assert select_issue(snap([answered]), now=NOW)["selected"] == number
+
+
+@pytest.mark.parametrize(
+    "make_stop, noun, number",
+    [
+        (decline, "declin", 210),
+        (deferred, "defer", 211),
+        (burn_cooldown, "burn-cool", 212),
+    ],
+)
+def test_cursor_bot_authored_stop_is_ignored(make_stop, noun, number):
+    # cursor[bot] is the shared Cursor App — never a trusted settle login.
+    spoof = make_stop(
+        2,
+        authorLogin="cursor[bot]",
+        authorType="Bot",
+        ownerLogin=OWNER,
+    )
+    iss = issue(number, "2026-08-01T00:00:00Z", comments=[spoof])
+    r = select_issue(snap([iss]), now=NOW)
+    assert r["selected"] == number
+    assert str(number) not in r["excluded"] or noun not in r["excluded"].get(
+        str(number), ""
+    )
 
 
 def _strip_created_at(comment, created_at):
@@ -747,10 +984,7 @@ def test_undated_stop_excludes_even_beside_a_dated_stop(
     # owner re-arm applies only when every matching stop parses.
     expired = make_stop(25)
     undated = _strip_created_at(make_stop(1), bad_created_at)
-    owner = {
-        "body": "Answered — the blocker is gone, please take this.",
-        "createdAt": _iso(NOW - timedelta(hours=1)),
-    }
+    owner = owner_reply(1, "Answered — the blocker is gone, please take this.")
 
     only_expired = issue(number, "2026-08-01T00:00:00Z", comments=[expired])
     assert select_issue(snap([only_expired]), now=NOW)["selected"] == number

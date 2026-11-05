@@ -242,9 +242,11 @@ Same skill, three tightenings — nobody is there to catch a wrong guess:
   question. Unattended, if the fork is a binary yes/no a human can settle,
   raise it through the HITL gate (§8) — a `🚦 DECISION NEEDED` that is
   machine-resumable — and stop; otherwise it is a
-  `🚢 DECLINED — needs a decision` comment naming what's unresolved, and a
+  `🚢 DECLINED — needs a decision` comment naming what's unresolved (include
+  the authenticity marker `<!-- burn-declined:v1 -->` in the body — readers
+  require first-line lead + HTML marker + trusted author, issue #925), and a
   clean stop. A stopped run costs nothing; a confidently wrong PR costs a
-  review.
+  review. A `🚢 DEFERRED` stop likewise needs `<!-- burn-deferred:v1 -->`.
 - **Hard stop conditions:** preflight red after one honest fix attempt; the
   diff outgrowing `Touches` in a way that isn't §4 blast radius; the issue
   turning out to need a human's taste (any shape, any look, any "is this
