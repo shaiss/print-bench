@@ -115,6 +115,9 @@ jobs:
       # The settle job's two AGENT_OUTCOME reads are this output. The drift
       # guard counts the name AGENT_OUTCOME twice in the workflow file.
       walk_outcome: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
+      # Per-link Actions outcomes for triage (#897): provider-triage folds
+      # these in so a walk where no link served cannot report servable/served.
+      ship_outcomes: ${{ steps.ship_zai_1.outcome }},${{ steps.ship_zai_2.outcome }},${{ steps.ship_zai_3.outcome }},${{ steps.ship_anthropic_4.outcome }},${{ steps.ship_anthropic_5.outcome }}
     # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
     # anything but 'true' pauses the whole job in seconds without a commit.
     # Key 2 (committed `enabled: true`) is checked in the "Read policy" step.
@@ -1788,6 +1791,10 @@ jobs:
           # never reaches the escalation (#637 read "(issue —").
           context: "the backlog-burn routine (issue #${{ needs.burn.outputs.issue }})"
           escalate: "true"
+          # Feed the ship walk's step outcomes so install/agent failures cannot
+          # classify as servable/served (issue #897). #981 deferred walks set
+          # settle.declined and skip this step entirely — disposition intact.
+          ship-outcomes: ${{ needs.burn.outputs.ship_outcomes }}
 
   disarmed-notice:
     name: Explain a disarmed run

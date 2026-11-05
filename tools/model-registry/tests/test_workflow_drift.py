@@ -3641,7 +3641,7 @@ def test_provider_triage_action_declares_the_io_its_callers_use():
     # the escalate switch, and the class/reason outputs the callers read).
     action = TRIAGE_ACTION.read_text(encoding="utf-8")
     for decl in ("chain:", "zai-key:", "anthropic-key:", "openrouter-key:",
-                 "github-token:", "context:", "escalate:"):
+                 "github-token:", "context:", "escalate:", "ship-outcomes:"):
         assert decl in action, f"provider-triage no longer declares input {decl!r}"
     assert re.search(r"^outputs:", action, re.MULTILINE), "provider-triage lost its outputs block"
     for out in ("class:", "reason:"):
@@ -3650,6 +3650,15 @@ def test_provider_triage_action_declares_the_io_its_callers_use():
     assert "model_registry classify" in action, (
         "provider-triage no longer runs `model_registry classify` — its class/reason "
         "outputs would be empty and every caller's branch would misfire")
+    # Issue #897: ship-step outcomes fold into the final class/reason via the
+    # backlog-burn overlay so a no-link-served walk cannot report servable.
+    assert "backlog_burn.cli triage-classify" in action, (
+        "provider-triage no longer overlays ship outcomes via "
+        "`backlog_burn.cli triage-classify` — issue #897's servable-when-dead "
+        "misclassification would return")
+    assert "steps.overlay.outputs.class" in action, (
+        "provider-triage escalate/outputs must read the ship-outcome overlay, "
+        "not the raw provider classify step")
 
 
 def test_triage_wiring_guard_discriminates_a_wrong_chain():
