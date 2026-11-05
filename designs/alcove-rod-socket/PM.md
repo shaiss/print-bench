@@ -72,7 +72,7 @@ the one motion the part really performs — seeded from the hero.
 |---|---|---|---|
 | ~~B3~~ | ~~Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release)~~ | **Done** (#631): `collar-shallow` gated via `ci.parts`; plate stays boss+collar; README points at the Release/gated part | — |
 | B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
-| B1 | Witness slot / seat detent ("is the rod fully in?") | brief's optional ask; install confidence — plus vibration insurance: ~730 axial curtain-tugs/yr vs single-digit unthreads, and a steep 2-start lead is what walks loose under cyclic load; nothing on the rod resists a slow unthread. Measured by the proving print's week-of-use seat check; a walked collar promotes B1 to #1 | small geometry + re-gate |
+| ~~B1~~ | ~~Witness slot / seat detent ("is the rod fully in?")~~ | **Done** (supersedes #787): seat detent (0.30 mm radial lip) + two 1.6×8 mm witness slots on `collar_use`; shallow collar inherits via `depth=`. Field click/visibility still waits on the proving print's week-of-use seat check. | — |
 | B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
 | ~~B5~~ | ~~25 mm reference coupons (thread + bore)~~ | **Done** (#809): gated `thread-coupon-25` + `bore-coupon-25`; knurl flute cap by OD (NOTES) | — |
 | B5b | Gated 25 mm production holders (`boss` / `collar` / `collar-shallow` at fixed 25 mm, Release + plate policy) | coupons prove the size; holders still need Customizer `rod_d=25` export until gated parts ship | ci.parts + README |
@@ -91,7 +91,7 @@ All four are the brief's own open questions, non-blocking for modeling.
 | Actual rod barrel Ø where it sits | before printing, not modeling | 40.0 given value; bore coupon verifies |
 | Alcove width vs rod length (install gap) | install, not modeling | deep+shallow pair via `engagement_depth` |
 | Mount surface (drywall/wood/masonry) | no | M5 wood screw, recessed; anchor is the user's call |
-| Witness slot wanted? | no | not in v1 (B1) |
+| Witness slot wanted? | no | **shipped** — two axial sight slots + seat detent, both on by default (B1 / NOTES D13); turn either off with `witness_window` / `seat_detent` |
 
 ## Decision log
 
@@ -108,3 +108,4 @@ All four are the brief's own open questions, non-blocking for modeling.
 | 2026-08-24 | v1 → v2 numbering (not v0.2) | the field-test failure forced a second version before any release shipped: v1 = the frozen geometry, v2 = the packaging fix |
 | 2026-09-12 | Ship `collar-shallow` as a gated part (B3 / #631) | `ci.parts` cannot carry a free-form `-D engagement_depth=12`; dual-`-D` hand-render is the foot-gun the deliverable rules stop. Depth threaded into `collar`/`collar_use`; plate unchanged (boss+collar only) |
 | 2026-10-04 | B5: gate 25 mm thread + bore coupons; cap knurl flutes by collar OD | 36 flutes fail N6 merge guard at 25 mm (collar OD 39); auto-cap to 32 keeps asserts without weakening floors — slip still 0.6 until a coupon says otherwise (#809) |
+| 2026-11-05 | Seat detent + witness window (B1; supersedes #787) | Closed socket hid full-seat; both features, small and supportless, on `collar_use` so the shallow collar inherits. See NOTES D13. |
