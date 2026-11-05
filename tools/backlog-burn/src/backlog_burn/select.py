@@ -31,39 +31,41 @@ the decision is recorded and the label is cleared. Unlike a SHIP-LOCK this block
 is *durable* — it never goes stale, because a pending decision does not expire.
 
 A third exclusion, also not from the lock check (issue #530): a brief whose
-*latest* ``🚢 DECLINED`` comment sits inside a cooldown window is skipped — a
-decline means *waiting on the owner*, so an unanswered blocking question must
-not monopolize every hourly firing. Like a SHIP-LOCK the block is temporary,
-but where a stale lock means "the run died", a fresh decline means "the run
-looked and walked away": it **expires** (never buries — after the window the
-brief is eligible again, and a later decline restarts it), and any *owner*
-activity re-arms it immediately. Because the routines post through the same
-PAT identity as the owner (measured on #515: declines, withdrawals and the
-owner's own answer are all the same login), "owner activity" cannot be an
-author test — it is a comment whose first line carries no machine marker and
-whose author GitHub does not type as a ``Bot``.
+*latest authentic* ``🚢 DECLINED`` comment sits inside a cooldown window is
+skipped — a decline means *waiting on the owner*, so an unanswered blocking
+question must not monopolize every hourly firing. Like a SHIP-LOCK the block
+is temporary, but where a stale lock means "the run died", a fresh decline
+means "the run looked and walked away": it **expires** (never buries — after
+the window the brief is eligible again, and a later decline restarts it), and
+any *owner* activity re-arms it immediately. Authenticity (issue #925) matches
+the SHIP-LOCK rule: first-line lead + HTML authenticity marker + trusted
+author (``ownerLogin`` or ``SHIP_LOCK_AUTHOR_LOGINS``). Mid-body backtick
+quotes of the HTML marker never authenticate. Re-arm keeps the #515
+marker+``Bot`` definition of "the run" (PAT login equals the owner) and adds
+an owner-only gate (issue #925): when both ``authorLogin`` and ``ownerLogin``
+are present, only a matching login re-arms — an outsider's markerless comment
+cannot cancel the cooldown.
 
 A fourth exclusion, the defer twin of that cooldown (issue #694, the optional
-half of #690): a brief whose *latest* ``🚢 DEFERRED`` comment sits inside the
-same shape of cooldown window is skipped — a defer means the run looked and
-found the brief's *dependencies* unlanded (#690's gap: on #641 the burn
-re-picked the same dependency-blocked issue every firing, the agent
+half of #690): a brief whose *latest authentic* ``🚢 DEFERRED`` comment sits
+inside the same shape of cooldown window is skipped — a defer means the run
+looked and found the brief's *dependencies* unlanded (#690's gap: on #641 the
+burn re-picked the same dependency-blocked issue every firing, the agent
 re-deferred, and the routine spun 20+ times without shipping). Identical
-expiry semantics to a decline: it **expires** (after the window the next
-firing re-checks whether the dependencies landed — never buries), the latest
-defer is the state (a later defer restarts it), and any owner activity
-re-arms it immediately. The marker is the same first-line ``🚢 DEFERRED``
-the red-gate's disposition classification reads
-(``scripts/routine-lock-cleanup.sh``, PR #695), so the selector and the
-cleanup can never disagree about what counts as a defer.
+expiry / authenticity / owner-only re-arm semantics to a decline. The marker
+is the same first-line ``🚢 DEFERRED`` the red-gate's disposition
+classification reads (``scripts/routine-lock-cleanup.sh``, PR #695), so the
+selector and the cleanup can never disagree about what counts as a defer.
 
-A fifth exclusion (issue #923): a brief whose *latest* ``🚢 BURN-COOLDOWN``
-comment sits inside the same shape of cooldown window is skipped —
-``scripts/routine-lock-cleanup.sh`` posts that marker when a ship walk
-records neither delivered nor declined (the #885 spin: agent ``success``,
-no PR, no decline, re-picked every hour). It is a decline *for picking
-purposes only*: the settle job still goes red on that death, and the
-cooldown **expires** so a later firing can retry. Owner activity re-arms.
+A fifth exclusion (issue #923): a brief whose *latest authentic*
+``🚢 BURN-COOLDOWN`` comment sits inside the same shape of cooldown window is
+skipped — ``scripts/routine-lock-cleanup.sh`` posts that marker when a
+backlog-burn ship walk records neither delivered nor declined (the #885 spin:
+agent ``success``, no PR, no decline, re-picked every hour; gated on
+``ROUTINE=backlog-burn`` since #925 so a design-run death does not park the
+brief out of the burn). It is a decline *for picking purposes only*: the
+settle job still goes red on that death, and the cooldown **expires** so a
+later firing can retry. Same authenticity + owner-only re-arm as decline/defer.
 
 The skill re-verifies all of this before it touches a line of code, so this
 module is a best-effort *pre-filter*. Its only jobs are to never hand the run
@@ -129,8 +131,11 @@ STALE_LOCK_HOURS = 6
 # the human-readable stop the /ship-issue skill's §1/§7 (and /design-run's §8)
 # posts when a brief cannot be taken yet: a blocking open question nobody has
 # answered. It is a *state*, like a SHIP-LOCK: the cooldown below reads the
-# latest such comment, not any of them, so a second decline restarts it.
+# latest *authentic* such comment, not any of them, so a second decline
+# restarts it. Authenticity (issue #925) = first-line lead + HTML marker +
+# trusted author — mirrored in routine-lock-cleanup / design-run-deliver.
 DECLINED_MARKER = "🚢 DECLINED"
+DECLINED_HTML_MARKER = "<!-- burn-declined:v1 -->"
 
 # A decline this fresh keeps the brief out of selection (issue #530): a run
 # already looked at it and walked away, so re-selecting it inside the window
@@ -145,8 +150,15 @@ DECLINE_COOLDOWN_HOURS = 24
 # have not landed yet (issue #690; the red-gate's disposition classification
 # reads the same first-line marker, PR #695, so the two agree on what a
 # defer is). A *state* like a decline: the cooldown below reads the latest
-# such comment, so a second defer restarts it.
+# *authentic* such comment, so a second defer restarts it. The denial form
+# (``burn-deferred-denial:v1``, #981) is the same stop for picking purposes.
 DEFERRED_MARKER = "🚢 DEFERRED"
+DEFERRED_HTML_MARKER = "<!-- burn-deferred:v1 -->"
+DEFERRED_DENIAL_HTML_MARKER = "<!-- burn-deferred-denial:v1 -->"
+DEFERRED_HTML_MARKERS = frozenset({
+    DEFERRED_HTML_MARKER,
+    DEFERRED_DENIAL_HTML_MARKER,
+})
 
 # A defer this fresh keeps the brief out of selection (issue #694): the run
 # already looked and found its dependencies unlanded, so re-selecting it
@@ -160,10 +172,11 @@ DEFERRED_MARKER = "🚢 DEFERRED"
 DEFER_COOLDOWN_HOURS = 24
 
 # A comment whose first line starts with ``🚢 BURN-COOLDOWN`` is the cooldown
-# marker ``scripts/routine-lock-cleanup.sh`` posts when a ship walk recorded
-# neither delivered nor declined (issue #923). Same *state* semantics as a
-# decline/defer: the cooldown below reads the latest such comment.
+# marker ``scripts/routine-lock-cleanup.sh`` posts when a backlog-burn ship
+# walk recorded neither delivered nor declined (issue #923; ROUTINE-gated
+# since #925). Same *state* / authenticity semantics as a decline/defer.
 BURN_COOLDOWN_MARKER = "🚢 BURN-COOLDOWN"
+BURN_COOLDOWN_HTML_MARKER = "<!-- burn-cooldown:v1 -->"
 
 # A burn-cooldown this fresh keeps the brief out of selection (issue #923):
 # a run already burned a firing on it without an outcome, so re-selecting it
@@ -179,9 +192,11 @@ BURN_COOLDOWN_HOURS = 24
 # codepoint on purpose, so it matches both with and without the variation
 # selector the labeler emits. A run comment never re-arms a decline — only
 # owner activity does — and since the routines post through the same PAT
-# identity as the owner (so author *logins* cannot tell them apart, #515),
-# this marker test plus GitHub's ``Bot`` author type is the whole definition
-# of "the run" here. Extend the tuple when a new routine posts to threads.
+# identity as the owner (so author *logins* alone cannot tell them apart,
+# #515), this marker test plus GitHub's ``Bot`` author type is how "the run"
+# is identified. Issue #925 adds the complementary owner-only gate on the
+# re-arm side: when both logins are present, an outsider's markerless
+# comment is not owner activity. Extend the tuple when a new routine posts.
 RUN_COMMENT_MARKERS = ("🚢", "🚦", "🏷", "🧩")
 
 # GitHub honours these nine keywords, case-insensitively, each optionally
@@ -326,6 +341,66 @@ def _is_run_comment(comment: dict[str, Any]) -> bool:
     return any(first.startswith(marker) for marker in RUN_COMMENT_MARKERS)
 
 
+def _is_trusted_stop_author(comment: dict[str, Any]) -> bool:
+    """True when ``comment``'s author may mint an authentic stop (issue #925).
+
+    Trusted iff the login is in ``SHIP_LOCK_AUTHOR_LOGINS`` (settle /
+    attended) **or** equals ``ownerLogin``. A missing login fails closed —
+    an unattributed comment cannot park the picker. ``cursor[bot]`` /
+    ``claude[bot]`` are never trusted (same allowlist as SHIP-LOCK).
+    """
+    login = (comment.get("authorLogin") or "").lower()
+    if not login:
+        return False
+    if login in {a.lower() for a in SHIP_LOCK_AUTHOR_LOGINS}:
+        return True
+    owner = (comment.get("ownerLogin") or "").lower()
+    return bool(owner and login == owner)
+
+
+def _is_authentic_stop(
+    comment: dict[str, Any],
+    marker: str,
+    html_markers: frozenset[str],
+) -> bool:
+    """True when ``comment`` is an authentic stop of ``marker`` (issue #925).
+
+    Same three-leg rule as :func:`_is_authentic_ship_lock`:
+
+    1. the first non-blank line (BOM / heading / bold wrappers stripped)
+       starts with ``marker``,
+    2. one of ``html_markers`` is present in the body, and
+    3. the author is trusted (:func:`_is_trusted_stop_author`).
+
+    A bare first-line lead is never enough; nor is a mid-body backtick
+    quote of the HTML marker without the lead; nor is an outsider author.
+    """
+    body = comment.get("body") or ""
+    if not _lock_lead_line(body).startswith(marker):
+        return False
+    if not any(m in body for m in html_markers):
+        return False
+    return _is_trusted_stop_author(comment)
+
+
+def _is_owner_rearm_activity(comment: dict[str, Any]) -> bool:
+    """True when ``comment`` is owner activity that may re-arm a stop.
+
+    Not a run comment (:func:`_is_run_comment`), and — when both
+    ``authorLogin`` and ``ownerLogin`` are present — the logins must match
+    (issue #925). Missing identity fields preserve the pre-#925 marker+Bot
+    rule alone so a fixture without logins still re-arms the way #530/#694
+    documented; an outsider with both fields set never does.
+    """
+    if _is_run_comment(comment):
+        return False
+    owner = (comment.get("ownerLogin") or "").casefold()
+    author = (comment.get("authorLogin") or "").casefold()
+    if owner and author and author != owner:
+        return False
+    return True
+
+
 def _stop_marker_cooldown(
     comments: list[dict[str, Any]],
     now: Optional[datetime],
@@ -333,21 +408,23 @@ def _stop_marker_cooldown(
     marker: str,
     noun: str,
     participle: str,
+    html_markers: frozenset[str],
 ) -> Optional[str]:
-    """Why the issue is in the cooldown of its latest ``marker`` stop, or
-    ``None`` if it is not.
+    """Why the issue is in the cooldown of its latest authentic ``marker``
+    stop, or ``None`` if it is not.
 
     One expiry semantics shared by the stop markers — declines (issue #530,
     waiting on the owner), defers (issue #694, waiting on dependencies) and
     burn-cooldowns (issue #923, neither delivered nor declined) — so the
     guards in :func:`exclusion_reason` cannot drift:
-    *eligible iff every matching stop has a parseable ``createdAt`` AND (the
-    latest of those is older than the window OR any non-run comment is newer
-    than that latest stop)*. The latest dated stop is the state, so a second
-    one restarts the window; and a run comment newer than the stop — another
-    withdrawal, a triage label, a park marker, even the other stop marker —
-    re-arms nothing, because none of it is the owner answering what the stop
-    is waiting on.
+    *eligible iff every authentic matching stop has a parseable
+    ``createdAt`` AND (the latest of those is older than the window OR any
+    owner-rearm activity is newer than that latest stop)*. Authenticity is
+    first-line lead + HTML marker + trusted author (issue #925). The latest
+    dated authentic stop is the state, so a second one restarts the window;
+    and a run comment / outsider comment newer than the stop re-arms
+    nothing, because none of it is the owner answering what the stop is
+    waiting on.
 
     A matching stop whose ``createdAt`` is missing or unparseable cannot be
     ordered against the dated ones. Treating it as the oldest let an expired
@@ -360,7 +437,7 @@ def _stop_marker_cooldown(
     """
     stops = [
         c for c in (comments or [])
-        if _first_line(c.get("body", "")).startswith(marker)
+        if _is_authentic_stop(c, marker, html_markers)
     ]
     if not stops:
         return None
@@ -376,7 +453,7 @@ def _stop_marker_cooldown(
         parsed.append(created)
     latest_dt = max(parsed)
     for c in comments or []:
-        if _is_run_comment(c):
+        if not _is_owner_rearm_activity(c):
             continue
         dt = _parse_iso(c.get("createdAt", ""))
         if dt is not None and latest_dt is not None and dt > latest_dt:
@@ -522,18 +599,21 @@ def exclusion_reason(
     decline = _stop_marker_cooldown(
         issue.get("comments", []), now, decline_cooldown_hours,
         DECLINED_MARKER, "decline", "declined",
+        frozenset({DECLINED_HTML_MARKER}),
     )
     if decline is not None:
         return decline
     defer = _stop_marker_cooldown(
         issue.get("comments", []), now, defer_cooldown_hours,
         DEFERRED_MARKER, "defer", "deferred",
+        DEFERRED_HTML_MARKERS,
     )
     if defer is not None:
         return defer
     burn = _stop_marker_cooldown(
         issue.get("comments", []), now, burn_cooldown_hours,
         BURN_COOLDOWN_MARKER, "burn-cooldown", "burn-cooled",
+        frozenset({BURN_COOLDOWN_HTML_MARKER}),
     )
     if burn is not None:
         return burn

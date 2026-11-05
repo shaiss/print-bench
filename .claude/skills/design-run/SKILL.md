@@ -406,7 +406,10 @@ Consequences for the sections above:
 - **Stops are comment intents.** A `🚢 DECLINED`, `🚦 DECISION NEEDED`, or
   `🚢 DEFERRED` first line in a comment intent is a hard stop the bundle step
   honors: no bundle, no push — but the intents still travel, so settle posts
-  your stop and the thread keeps its record.
+  your stop and the thread keeps its record. Do **not** put `<!--` in an
+  intent body (intents reject HTML comments so they cannot forge a SHIP-LOCK);
+  settle injects `<!-- burn-declined:v1 -->` / `<!-- burn-deferred:v1 -->`
+  when posting DECLINED/DEFERRED (issue #925).
 - **§9's label is a label intent.** Skip the `ensure-label`/`gh issue edit`
   dance; write `{"action":"label","label":"needs-decision"}` and settle
   ensures and adds it.

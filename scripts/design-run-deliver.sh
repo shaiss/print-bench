@@ -798,6 +798,13 @@ finish() {  # delivered summary
 STOP_MARKER_DECLINED='🚢 DECLINED'
 STOP_MARKER_DECISION='🚦 DECISION NEEDED'
 STOP_MARKER_DEFERRED='🚢 DEFERRED'
+# Stop authenticity HTML markers (issue #925) — settle injects these when
+# posting a DECLINED / DEFERRED intent (intents still reject raw `<!--`, so
+# an agent cannot forge SHIP-LOCK or invent a stop marker). Must stay
+# byte-identical to backlog_burn.select / routine-lock-cleanup.sh.
+DECLINED_HTML_MARKER='<!-- burn-declined:v1 -->'
+DEFERRED_HTML_MARKER='<!-- burn-deferred:v1 -->'
+DEFERRED_DENIAL_HTML_MARKER='<!-- burn-deferred-denial:v1 -->'
 # Visible first-line lead. A comment is a lock ONLY when its first
 # non-blank line (BOM / heading / bold wrappers stripped) starts with
 # STOP_LOCK_MARKER, it also carries SHIP_LOCK_HTML_MARKER, and it is
@@ -814,7 +821,8 @@ SHIP_LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
 #   shaiss              — attended hand-run / PAT (repo owner)
 # cursor[bot] is NOT listed (shared Cursor App login — Bugbot, Security/
 # Approval Agents, every Cursor cloud agent). Attended runs post as shaiss
-# or not at all. backlog-burn can also post as shaiss (#872).
+# or not at all. backlog-burn can also post as shaiss (#872). Also the
+# trusted-author allowlist for DECLINED / DEFERRED stop authenticity (#925).
 SHIP_LOCK_AUTHOR_LOGINS='github-actions[bot] shaiss'
 # Constant settle-claim body — built here, never from intent text.
 SHIP_LOCK_SETTLE_BODY="${STOP_LOCK_MARKER} — settle claim
@@ -897,6 +905,9 @@ hard_stop_from_comments() {  # [run-started-at]
     --arg settle_logins "$SHIP_LOCK_AUTHOR_LOGINS" \
     --arg d1 "$STOP_MARKER_DECLINED" --arg d2 "$STOP_MARKER_DECISION" \
     --arg d3 "$STOP_MARKER_DEFERRED" \
+    --arg declined_html "$DECLINED_HTML_MARKER" \
+    --arg deferred_html "$DEFERRED_HTML_MARKER" \
+    --arg deferred_denial_html "$DEFERRED_DENIAL_HTML_MARKER" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" '
       def fl($b): ($b // "") | split("\n")
         | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
@@ -909,17 +920,18 @@ hard_stop_from_comments() {  # [run-started-at]
         | gsub("^#{1,6}[[:space:]]+"; "")
         | if (startswith("**") and endswith("**") and length > 4) then .[2:-2]
           else . end;
-      # Stops may come from github-actions[bot] (settle intents) or the
-      # repo owner (attended PAT). Locks use the named allowlist — see is_lock.
+      # Stops (issue #925): login in SHIP_LOCK_AUTHOR_LOGINS or the repo
+      # owner — never a generic Bot match (cursor[bot] / claude[bot] fail).
+      # Locks use the same named allowlist — see is_lock.
+      def lock_logins:
+        ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
       def stop_trusted:
         ((.login // "") | length) > 0 and ((.type // "") | length) > 0
         and (
-          .type == "Bot"
+          (((.login | ascii_downcase) as $l | (lock_logins | index($l)) != null))
           or (($owner | length) > 0
               and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
         );
-      def lock_logins:
-        ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
       # One authentic-lock rule (Cipher #864 + #872): lock_lead starts with
       # the SHIP-LOCK lead, HTML marker present, allowlisted login.
       def is_lock:
@@ -938,25 +950,37 @@ hard_stop_from_comments() {  # [run-started-at]
       # in one second (Bugbot MED, #864); keep in sync with
       # routine-lock-cleanup.sh JQ_THIS_RUN. sort_by keeps the last of equal
       # keys, so higher id wins (missing id sorts as 0).
-      def claimless_stop(is_stop):
+      # Stop authenticity (issue #925): DECLINED/DEFERRED need their HTML
+      # marker; DECISION NEEDED is author-gated only (no HTML in #925 scope).
+      def is_decline_stop:
+        (fl(.body) | startswith($d1))
+        and ((.body // "") | contains($declined_html));
+      def is_decision_stop:
+        fl(.body) | startswith($d2);
+      def is_defer_stop:
+        (fl(.body) | startswith($d3))
+        and ((.body // "")
+             | (contains($deferred_html) or contains($deferred_denial_html)));
+      def is_hard_stop: is_decline_stop or is_decision_stop or is_defer_stop;
+      def claimless_stop:
         if ($since | length) == 0 or length == 0 then false
         else (sort_by(.created_at, ((.id // 0) | tonumber)) | last)
-             | (fl(.body) | is_stop) and (.created_at > $since) and stop_trusted
+             | is_hard_stop and (.created_at > $since) and stop_trusted
         end;
-      def indicated(pred):
+      def indicated:
         latest_lock as $l
-        | if $l == null then claimless_stop(pred)
+        | if $l == null then claimless_stop
           else
             [ .[]
               | select(.created_at > $l.created_at)
               | select(in_window)
-              | select(fl(.body) | pred)
+              | select(is_hard_stop)
               | select(stop_trusted) ]
             | length > 0
           end;
       (add // []) as $comments
       | $comments
-      | (indicated(startswith($d1) or startswith($d2)) or indicated(startswith($d3)))
+      | indicated
     '
 }
 
@@ -1113,6 +1137,33 @@ body_is_stop_comment() {
       | map(select(length > 0)) | (.[0] // "");
     fl($b) | startswith($d1) or startswith($d2) or startswith($d3)
   ' >/dev/null 2>&1
+}
+
+# Settle injects the stop HTML authenticity marker (issue #925) so intents
+# stay free of `<!--` (which would forge a SHIP-LOCK) while posted DECLINED /
+# DEFERRED comments still authenticate. DECISION NEEDED has no HTML in #925
+# scope. Idempotent if the marker is already present.
+augment_stop_body() {
+  local body="${1:-}" first
+  first="$(printf '%s' "$body" | jq -rn --arg b "$body" '
+    ($b // "") | split("\n")
+    | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+    | map(select(length > 0)) | (.[0] // "")')"
+  case "$first" in
+    "$STOP_MARKER_DECLINED"*)
+      case "$body" in
+        *"$DECLINED_HTML_MARKER"*) printf '%s' "$body" ;;
+        *) printf '%s\n\n%s' "$body" "$DECLINED_HTML_MARKER" ;;
+      esac
+      ;;
+    "$STOP_MARKER_DEFERRED"*)
+      case "$body" in
+        *"$DEFERRED_HTML_MARKER"*|*"$DEFERRED_DENIAL_HTML_MARKER"*) printf '%s' "$body" ;;
+        *) printf '%s\n\n%s' "$body" "$DEFERRED_HTML_MARKER" ;;
+      esac
+      ;;
+    *) printf '%s' "$body" ;;
+  esac
 }
 
 # Apply the agent's issue intents (settle job, trusted artifact download).
@@ -1275,6 +1326,11 @@ apply_intents() {
           echo "::warning::comment intent ${i} exceeds the ${INTENTS_MAX_COMMENTS}-comment cap — rejected" >&2
           rejected=$((rejected + 1))
           continue
+        fi
+        # Inject DECLINED/DEFERRED HTML authenticity markers (issue #925)
+        # after the HTML-reject gate — intents never carry `<!--`.
+        if body_is_stop_comment "$body"; then
+          body="$(augment_stop_body "$body")"
         fi
         if ! gh api --method POST "repos/${REPO}/issues/${ISSUE}/comments" \
           -f body="$body" >/dev/null; then
@@ -3217,8 +3273,11 @@ EOF
       '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
         {body:$body,created_at:$at,login:$login,type:$type}]' > "${tmp}/comments.json"
   }
-  for marker in '🚢 DECLINED — needs a decision' '🚦 DECISION NEEDED — bay-width' '🚢 DEFERRED — dependencies'; do
-    plant_stop "${marker}"$'\n\nstop' acme User 2026-10-19T01:00:00Z
+  for marker in \
+      "🚢 DECLINED — needs a decision"$'\n\n'"stop"$'\n\n'"$DECLINED_HTML_MARKER" \
+      $'🚦 DECISION NEEDED — bay-width\n\nstop' \
+      "🚢 DEFERRED — dependencies"$'\n\n'"stop"$'\n\n'"$DEFERRED_HTML_MARKER"; do
+    plant_stop "${marker}" acme User 2026-10-19T01:00:00Z
     printf 'dirty-stop\n' > "$hsrc/designs/nuggs-ladder/dirty-stop.scad"
     hbefore="$(git_cmd -C "$hsrc" rev-parse HEAD)"
     rm -f "${tmp}/stop.bundle"
@@ -3244,7 +3303,7 @@ EOF
   # claimless (the later stop still fires as claimless). REPO must be set so
   # author_trusted can match the owner login.
   REPO=acme/print-bench
-  jq -n --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+  jq -n --arg body $'🚢 DECLINED — needs a decision\n\nstop\n\n<!-- burn-declined:v1 -->' \
     '[{body:"🚢 SHIP-LOCK\n\nspoofed without marker",created_at:"2026-10-19T00:00:00Z",login:"acme",type:"User"},
       {body:$body,created_at:"2026-10-19T01:00:00Z",login:"acme",type:"User"}]' \
     > "${tmp}/comments.json"
@@ -3254,7 +3313,7 @@ EOF
   }
   # Settle-written claim (marker + trusted author) IS a lock: a stop after
   # it is indicated; the same stop before the window is not.
-  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+  jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg body $'🚢 DECLINED — needs a decision\n\nstop\n\n<!-- burn-declined:v1 -->' \
     '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
       {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
     > "${tmp}/comments.json"
@@ -3272,7 +3331,7 @@ EOF
   }
   # #872: HTML marker quoted mid-body (no first-line lead) is NOT a lock —
   # hard-stop stays claimless so a later stop still fires.
-  jq -n --arg marker "$SHIP_LOCK_HTML_MARKER" --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+  jq -n --arg marker "$SHIP_LOCK_HTML_MARKER" --arg body $'🚢 DECLINED — needs a decision\n\nstop\n\n<!-- burn-declined:v1 -->' \
     '[{body:("Scope addition\n\nA spec quotes the marker in backticks: `" + $marker + "`."),
        created_at:"2026-10-19T00:00:00Z",login:"shaiss",type:"User"},
       {body:$body,created_at:"2026-10-19T01:00:00Z",login:"acme",type:"User"}]' \
@@ -3295,7 +3354,7 @@ EOF
       "$bom_lock" \
       "## ${STOP_LOCK_MARKER}"$'\n\n'"${SHIP_LOCK_HTML_MARKER}" \
       "**${STOP_LOCK_MARKER} — claim**"$'\n\n'"${SHIP_LOCK_HTML_MARKER}"; do
-    jq -n --arg lock "$wrapped" --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+    jq -n --arg lock "$wrapped" --arg body $'🚢 DECLINED — needs a decision\n\nstop\n\n<!-- burn-declined:v1 -->' \
       '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:"github-actions[bot]",type:"Bot"},
         {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
       > "${tmp}/comments.json"
@@ -3307,7 +3366,7 @@ EOF
   # Allowlisted logins (settle + attended shaiss) count.
   for ok_login in 'github-actions[bot]' 'shaiss'; do
     jq -n --arg lock "$SHIP_LOCK_SETTLE_BODY" --arg login "$ok_login" \
-      --arg body $'🚢 DECLINED — needs a decision\n\nstop' \
+      --arg body $'🚢 DECLINED — needs a decision\n\nstop\n\n<!-- burn-declined:v1 -->' \
       '[{body:$lock,created_at:"2026-10-19T00:00:00Z",login:$login,type:(if $login=="shaiss" then "User" else "Bot" end)},
         {body:$body,created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot"}]' \
       > "${tmp}/comments.json"
@@ -3357,7 +3416,7 @@ EOF
   jq -n \
     '[{body:"**Design name:** widget\n\n**Gate contract**\n- [ ] G1",
        created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:100},
-      {body:"🚢 DECLINED — needs a decision\n\nstop",
+      {body:"🚢 DECLINED — needs a decision\n\nstop\n\n<!-- burn-declined:v1 -->",
        created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:101}]' \
     > "${tmp}/comments.json"
   [ "$(hard_stop_from_comments 2026-10-19T00:30:00Z <"${tmp}/comments.json")" = "true" ] || {
@@ -3365,7 +3424,7 @@ EOF
     exit 1
   }
   jq -n \
-    '[{body:"🚢 DECLINED — needs a decision\n\nstop",
+    '[{body:"🚢 DECLINED — needs a decision\n\nstop\n\n<!-- burn-declined:v1 -->",
        created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:100},
       {body:"**Design name:** widget\n\n**Gate contract**\n- [ ] G1",
        created_at:"2026-10-19T01:00:00Z",login:"github-actions[bot]",type:"Bot",id:101}]' \
@@ -3375,7 +3434,8 @@ EOF
     exit 1
   }
   # Outsider marker does not stop the run. The bundle is written.
-  plant_stop $'🚢 DECLINED — needs a decision\n\nspoof' attacker User 2026-10-19T01:00:00Z
+  # Outsider with first-line + HTML still must not stop (author gate #925).
+  plant_stop $'🚢 DECLINED — needs a decision\n\nspoof\n\n<!-- burn-declined:v1 -->' attacker User 2026-10-19T01:00:00Z
   rm -f "${tmp}/stop.bundle"
   set +e
   env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
@@ -3392,7 +3452,7 @@ EOF
     exit 1
   }
   # A stop from before this run's window does not suppress delivery.
-  plant_stop $'🚢 DECLINED — needs a decision\n\nold' acme User 2026-10-18T01:00:00Z
+  plant_stop $'🚢 DECLINED — needs a decision\n\nold\n\n<!-- burn-declined:v1 -->' acme User 2026-10-18T01:00:00Z
   rm -f "${tmp}/stop.bundle"
   set +e
   env GH_BIN="${tmp}/bin/gh" GH_TOKEN=test-token \
@@ -3411,7 +3471,7 @@ EOF
   # Deliver side: a valid bundle is not pushed when the thread has since stopped.
   hsha="$(sha256sum "${tmp}/old-stop.bundle" | awk '{print $1}')"
   htip="$(git_cmd -C "$hsrc" rev-parse HEAD)"
-  plant_stop $'🚢 DEFERRED — dependencies\n\nwait' acme User 2026-10-19T01:00:00Z
+  plant_stop $'🚢 DEFERRED — dependencies\n\nwait\n\n<!-- burn-deferred:v1 -->' acme User 2026-10-19T01:00:00Z
   rm -f "${tmp}/comment.body" "${tmp}/pr.json"
   set +e
   env GH_BIN="${tmp}/bin/gh" GH_REPO="$hdel" GH_TOKEN=test-token COMMENT_TOKEN=comment-token \

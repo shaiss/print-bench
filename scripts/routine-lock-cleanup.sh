@@ -116,6 +116,12 @@ DECISION_LABEL='needs-decision'
 COOLDOWN_MARKER='🚢 BURN-COOLDOWN'
 COOLDOWN_HTML_MARKER='<!-- burn-cooldown:v1 -->'
 BURN_COOLDOWN_HOURS=24
+# Stop authenticity HTML markers (issue #925) — must stay byte-identical to
+# tools/backlog-burn select.py. Settle injects these when posting DECLINED /
+# DEFERRED intents; cleanup and the picker require them (plus trusted author).
+DECLINED_HTML_MARKER='<!-- burn-declined:v1 -->'
+DEFERRED_HTML_MARKER='<!-- burn-deferred:v1 -->'
+DEFERRED_DENIAL_HTML_MARKER='<!-- burn-deferred-denial:v1 -->'
 
 # jq prelude: first non-blank line of a body, stripped — the line
 # backlog_burn.select._first_line classifies on. lock_lead additionally
@@ -216,22 +222,24 @@ lock_state() {
 # stop detectors (decline_indicated, deferred_indicated) run, so the twins
 # cannot drift. Needs JQ_FL, and the --arg variables $since (this run's start,
 # UTC ISO-8601, or "" when the caller has no job window) and $owner (the
-# first segment of --repo).
-#   stop_trusted — the author gate: GitHub type "Bot", or a login equal to
-#     the repo owner (case-insensitive — the PAT posts as that User, the #641
-#     and #675 shapes). A missing or empty login or type fails closed: an
-#     outsider, or a comment the fetch could not attribute, must not set
-#     declined and skip red-on-death.
+# first segment of --repo). Also needs $settle_logins (LOCK_AUTHOR_LOGINS)
+# via lock_logins from JQ_FL's companion.
+#   stop_trusted — the author gate (issue #925): login in LOCK_AUTHOR_LOGINS
+#     (github-actions[bot] / shaiss) OR equal to the repo owner
+#     (case-insensitive). NOT a generic Bot match — cursor[bot] /
+#     claude[bot] must not mint a decline. A missing or empty login or type
+#     fails closed.
 #   in_window — strictly after $since; with no window, unbounded (the
 #     claimed branches' anchor is the claim itself, so a hand run that
 #     passed no --run-started-at still works there).
 #   claimless_stop(is_stop) — for a thread with NO SHIP-LOCK at all, where
 #     there is no claim timestamp to anchor on: the thread's LATEST comment
-#     must be a stop (is_stop, applied to its first line), strictly after
-#     $since, by a trusted author. Anything newer means the stop is history;
-#     no window, or a stop that predates the window, is not this firing — a
-#     later success that posts nothing must not reuse it, set declined, and
-#     skip red-on-death.
+#     must be a stop (is_stop, applied to the comment — first-line + any
+#     HTML authenticity the caller folds in), strictly after $since, by a
+#     trusted author. Anything newer means the stop is history; no window,
+#     or a stop that predates the window, is not this firing — a later
+#     success that posts nothing must not reuse it, set declined, and skip
+#     red-on-death.
 #     "Latest" ties on created_at (GitHub second precision) break by higher
 #     numeric comment id — settle's apply loop can post a contract intent
 #     then a DECLINED in the same second when it skips the lock (Bugbot MED
@@ -241,7 +249,7 @@ lock_state() {
 JQ_THIS_RUN='def stop_trusted:
     ((.login // "") | length) > 0 and ((.type // "") | length) > 0
     and (
-      .type == "Bot"
+      (((.login | ascii_downcase) as $l | (lock_logins | index($l)) != null))
       or (($owner | length) > 0
           and ((.login | ascii_downcase) == ($owner | ascii_downcase)))
     );
@@ -249,13 +257,15 @@ JQ_THIS_RUN='def stop_trusted:
   def claimless_stop(is_stop):
     if ($since | length) == 0 or length == 0 then false
     else (sort_by(.created_at, ((.id // 0) | tonumber)) | last)
-         | (fl(.body) | is_stop) and (.created_at > $since) and stop_trusted
+         | is_stop and (.created_at > $since) and stop_trusted
     end;'
 
 # stdin: NDJSON comments {body, created_at, login, type}. $1: this run's
 # start (UTC ISO-8601 YYYY-MM-DDTHH:MM:SSZ), or empty when the caller has
-# no job window. Prints true/false: a first-line 🚢 DECLINED or 🚦 DECISION
-# NEEDED — the skill's own terminal-stop markers — is this firing's stop.
+# no job window. Prints true/false: an authentic 🚢 DECLINED (first-line
+# lead + burn-declined HTML + trusted author) or a first-line 🚦 DECISION
+# NEEDED (author-gated; no HTML marker in #925's scope) is this firing's
+# stop.
 #   * claimed — posted strictly after the latest SHIP-LOCK, inside the job
 #     window (in_window), and by a trusted author (stop_trusted) — the SAME
 #     gate deferred_indicated's claimed branch applies, so the three markers
@@ -270,20 +280,28 @@ JQ_THIS_RUN='def stop_trusted:
 #     without this branch a legitimate decline read as a death and redded
 #     the run daily.
 # Neither branch counts the marker mid-line: the skill leads its stop
-# comments with the marker.
+# comments with the marker. DECLINED additionally requires its HTML
+# authenticity marker (issue #925); a mid-body backtick quote fails closed.
 decline_indicated() {  # [run-started-at]
   jq -rs --arg lock_marker "$LOCK_MARKER" \
     --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     --arg d1 "$DECLINE_MARKER_1" --arg d2 "$DECLINE_MARKER_2" \
+    --arg declined_html "$DECLINED_HTML_MARKER" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
+    def is_decline_stop:
+      (fl(.body) | startswith($d1))
+      and ((.body // "") | contains($declined_html));
+    def is_decision_stop:
+      fl(.body) | startswith($d2);
+    def is_stop: is_decline_stop or is_decision_stop;
     latest_lock as $l
-    | if $l == null then claimless_stop(startswith($d1) or startswith($d2))
+    | if $l == null then claimless_stop(is_stop)
       else
         [ .[]
           | select(.created_at > $l.created_at)
           | select(in_window)
-          | select(fl(.body) | startswith($d1) or startswith($d2))
+          | select(is_stop)
           | select(stop_trusted) ]
         | length > 0
       end'
@@ -294,10 +312,10 @@ decline_indicated() {  # [run-started-at]
 # no job window.
 # Prints true/false.
 #
-# A first-line 🚢 DEFERRED is decline-class only when it is attributable to
-# THIS firing, never because an older one is still the freshest comment,
-# and only when its author is one of ours (JQ_THIS_RUN's stop_trusted, on
-# both branches).
+# An authentic 🚢 DEFERRED (first-line lead + burn-deferred /
+# burn-deferred-denial HTML + trusted author) is decline-class only when it
+# is attributable to THIS firing, never because an older one is still the
+# freshest comment (issue #925 HTML/author gate).
 #   * claimed — posted strictly after the latest SHIP-LOCK. When a job
 #     window was given, the comment must also be strictly after $1, so a
 #     defer that merely follows some earlier claim is that earlier run's
@@ -308,16 +326,23 @@ decline_indicated() {  # [run-started-at]
 deferred_indicated() {  # [run-started-at]
   jq -rs --arg lock_marker "$LOCK_MARKER" \
     --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
-    --arg d "$DEFER_MARKER" --arg since "${1:-}" \
+    --arg d "$DEFER_MARKER" \
+    --arg deferred_html "$DEFERRED_HTML_MARKER" \
+    --arg deferred_denial_html "$DEFERRED_DENIAL_HTML_MARKER" \
+    --arg since "${1:-}" \
     --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
+    def is_defer_stop:
+      (fl(.body) | startswith($d))
+      and ((.body // "")
+           | (contains($deferred_html) or contains($deferred_denial_html)));
     latest_lock as $l
-    | if $l == null then claimless_stop(startswith($d))
+    | if $l == null then claimless_stop(is_defer_stop)
       else
         [ .[]
           | select(.created_at > $l.created_at)
           | select(in_window)
-          | select(fl(.body) | startswith($d))
+          | select(is_defer_stop)
           | select(stop_trusted) ]
         | length > 0
       end'
@@ -435,8 +460,14 @@ conclude() {  # delivered declined withdrawn escalated summary — the one exit 
 
 # Post the picker cooldown for a neither-delivered-nor-declined death.
 # Does NOT set declined=true — the red gate must still fire (AC3 / #923).
+# Gated on ROUTINE=backlog-burn (issue #925 LOW): a design-run death must
+# not park the issue out of backlog-burn for 24 h.
 post_burn_cooldown() {
   local body
+  if [ "$ROUTINE" != "backlog-burn" ]; then
+    echo "::notice::skipping $COOLDOWN_MARKER on #$ISSUE (ROUTINE=$ROUTINE; cooldown is backlog-burn picker only)"
+    return 0
+  fi
   body="$(printf '%s\n\n%s\n\n- routine: %s\n- agent outcome (diagnostic only — the disposition is derived from the artifacts above): %s\n- run: %s\n\nNeither delivered nor declined. This issue is on a %s h burn cooldown so the next firing picks other work; the job still goes red so the death stays visible.' \
     "$COOLDOWN_MARKER" "$COOLDOWN_HTML_MARKER" "$ROUTINE" "$OUTCOME" "$RUN_URL" "$BURN_COOLDOWN_HOURS")"
   gh_api --method POST "/repos/$REPO/issues/$ISSUE/comments" -f body="$body" >/dev/null
@@ -525,13 +556,18 @@ run_live() {
     # re-selecting it every hour with nothing recorded.
     echo "::notice::no active SHIP-LOCK on #$ISSUE — nothing to release"
     post_burn_cooldown
-    conclude false false false false "no-op (no active lock; burn-cooldown posted)"
+    if [ "$ROUTINE" = "backlog-burn" ]; then
+      conclude false false false false "no-op (no active lock; burn-cooldown posted)"
+    else
+      conclude false false false false "no-op (no active lock)"
+    fi
   fi
 
   # 5. Dead — regardless of the exit code passed in. Withdraw: a new
   # comment, never a deletion: timestamps are the record. Also post the
-  # burn-cooldown so a withdrawn claim does not get re-picked immediately
-  # (#923) — declined stays false so red-on-death still fires.
+  # burn-cooldown (backlog-burn only — #925) so a withdrawn claim does not
+  # get re-picked immediately (#923) — declined stays false so red-on-death
+  # still fires.
   local body
   body="$(printf '%s\n\n- routine: %s\n- agent outcome (diagnostic only — the disposition is derived from the artifacts above): %s\n- run: %s\n\nThe claim above is released (not deleted — timestamps are the record) so the next firing can select this issue again.' \
     "$WITHDRAW_LINE" "$ROUTINE" "$OUTCOME" "$RUN_URL")"
@@ -546,7 +582,11 @@ run_live() {
   deaths="$(count_dead_withdrawals <<<"$comments")"
   total=$(( deaths + 1 ))
   if ! should_escalate "$deaths" "$ESCALATE_AFTER"; then
-    conclude false false true false "withdrew a dead run's SHIP-LOCK (death $total of $ESCALATE_AFTER before escalation; burn-cooldown posted)"
+    if [ "$ROUTINE" = "backlog-burn" ]; then
+      conclude false false true false "withdrew a dead run's SHIP-LOCK (death $total of $ESCALATE_AFTER before escalation; burn-cooldown posted)"
+    else
+      conclude false false true false "withdrew a dead run's SHIP-LOCK (death $total of $ESCALATE_AFTER before escalation)"
+    fi
   fi
 
   # Ensure the label exists — the ensure-label idiom from the decision gate:
@@ -726,7 +766,7 @@ sys.stdout.write(json.dumps({
   # the marker mid-line, and a thread with no claim at all.
   cat > "$tmp/declined-after.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
-{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked\n\n<!-- burn-declined:v1 -->", "created_at": "2026-08-02T00:00:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(decline_indicated < "$tmp/declined-after.ndjson")" = "true" ] \
     || st_fail "a DECLINED comment after the claim by the owner was not read as a decline"
@@ -744,7 +784,7 @@ EOF
   # only the stop author changed to an outsider.
   cat > "$tmp/declined-after-attacker.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
-{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
+{"body": "🚢 DECLINED — needs a decision\n\nthe issue offers options nobody picked\n\n<!-- burn-declined:v1 -->", "created_at": "2026-08-02T00:00:00Z", "login": "attacker", "type": "User"}
 EOF
   [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-attacker.ndjson")" = "false" ] \
     || st_fail "an outsider's DECLINED under a live SHIP-LOCK minted a decline (ghost-lock spoof)"
@@ -758,12 +798,12 @@ EOF
   # data the fetch could attribute.
   cat > "$tmp/declined-after-anon.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
-{"body": "🚢 DECLINED — needs a decision", "created_at": "2026-08-02T00:00:00Z"}
+{"body": "🚢 DECLINED — needs a decision\n\n<!-- burn-declined:v1 -->", "created_at": "2026-08-02T00:00:00Z"}
 EOF
   [ "$(decline_indicated 2026-08-01T00:00:00Z < "$tmp/declined-after-anon.ndjson")" = "false" ] \
     || st_fail "a claimed DECLINED with no login or type was read as a decline"
   cat > "$tmp/declined-before.ndjson" <<'EOF'
-{"body": "🚢 DECLINED — earlier run gave up here", "created_at": "2026-08-01T00:00:00Z"}
+{"body": "🚢 DECLINED — earlier run gave up here\n\n<!-- burn-declined:v1 -->", "created_at": "2026-08-01T00:00:00Z"}
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed afresh", "created_at": "2026-08-02T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
 EOF
   [ "$(decline_indicated < "$tmp/declined-before.ndjson")" = "false" ] \
@@ -790,8 +830,8 @@ EOF
   # at the window start, an outsider posted it, it carries no author data,
   # and a newer comment follows it.
   cat > "$tmp/decline-claimless.ndjson" <<'EOF'
-{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-01T19:40:49Z", "login": "o", "type": "User"}
-{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-01T19:40:49Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless.ndjson")" = "true" ] \
     || st_fail "the #675 shape (a claimless DECLINED inside this run's window, by the owner) was not read as a decline"
@@ -807,17 +847,17 @@ EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decision-claimless-bot.ndjson")" = "true" ] \
     || st_fail "a claimless DECISION NEEDED by a Bot inside the window was not read as a decline"
   cat > "$tmp/decline-claimless-attacker.ndjson" <<'EOF'
-{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "login": "attacker", "type": "User"}
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "login": "attacker", "type": "User"}
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-attacker.ndjson")" = "false" ] \
     || st_fail "an outsider's claimless DECLINED inside the window minted a decline"
   cat > "$tmp/decline-claimless-anon.ndjson" <<'EOF'
-{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z"}
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z"}
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-anon.ndjson")" = "false" ] \
     || st_fail "a claimless DECLINED with no login or type was read as a decline"
   cat > "$tmp/decline-claimless-followed.ndjson" <<'EOF'
-{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
+{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
 {"body": "#676 merged — this can go now.", "created_at": "2026-10-02T23:09:10Z", "login": "o", "type": "User"}
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-followed.ndjson")" = "false" ] \
@@ -828,13 +868,13 @@ EOF
   # apply_intents order when intents carry a stop and settle skips the lock.
   cat > "$tmp/decline-claimless-tie.ndjson" <<'EOF'
 {"body": "**Design name:** widget\n\n**Gate contract**\n- [ ] G1", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 100}
-{"body": "🚢 DECLINED — needs a decision\n\nparked", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
+{"body": "🚢 DECLINED — needs a decision\n\nparked\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-tie.ndjson")" = "true" ] \
     || st_fail "a same-second claimless contract+DECLINED tie (stop has higher id) was not read as a decline"
   # Inverse order in the array must not matter — id, not array position.
   cat > "$tmp/decline-claimless-tie-rev.ndjson" <<'EOF'
-{"body": "🚢 DECLINED — needs a decision\n\nparked", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
+{"body": "🚢 DECLINED — needs a decision\n\nparked\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
 {"body": "**Design name:** widget\n\n**Gate contract**\n- [ ] G1", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 100}
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-tie-rev.ndjson")" = "true" ] \
@@ -842,7 +882,7 @@ EOF
   # If the non-stop has the higher id (posted after the stop in the same
   # second), the stop is no longer latest — not this firing's decline.
   cat > "$tmp/decline-claimless-tie-followed.ndjson" <<'EOF'
-{"body": "🚢 DECLINED — needs a decision\n\nparked", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 100}
+{"body": "🚢 DECLINED — needs a decision\n\nparked\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 100}
 {"body": "**Design name:** widget\n\n**Gate contract**\n- [ ] G1", "created_at": "2026-10-02T23:08:39Z", "login": "github-actions[bot]", "type": "Bot", "id": 101}
 EOF
   [ "$(decline_indicated 2026-10-02T23:05:00Z < "$tmp/decline-claimless-tie-followed.ndjson")" = "false" ] \
@@ -874,7 +914,7 @@ EOF
   # comment.
   cat > "$tmp/defer-after.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "github-actions[bot]", "type": "Bot"}
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T15:02:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-after.ndjson")" = "true" ] \
     || st_fail "a DEFERRED comment after the claim and inside the window was not read as a defer"
@@ -883,7 +923,7 @@ EOF
   [ "$(deferred_indicated < "$tmp/defer-after.ndjson")" = "true" ] \
     || st_fail "a DEFERRED comment after the claim was not read as a defer"
   cat > "$tmp/defer-before.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED — dependency not landed yet.", "created_at": "2026-09-01T15:00:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED — dependency not landed yet.\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T15:00:00Z", "login": "o", "type": "User"}
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed afresh", "created_at": "2026-09-01T15:01:00Z", "login": "github-actions[bot]", "type": "Bot"}
 EOF
   [ "$(deferred_indicated 2026-09-01T14:00:00Z < "$tmp/defer-before.ndjson")" = "false" ] \
@@ -898,7 +938,7 @@ EOF
   # DEFERRED is the latest comment, and it was posted after the window opened.
   cat > "$tmp/defer-claimless.ndjson" <<'EOF'
 {"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-01T05:53:00Z", "login": "o", "type": "User"}
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-claimless.ndjson")" = "true" ] \
     || st_fail "a claimless DEFERRED posted inside this run's window was not read as a defer"
@@ -917,7 +957,7 @@ EOF
   [ "$(deferred_indicated 2026-09-01T16:00:00Z < "$tmp/defer-after.ndjson")" = "false" ] \
     || st_fail "a post-claim DEFERRED that predates this run's window still counted"
   cat > "$tmp/defer-stale.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
 {"body": "**Ops stopgap** — parking until deps land.", "created_at": "2026-09-01T06:36:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-stale.ndjson")" = "false" ] \
@@ -933,43 +973,43 @@ EOF
   # login or type fails closed. An outsider who can comment on a public
   # repo during the job window must not mint a stop on either branch.
   cat > "$tmp/defer-bot.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "github-actions[bot]", "type": "Bot"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "github-actions[bot]", "type": "Bot"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-bot.ndjson")" = "true" ] \
     || st_fail "a Bot (github-actions[bot]) claimless DEFERRED inside the window was not read as a defer"
   cat > "$tmp/defer-owner.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-owner.ndjson")" = "true" ] \
     || st_fail "an owner User (o) claimless DEFERRED inside the window was not read as a defer"
   cat > "$tmp/defer-owner-case.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "O", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "O", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-owner-case.ndjson")" = "true" ] \
     || st_fail "an owner login that differs only in case was not read as a defer"
   cat > "$tmp/defer-attacker.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "attacker", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "attacker", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-attacker.ndjson")" = "false" ] \
     || st_fail "an outsider User (attacker) claimless DEFERRED inside the window was read as a defer"
   cat > "$tmp/defer-attacker-claimed.ndjson" <<'EOF'
 {"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "login": "github-actions[bot]", "type": "Bot"}
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "login": "attacker", "type": "User"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T15:02:00Z", "login": "attacker", "type": "User"}
 EOF
   [ "$(deferred_indicated 2026-09-01T15:00:00Z < "$tmp/defer-attacker-claimed.ndjson")" = "false" ] \
     || st_fail "an outsider User DEFERRED after the lock was read as a defer"
   cat > "$tmp/defer-anon.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-anon.ndjson")" = "false" ] \
     || st_fail "a claimless DEFERRED with no login or type was read as a defer"
   cat > "$tmp/defer-notype.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": ""}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": ""}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-notype.ndjson")" = "false" ] \
     || st_fail "an owner login with an empty type was read as a defer"
   cat > "$tmp/defer-nologin.ndjson" <<'EOF'
-{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "", "type": "Bot"}
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T06:01:00Z", "login": "", "type": "Bot"}
 EOF
   [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/defer-nologin.ndjson")" = "false" ] \
     || st_fail "a Bot type with an empty login was read as a defer"
@@ -1177,7 +1217,7 @@ STUB
   # Row 3: exit 0 with a DECLINED comment after the claim → declined, nothing
   # posted (the lock is left to age out through the selector's staleness, per
   # the fix's design).
-  e2e_fix declined comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DECLINED — the issue needs a decision\n\nparked","created_at":"2026-09-01T16:00:00Z","user":{"login":"o","type":"User"}}]'
+  e2e_fix declined comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DECLINED — the issue needs a decision\n\nparked\n\n<!-- burn-declined:v1 -->","created_at":"2026-09-01T16:00:00Z","user":{"login":"o","type":"User"}}]'
   e2e_fix declined branches '[]'
   e2e_fix declined pulls '[]'
   e2e declined success
@@ -1190,7 +1230,7 @@ STUB
   # comment posted). Mirrors the deferatklock control for the decline path:
   # a public-issue spoof can no longer suppress the death-withdrawal and
   # strand a ghost lock.
-  e2e_fix declatklock comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DECLINED — the issue needs a decision\n\nparked","created_at":"2026-09-01T16:00:00Z","user":{"login":"attacker","type":"User"}}]'
+  e2e_fix declatklock comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DECLINED — the issue needs a decision\n\nparked\n\n<!-- burn-declined:v1 -->","created_at":"2026-09-01T16:00:00Z","user":{"login":"attacker","type":"User"}}]'
   e2e_fix declatklock branches '[]'
   e2e_fix declatklock pulls '[]'
   e2e declatklock success 2026-09-01T15:00:00Z
@@ -1215,7 +1255,7 @@ STUB
   # claimless branch this read as the all-false no-op and the red gate
   # failed the run on every firing that re-declined.
   local claimless_declines name
-  claimless_declines='{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-01T19:40:49Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "user": {"login": "o", "type": "User"}}'
+  claimless_declines='{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-01T19:40:49Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "user": {"login": "o", "type": "User"}}'
   e2e_fix declfree comments "[$claimless_declines]"
   e2e_fix declfree branches '[]'
   e2e_fix declfree pulls '[]'
@@ -1234,7 +1274,7 @@ STUB
   #   declatk   — the in-window DECLINED is an outsider's.
   #   declnewer — a newer comment follows the in-window DECLINED.
   e2e_fix declold comments "[$claimless_declines]"
-  e2e_fix declatk comments '[{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open", "created_at": "2026-10-02T23:08:39Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix declatk comments '[{"body": "🚢 DECLINED — re-arm condition unmet: parent #676 still open\n\n<!-- burn-declined:v1 -->\n\n<!-- burn-declined:v1 -->", "created_at": "2026-10-02T23:08:39Z", "user": {"login": "attacker", "type": "User"}}]'
   e2e_fix declnewer comments "[$claimless_declines"',{"body": "#676 merged — this can go now.", "created_at": "2026-10-02T23:09:10Z", "user": {"login": "o", "type": "User"}}]'
   for name in declold declatk declnewer; do
     e2e_fix "$name" branches '[]'
@@ -1256,7 +1296,7 @@ STUB
   # repo owner (the PAT identity), no branch/PR → declined (a deliberate
   # defer), nothing posted — so the red gate's delivered/declined condition
   # reads declined=true and the job stays green instead of false-redding.
-  e2e_fix deferred comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix deferred comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix deferred branches '[]'
   e2e_fix deferred pulls '[]'
   e2e deferred success 2026-09-19T06:00:00Z
@@ -1268,7 +1308,7 @@ STUB
   # The same claimless in-window DEFERRED, but posted by github-actions[bot].
   # Proves the live fetch's type field reaches the author gate: a Bot counts
   # even though its login is not the repo owner.
-  e2e_fix deferbot comments '[{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
+  e2e_fix deferbot comments '[{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
   e2e_fix deferbot branches '[]'
   e2e_fix deferbot pulls '[]'
   e2e deferbot success 2026-09-19T06:00:00Z
@@ -1279,7 +1319,7 @@ STUB
   # declined stays false. Claimless, so there is no lock to withdraw — the
   # all-false disposition reaches red-on-death, and a burn-cooldown is
   # posted so the picker skips (#923).
-  e2e_fix deferatk comments '[{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "attacker", "type": "User"}}]'
+  e2e_fix deferatk comments '[{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "attacker", "type": "User"}}]'
   e2e_fix deferatk branches '[]'
   e2e_fix deferatk pulls '[]'
   e2e deferatk success 2026-09-19T06:00:00Z
@@ -1291,7 +1331,7 @@ STUB
 
   # Same control on the claimed branch: an outsider's DEFERRED after the
   # lock is not a stop, so the active lock is a death and gets withdrawn.
-  e2e_fix deferatklock comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DEFERRED (re-check) — dependencies still not landed.","created_at":"2026-09-01T15:02:00Z","user":{"login":"attacker","type":"User"}}]'
+  e2e_fix deferatklock comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->","created_at":"2026-09-01T15:02:00Z","user":{"login":"attacker","type":"User"}}]'
   e2e_fix deferatklock branches '[]'
   e2e_fix deferatklock pulls '[]'
   e2e deferatklock success 2026-09-01T15:00:00Z
@@ -1320,7 +1360,7 @@ STUB
   # The window opened after that comment, so it is not this firing's defer
   # — declined stays false, red-on-death fires, and a fresh burn-cooldown
   # is posted so the picker moves on (#923).
-  e2e_fix priordefer comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "o", "type": "User"}}]'
+  e2e_fix priordefer comments '[{"body": "🏷️ Triaged: `autonomy-ok` — still blocked on the dependency.", "created_at": "2026-09-18T22:39:00Z", "user": {"login": "o", "type": "User"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-19T06:01:00Z", "user": {"login": "o", "type": "User"}}]'
   e2e_fix priordefer branches '[]'
   e2e_fix priordefer pulls '[]'
   e2e priordefer success 2026-09-19T07:00:00Z
@@ -1333,7 +1373,7 @@ STUB
   # Row 4b: the claimed shape — the walk claimed, deferred inside the
   # window, and left the lock standing → declined, nothing posted (the lock
   # ages out through the selector's staleness, the DECLINED row's design).
-  e2e_fix deferlock comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
+  e2e_fix deferlock comments '[{"body": "🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-09-01T15:01:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}},{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->\n\n<!-- burn-deferred:v1 -->", "created_at": "2026-09-01T15:02:00Z", "user": {"login": "github-actions[bot]", "type": "Bot"}}]'
   e2e_fix deferlock branches '[]'
   e2e_fix deferlock pulls '[]'
   e2e deferlock success 2026-09-01T15:00:00Z
@@ -1344,7 +1384,7 @@ STUB
   # window opens after both. The defer is not this run's, the lock is still
   # active and nothing was delivered, so the run is dead and the claim is
   # withdrawn — not quietly declined.
-  e2e_fix deferold comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DEFERRED (re-check) — dependencies still not landed.","created_at":"2026-09-01T15:02:00Z","user":{"login":"o","type":"User"}}]'
+  e2e_fix deferold comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->","created_at":"2026-09-01T15:02:00Z","user":{"login":"o","type":"User"}}]'
   e2e_fix deferold branches '[]'
   e2e_fix deferold pulls '[]'
   e2e deferold success 2026-09-01T16:00:00Z
@@ -1356,7 +1396,7 @@ STUB
   # Row 4c: corroboration outranks the defer — a branch exists even though
   # the thread's latest stop is a DEFERRED → delivered, nothing posted (a
   # walk that deferred and then landed anyway is a delivery, not a defer).
-  e2e_fix deferbranch comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DEFERRED (re-check) — dependencies still not landed.","created_at":"2026-09-01T15:02:00Z","user":{"login":"o","type":"User"}}]'
+  e2e_fix deferbranch comments '[{"body":"🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed","created_at":"2026-09-01T15:01:00Z","user":{"login":"github-actions[bot]","type":"Bot"}},{"body":"🚢 DEFERRED (re-check) — dependencies still not landed.\n\n<!-- burn-deferred:v1 -->","created_at":"2026-09-01T15:02:00Z","user":{"login":"o","type":"User"}}]'
   e2e_fix deferbranch branches '[{"name": "claude/issue-1-the-fix"}]'
   e2e_fix deferbranch pulls '[]'
   e2e_fix deferbranch repo '{"default_branch": "main"}'
@@ -1764,7 +1804,69 @@ EOF
     '🚢 BURN-COOLDOWN') : ;;
     *) st_fail "COOLDOWN_MARKER drifted off select.py's BURN_COOLDOWN_MARKER (got '$COOLDOWN_MARKER')" ;;
   esac
+  case "$COOLDOWN_HTML_MARKER" in
+    '<!-- burn-cooldown:v1 -->') : ;;
+    *) st_fail "COOLDOWN_HTML_MARKER drifted (got '$COOLDOWN_HTML_MARKER')" ;;
+  esac
+  case "$DECLINED_HTML_MARKER" in
+    '<!-- burn-declined:v1 -->') : ;;
+    *) st_fail "DECLINED_HTML_MARKER drifted (got '$DECLINED_HTML_MARKER')" ;;
+  esac
+  case "$DEFERRED_HTML_MARKER" in
+    '<!-- burn-deferred:v1 -->') : ;;
+    *) st_fail "DEFERRED_HTML_MARKER drifted (got '$DEFERRED_HTML_MARKER')" ;;
+  esac
   echo "ok    selftest: withdrawal first line stays selector-compatible"
+
+  # -- issue #925: HTML authenticity + ROUTINE-gated burn-cooldown ---------
+  # A first-line DECLINED without its HTML marker is not this firing's stop
+  # (mid-body backtick quote of the marker alone also fails — same as #872).
+  cat > "$tmp/declined-no-html.ndjson" <<EOF
+{"body": "🚢 DECLINED — needs a decision\n\nparked without marker", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-10-02T22:00:00Z < "$tmp/declined-no-html.ndjson")" = "false" ] \
+    || st_fail "a DECLINED without HTML authenticity was read as a decline"
+  cat > "$tmp/declined-quoted-html.ndjson" <<EOF
+{"body": "A spec quotes \`${DECLINED_HTML_MARKER}\` mid-body.", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-10-02T22:00:00Z < "$tmp/declined-quoted-html.ndjson")" = "false" ] \
+    || st_fail "a mid-body quoted DECLINED HTML marker authenticated a stop"
+  cat > "$tmp/deferred-no-html.ndjson" <<EOF
+{"body": "🚢 DEFERRED (re-check) — dependencies still not landed.", "created_at": "2026-09-01T06:01:00Z", "login": "o", "type": "User"}
+EOF
+  [ "$(deferred_indicated 2026-09-01T06:00:00Z < "$tmp/deferred-no-html.ndjson")" = "false" ] \
+    || st_fail "a DEFERRED without HTML authenticity was read as a defer"
+  # Positive control: HTML + trusted author still authenticates.
+  cat > "$tmp/declined-html.ndjson" <<EOF
+{"body": "🚢 DECLINED — needs a decision\n\nparked\n\n${DECLINED_HTML_MARKER}", "created_at": "2026-10-02T23:08:39Z", "login": "o", "type": "User"}
+EOF
+  [ "$(decline_indicated 2026-10-02T22:00:00Z < "$tmp/declined-html.ndjson")" = "true" ] \
+    || st_fail "an authentic DECLINED (HTML + owner) was not read as a decline"
+  echo "ok    selftest: #925 stop HTML authenticity (DECLINED/DEFERRED)"
+
+  # ROUTINE=design-run must NOT post BURN-COOLDOWN; backlog-burn still does.
+  e2e_fix drcool comments '[]'
+  e2e_fix drcool branches '[]'
+  e2e_fix drcool pulls '[]'
+  : > "$tmp/drcool-postlog"; : > "$tmp/drcool-out"
+  PATH="$tmp/bin:$PATH" GH_TOKEN=stub GH_STUB_FIXTURES="$tmp/drcool-fix" \
+    GH_STUB_POSTLOG="$tmp/drcool-postlog" GITHUB_OUTPUT="$tmp/drcool-out" \
+    GITHUB_STEP_SUMMARY='' "$SELF" \
+    --repo o/r --issue 1 --agent-outcome success --run-url u --routine design-run \
+    --run-started-at 2026-09-19T06:00:00Z >/dev/null \
+    || st_fail "design-run claimless death exited non-zero"
+  grep -qx 'delivered=false' "$tmp/drcool-out" || st_fail "design-run claimless death did not emit delivered=false"
+  grep -qx 'declined=false' "$tmp/drcool-out" || st_fail "design-run claimless death did not emit declined=false"
+  if grep "$COOLDOWN_MARKER" "$tmp/drcool-postlog" >/dev/null; then
+    st_fail "design-run death posted BURN-COOLDOWN (must be backlog-burn only — #925)"
+  fi
+  e2e_fix bbcool comments '[]'
+  e2e_fix bbcool branches '[]'
+  e2e_fix bbcool pulls '[]'
+  e2e bbcool success 2026-09-19T06:00:00Z
+  grep "$COOLDOWN_MARKER" "$tmp/bbcool-postlog" >/dev/null \
+    || st_fail "backlog-burn claimless death did not post BURN-COOLDOWN"
+  echo "ok    selftest: #925 ROUTINE-gated burn-cooldown (design-run skips; backlog-burn posts)"
 
   # -- usage errors exit 2 -------------------------------------------------
   rc=0
