@@ -14,7 +14,7 @@ include <styles/workshop-utility/style.scad> // family tokens; $fn set below
 /* [Part] */
 // What to render: the two printable parts, the fit coupons, the assembled
 // preview, or the boolean mate proofs (ci.fitchecks — never printed).
-part = "assembly"; // [assembly, boss, collar, collar-shallow, thread-coupon, bore-coupon, thread-coupon-25, bore-coupon-25, fit-mate, fit-mate-ctrl, cutaway]
+part = "assembly"; // [assembly, boss, collar, collar-shallow, boss-25, collar-25, collar-shallow-25, thread-coupon, bore-coupon, thread-coupon-25, bore-coupon-25, fit-mate, fit-mate-ctrl, cutaway]
 
 /* [Rod & socket] */
 // Rod barrel outer diameter, measured where it sits in the socket (mm)
@@ -76,10 +76,15 @@ $fn = style_fn; // 64 — the family's curve resolution
 // ---------------------------------------------------------------------------
 // Derived
 // ---------------------------------------------------------------------------
-// B5: 25 mm reference coupons are gated as named parts (not a second rod_d
-// override on the command line). Everything else uses the Customizer `rod_d`.
-_geom_rod_d = (part == "thread-coupon-25" || part == "bore-coupon-25")
-    ? 25.0 : rod_d;
+// B5 / B5b: 25 mm reference parts are gated by name (rod Ø pinned at 25.0 —
+// not a second rod_d override on the command line). Everything else uses the
+// Customizer `rod_d`. `rod_clearance` still applies (tune on the bore coupon,
+// then match it on plain boss/collar exports if you move off 0.6).
+function _part_at_25mm(p) =
+    p == "thread-coupon-25" || p == "bore-coupon-25"
+    || p == "boss-25" || p == "collar-25" || p == "collar-shallow-25";
+
+_geom_rod_d = _part_at_25mm(part) ? 25.0 : rod_d;
 
 bore_d = _geom_rod_d + rod_clearance;              // slip bore at geom rod
 thread_major = bore_d + 2 * wall;                  // 47.0 — scales with bore
@@ -323,9 +328,10 @@ module cutaway() {
     }
 }
 
-if (part == "boss") boss();
-else if (part == "collar") collar();
-else if (part == "collar-shallow") collar(shallow_engagement_depth);
+if (part == "boss" || part == "boss-25") boss();
+else if (part == "collar" || part == "collar-25") collar();
+else if (part == "collar-shallow" || part == "collar-shallow-25")
+    collar(shallow_engagement_depth);
 else if (part == "thread-coupon") thread_coupon();
 else if (part == "bore-coupon") bore_coupon();
 else if (part == "thread-coupon-25") thread_coupon();
