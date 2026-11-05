@@ -115,8 +115,11 @@ jobs:
       # The settle job's two AGENT_OUTCOME reads are this output. The drift
       # guard counts the name AGENT_OUTCOME twice in the workflow file.
       walk_outcome: ${{ steps.ship_zai_1.outcome == 'success' && 'success' || steps.ship_zai_2.outcome == 'success' && 'success' || steps.ship_zai_3.outcome == 'success' && 'success' || steps.ship_anthropic_4.outcome == 'success' && 'success' || steps.ship_anthropic_5.outcome == 'success' && 'success' || (steps.ship_zai_1.outcome == 'skipped' && steps.ship_zai_2.outcome == 'skipped' && steps.ship_zai_3.outcome == 'skipped' && steps.ship_anthropic_4.outcome == 'skipped' && steps.ship_anthropic_5.outcome == 'skipped') && 'not-run' || 'failure' }}
-      # Per-link Actions outcomes for triage (#897): provider-triage folds
-      # these in so a walk where no link served cannot report servable/served.
+      # Per-link Actions outcomes for the sibling triage job (#897): folded
+      # into the probe so a walk where no link served cannot report
+      # servable/served. (Do not name the composite action here — a
+      # design-run-deliver selftest greps the burn job for that string to
+      # prove triage stays off the agent runner.)
       ship_outcomes: ${{ steps.ship_zai_1.outcome }},${{ steps.ship_zai_2.outcome }},${{ steps.ship_zai_3.outcome }},${{ steps.ship_anthropic_4.outcome }},${{ steps.ship_anthropic_5.outcome }}
     # Key 1 of 2: the live arming / kill switch (repo variable). Unset or
     # anything but 'true' pauses the whole job in seconds without a commit.
