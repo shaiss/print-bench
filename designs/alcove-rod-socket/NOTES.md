@@ -222,10 +222,14 @@ only; heavy closet installs need plain **`boss`** with `rod_d = 25` and
 `screw_count = 2` (or a stud). At 25 mm the boss flange is about **Ø43.8**
 (vs Ø58.8 at 40 mm).
 
-**Field question (Drik / #812):** at 25 mm the collar OD is **39 mm** and the
-auto-capped grip is **32 flutes** (tighter pitch than 40 mm / 36). Wet-hand
-grip vs the 40 mm collar is unknown — do not retune `knurl_flutes` without a
-print report.
+**Field question (Drik / #812) — answered until print report (#992):** at 25 mm
+the collar OD is **39 mm** and the auto-capped grip is **32 flutes** (tighter
+pitch than 40 mm / 36). Do not retune `knurl_flutes` without a print report;
+Drik's customer-side answer is that wash-day grip pitch is unlikely to matter
+(thread feel / retention is the report that counts). The product page now
+expects finer, softer lands at this OD. First 25 mm print report should also
+note whether the 40 mm wall-to-wall rod-cut guidance (~40 mm short) still
+feels right at the smaller collar.
 
 ## Rod cut (wall-to-wall)
 

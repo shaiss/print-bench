@@ -1,11 +1,12 @@
 # Alcove rod socket
 
 A parametric, two-part screw-together end socket for curtain or closet rods
-that span a recess or alcove. Default **40 mm** is fit-proven in the field;
-a **25 mm** reference set is CI-gated (not field-tested on a real rod yet —
-see *What you get*). A wall boss screws flat to each facing wall; the rod's
-ends plug into knurled collars that hand-thread onto the bosses. Curtains
-down for washing = unthread two collars, no tools.
+that span a recess or alcove. Default **40 mm** is the gated production size
+(coupon-proven; not yet field-proven on a hung rod — see NOTES); a **25 mm**
+reference set is CI-gated with the same field-test honesty (see *What you
+get*). A wall boss screws flat to each facing wall; the rod's ends plug into
+knurled collars that hand-thread onto the bosses. Curtains down for washing
+= unthread two collars, no tools.
 
 > **v2** — ships the separable multi-object plate deliverable. v1 (#361)
 > printed **fused** in the field (a single STL of the two parts slices as one
@@ -44,7 +45,8 @@ Printed **in pairs** (one holder per wall, one pair per rod):
   `alcove-rod-socket-boss-25.scad`, `alcove-rod-socket-collar-25.scad`,
   `alcove-rod-socket-collar-shallow-25.scad`. No 25 mm plate — mirror the 40 mm
   policy: the gated plate stays `boss` + `collar` only; shallow is a separate
-  download.
+  download. **US “1-inch” rod (~25.4 mm)?** Skip these — see the 25.4 note in
+  Parameters.
 
 **Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
 **separate parts**, and the one rule is: keep them as two distinct objects in the
@@ -109,6 +111,8 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   vs PLA; ASA shrinks the bore ~0.2–0.4 mm — about the whole slip — so
   print the bore coupon in ASA first and expect +0.1–0.2 mm on
   `rod_clearance` (a material-specific preset is charter backlog B4).
+  ASA needs an enclosure; expect the thread to run snug — coupon first,
+  `thread_tol` +0.05 if it drags.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Seam:** Scarf (Bambu Studio) or Back — the default Aligned seam stacks a
@@ -116,7 +120,8 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   locally eat the 0.3 mm radial sliding fit.
 - **Infill:** 20% gyroid.
 - **Supports:** none needed anywhere, by design.
-- **Bed adhesion:** brim the **collar** (and `collar-shallow`), per-object
+- **Bed adhesion:** brim the **collar** (and `collar-shallow`, and the
+  **`*-25` collars**), per-object
   (Bambu Studio and most slicers brim per object — select just the collar).
   Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
   part that can lift; the boss doesn't need it — it prints flange-down on a
@@ -141,7 +146,7 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
 
 | Coupon | When |
 |---|---|
-| `thread-coupon` / `bore-coupon` | default **40 mm** rod (fit-proven size) |
+| `thread-coupon` / `bore-coupon` | default **40 mm** rod (coupon-proven size) |
 | `thread-coupon-25` / `bore-coupon-25` | **25.0 mm** reference (CI-gated; not field-tested yet) |
 
 **25 mm and both coupons fit at defaults?** The gated `*-25` downloads pin
@@ -152,9 +157,12 @@ measured barrel) and your tuned tolerances — same separable-object rules as th
 40 mm parts. When defaults match, use the gated **`boss-25`**, **`collar-25`**
 (and **`collar-shallow-25`** for the deep+shallow install) — from the clone
 path until a Release after v2.0 carries them. Grip auto-caps to
-**32** flutes at this collar OD. **`boss-25`** is **`screw_count=1`** only;
-heavier closet loads want plain **`boss`** with `rod_d = 25` and
-`screw_count = 2` (or screw into a stud).
+**32** flutes at this collar OD — the capped band prints with finer, softer
+lands than the 40 mm grip (normal at this OD; do not retune without a print
+report). **`boss-25`** is **`screw_count=1`** only (policy: the wrapper pins
+the Customizer default, mirroring the gated 40 mm boss; `screw_count=2`
+grows the flange and remains available on plain `boss` at `rod_d = 25`);
+heavier closet loads want that plain **`boss`** path or a stud.
 
 The gate scores the boss / collar / collar-shallow / thread-coupon set with
 the same thin-wall warning pattern (tessellated thread crests and knurl
@@ -186,13 +194,13 @@ you'll export the fused assembly preview instead of a printable part):
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
 
-**Gated rod sizes:** **40 mm** (fit-proven in the field — production parts +
-40 mm coupons) and **25 mm** (CI-gated `thread-coupon-25` / `bore-coupon-25` +
-`boss-25` / `collar-25` / `collar-shallow-25` — not fit-tested on a real rod
-yet). Any other barrel Ø still needs you to set `rod_d` and print the **40 mm**
-coupon wrappers (`alcove-rod-socket-coupon.scad` /
-`alcove-rod-socket-bore-coupon.scad`) at that override before trusting a
-boss/collar pair.
+**Gated rod sizes:** **40 mm** (gated production size — coupon-proven; not yet
+field-proven on a hung rod — production parts + 40 mm coupons) and **25 mm**
+(CI-gated `thread-coupon-25` / `bore-coupon-25` + `boss-25` / `collar-25` /
+`collar-shallow-25` — same field-test honesty). Any other barrel Ø still needs
+you to set `rod_d` and print the **40 mm** coupon wrappers
+(`alcove-rod-socket-coupon.scad` / `alcove-rod-socket-bore-coupon.scad`) at
+that override before trusting a boss/collar pair.
 
 **Calipers read ~25.4 mm (common on US “1 inch” rods)?** Every `*-25` gated
 part is fixed at a **25.0 mm** barrel and ignores Customizer `rod_d` — at
