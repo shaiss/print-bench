@@ -9,9 +9,13 @@ once reviewed — add a line, never reframe one.
 - **assembly** — boss and collar seated as installed (collar rim on the
   flange face, thread engaged), from the front-right iso. Sells the
   two-part shape and the knurl band.
-- **cutaway** — orthographic section (the +x half removed) face-on: male
-  thread on the boss neck, female groove in the collar, rod bore above,
-  countersunk screw hole through the boss. The internal-fit evidence shot.
+- **cutaway** — orthographic kept-half exterior (the +x half removed): the
+  camera looks along y, edge-on to the section plane, so the cut reads as a
+  silhouette line. Frozen; the face-on internal fit is `cutaway-section`.
+- **cutaway-section** — orthographic section face-on (same `part="cutaway"`,
+  eye on ±x so the cut normal is along the view): male thread on the boss
+  neck, female groove in the collar, rod bore above, countersunk screw hole
+  through the boss. The internal-fit evidence shot.
 - **collar-print** — the collar alone in its print orientation, rod mouth
   down: shows the tube that lands on the bed, the 45° flare up to the grip
   band, and that the internal thread sits at the top of the print.

@@ -76,6 +76,7 @@ the one motion the part really performs — seeded from the hero.
 | ~~B2~~ | ~~Anti-rotation rib (screwless alternative to `screw_count=2`)~~ | **Done** (supersedes #792): eight 0.8 mm 45° V-grooves on the boss wall face, default on for `screw_count=1`; omitted at `screw_count=2`. Field bite still waits on the proving print. | — |
 | ~~B5~~ | ~~25 mm reference coupons (thread + bore)~~ | **Done** (#809): gated `thread-coupon-25` + `bore-coupon-25`; knurl flute cap by OD (NOTES) | — |
 | B5b | Gated 25 mm production holders (`boss` / `collar` / `collar-shallow` at fixed 25 mm, Release + plate policy) | coupons prove the size; holders still need Customizer `rod_d=25` export until gated parts ship | ci.parts + README |
+| B7 | v2.1 Release cut — re-gate the grooved `boss` from the source default (`anti_rotate` on) into a tagged Release | v2.0 STLs ship plain flanges; the B2 feature only reaches Release downloaders with this cut. Blocked on this PR's merge; the proving print (B4 / v1-DoD field test) outranks it | owner tag push + Release bundle |
 
 Re-ranked 2026-08-24 per the #379 thread's ruling (Vera's note: the issue
 body's order was two rounds stale — the committed order wins). A "B6" appears
@@ -109,3 +110,4 @@ All four are the brief's own open questions, non-blocking for modeling.
 | 2026-09-12 | Ship `collar-shallow` as a gated part (B3 / #631) | `ci.parts` cannot carry a free-form `-D engagement_depth=12`; dual-`-D` hand-render is the foot-gun the deliverable rules stop. Depth threaded into `collar`/`collar_use`; plate unchanged (boss+collar only) |
 | 2026-10-04 | B5: gate 25 mm thread + bore coupons; cap knurl flutes by collar OD | 36 flutes fail N6 merge guard at 25 mm (collar OD 39); auto-cap to 32 keeps asserts without weakening floors — slip still 0.6 until a coupon says otherwise (#809) |
 | 2026-11-05 | Anti-rotation V-grooves on the boss wall face (B2; supersedes #792) | Screwless spin-lock for `screw_count=1` so collar torque does not ream a drywall anchor. See NOTES D14. |
+| 2026-11-05 | v2.0 ships plain flanges; grooved bosses ship from source until v2.1 | Release STLs predate B2. Source default keeps `anti_rotate` on for renders; the v2.1 Release cut (backlog B7) re-gates the grooved boss after merge, with the proving print still outranking that cut. |
