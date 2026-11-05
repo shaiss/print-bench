@@ -108,6 +108,11 @@ rod_tube_od = bore_d + 2 * wall;                   // 47.0
 collar_lower_h = lead_in + neck_len + 1.0;         // 12.6 — +1 relief past neck
 collar_h = engagement_depth + collar_lower_h;      // 40.6
 boss_h = flange_t + lead_in + neck_len;            // 18.0
+// Rod tip stop in collar coords (rim on flange): the boss neck tip. The
+// bore transition at collar_lower_h opens from bore_d up to female_bore_d,
+// so a Ørod_d rod passes that plane and bottoms on the boss — the +1 mm in
+// collar_lower_h is relief past this tip, not a collar seat for the rod.
+rod_stop_z = boss_h - flange_t;                    // 11.6 == lead_in + neck_len
 
 shank_d = screw_clearance_d(screw_size);           // 5.5 for M5
 csk_d = socket_head(screw_size)[0] + 0.5;          // 10.0 — flat-head recess
@@ -181,9 +186,16 @@ assert(witness_slot_w >= 0.8 && witness_slot_w <= 3.0, str(
     " mm — want [0.8, 3] so the mouth-down roof bridges."));
 assert(witness_slot_h >= 4 && witness_slot_h <= 16, str(
     "witness_slot_h ", witness_slot_h, " mm — want [4, 16]."));
-assert(!witness_window || witness_slot_h + 1.2 <= shallow_engagement_depth, str(
-    "witness slot ", witness_slot_h,
-    " mm must fit the shallow collar below the mouth chamfer."));
+// Slot is referenced to rod_stop_z (boss tip), not collar_lower_h, so a rod
+// still ~1 mm short of bottoming cannot fill the window like a seated one.
+// Keep the cut above the male neck tip (thread clearance) and below the
+// shallow mouth chamfer.
+assert(!witness_window ||
+    rod_stop_z + 0.3 + witness_slot_h + 1.2
+        <= collar_lower_h + shallow_engagement_depth, str(
+    "witness slot from rod_stop_z spans ",
+    rod_stop_z + 0.3 + witness_slot_h,
+    " mm and must clear the shallow collar mouth chamfer."));
 
 // ---------------------------------------------------------------------------
 // Boss — wall plate + male thread. Printed flange-down (its use orientation:
@@ -281,11 +293,11 @@ module collar_use(depth = engagement_depth) {
     }
 }
 
-// Soft triangular annulus just above the rod-seat plane. Peak bore =
+// Soft triangular annulus just above the bore transition. Peak bore =
 // bore_d − 2·seat_detent_radial (40.0 at the 0.30 default — line-to-line
 // with a 40 mm rod, a light scrape that becomes a catch as the end passes
-// the peak then bottoms on the shoulder). Printed mouth-down the ridge is
-// only a changing inner diameter — no overhang.
+// the peak then continues ~1 mm onto the boss tip at rod_stop_z). Printed
+// mouth-down the ridge is only a changing inner diameter — no overhang.
 module seat_detent_ring() {
     r_bore = bore_d / 2;
     embed = 0.6;                                   // weld into the tube wall
@@ -300,14 +312,16 @@ module seat_detent_ring() {
             ]);
 }
 
-// Through-wall axial windows at the seat. Capsule profile: hoop width is
-// the bridge when the collar prints rod-mouth-down (slot sits near the
-// top of the print). Rounded ends rest on the seat plane so the rod tip
-// is visible when seated; the cut stays above the female thread.
+// Through-wall axial windows at the rod stop. Capsule profile: hoop width
+// is the bridge when the collar prints rod-mouth-down. Referenced to
+// rod_stop_z (boss neck tip), not collar_lower_h: the Ørod_d tip bottoms
+// on the boss ~1 mm past the bore transition, so a window that started at
+// collar_lower_h + 0.3 filled the same whether the rod was seated or still
+// ~1 mm short. Lower tip sits 0.3 mm above the stop — above the male neck
+// (thread clearance) into the +1 mm relief — so empty dark at the seat end
+// means short-of-seat, and the tip edge appears only when bottomed.
 module seat_witness_cut(depth) {
-    // 0.3 mm above the seat plane so the capsule end cannot kiss the
-    // shoulder face (that kiss was a non-manifold edge on the first export).
-    z0 = collar_lower_h + 0.3 + witness_slot_w / 2;
+    z0 = rod_stop_z + 0.3 + witness_slot_w / 2;
     z1 = min(z0 + witness_slot_h - witness_slot_w,
              collar_lower_h + depth - 1.0 - witness_slot_w / 2);
     for (i = [0 : witness_slot_count - 1])

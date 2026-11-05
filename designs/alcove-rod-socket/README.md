@@ -197,20 +197,20 @@ bore at `rod_d = 25`) before you trust boss/collar exports.
 2. Slide the collars over the rod before hanging it — one at each end.
 3. Thread each collar onto its boss until the rim seats on the plate. Push
    each rod end in until you feel a scrape or click past the seat ridge, then
-   bottom on the shoulder — that tactile catch is what the design targets,
+   bottom on the boss tip — that tactile catch is what the design targets,
    but it is **unproven until the week-of-use proving print** (NOTES.md D13;
-   field test log). Look through the two thin slots near the grip-to-tube
-   flare: you should see the rod *tip* at the seat (empty dark deep in the
-   slot = not fully in). A thin dark **crescent at the seat end** of each
-   slot can be normal when seated (the witness starts 0.3 mm above the seat
-   plane) — look for the rod tip filling the slot, not a perfectly
-   black-free bottom. For a rigid rod between two fixed walls: use one
-   default `collar` (deep) and one `collar-shallow` — push into the deep
-   side, drop the shallow end in, tighten both collars. Measure
-   **wall-to-wall**, then cut the rod ≈ **40 mm shorter** (38–42 mm is the
-   safe band): each end bottoms on its collar shoulder 19 mm from that wall,
-   so the seated rod spans nearly wall-to-wall (mouth-to-mouth **plus** ~38 —
-   both sockets sit recessed into their collars).
+   field test log). Look through the two thin slots at the grip band near the
+   flare: empty dark at the **seat end** of the slot means the tip is still
+   short of the boss; the tip edge appears there only when bottomed (the
+   witness starts 0.3 mm above the boss-tip stop, not the bore transition —
+   a rod ~1 mm short used to fill the window like a seated one). For a rigid
+   rod between two fixed walls: use one default `collar` (deep) and one
+   `collar-shallow` — push into the deep side, drop the shallow end in,
+   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈
+   **40 mm shorter** (38–42 mm is the safe band): each end bottoms on its
+   boss tip 18 mm from that wall, so the seated rod spans nearly
+   wall-to-wall (hard stop is wall-to-wall − **36 mm**; the 40 mm short cut
+   leaves install slack).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out — **holding the flange still** as you
    unthread, because unscrewing friction can walk the single M5 out of the

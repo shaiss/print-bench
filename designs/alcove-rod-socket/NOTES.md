@@ -168,13 +168,17 @@ default-depth holder pair.
      load-bearing wall stays 3.2. Hand-pushable: the lip is a short axial
      bump, not a press-fit length.
   2. **Witness window** — two 1.6 × 8 mm axial capsule slots through the
-     rod-tube wall, 180° apart, rounded ends **0.3 mm above** the seat plane so
-     the rod *tip* is visible when seated (empty dark at the seat = not in)
-     without kissing the shoulder face (a coplanar kiss exported non-manifold).
-     Printed **rod-mouth-down** (D5) the slots sit near the top of the print;
-     the 1.6 mm hoop width is the bridge a stock 0.4/0.2 profile takes
-     without supports (N4). Slots stay above the female thread, so
-     `fit-mate` / phase / `lead_in` are untouched (D3).
+     wall, 180° apart, rounded ends **0.3 mm above** `rod_stop_z` (the boss
+     neck tip in collar coords = `boss_h − flange_t`). The Ø40 rod passes the
+     bore transition at `collar_lower_h` (ID opens to the female bore) and
+     bottoms on the boss ~1 mm past that plane — so a window keyed to
+     `collar_lower_h + 0.3` filled the same for seated and ~1 mm-short rods
+     (Copilot on #989). Keying to the actual stop makes empty dark at the
+     seat end mean short-of-seat, and the tip edge appear only when bottomed.
+     The lower tip sits in the +1 mm relief above the male neck, so thread
+     clearance / `fit-mate` / phase / `lead_in` stay untouched (D3). Printed
+     **rod-mouth-down** (D5); the 1.6 mm hoop width bridges on a stock
+     0.4/0.2 profile without supports (N4).
   Production defaults **on** (`seat_detent`, `witness_window`); either can
   be switched off. Asserts cap the lip at 0.5 mm radial, the slot width at
   3 mm (bridge), and both features to fit `shallow_engagement_depth`.
@@ -248,11 +252,13 @@ holders (32 flutes auto). Gated `boss-25` / `collar-25` parts are backlog B5b.
 
 ## Rod cut (wall-to-wall)
 
-With both collars seated, each rod end bottoms on the collar shoulder at
-`flange_t + collar_lower_h` = 6.4 + 12.6 = **19 mm** from its wall (the +1 mm
-in `collar_lower_h` is relief past the boss neck tip at `boss_h` = 18).
-Double-bottom length is therefore wall-to-wall − **38 mm**; the product page
-recommends ≈ **40 mm** short (38–42 band) for a couple mm of install slack.
+With both collars seated, each rod end bottoms on the **boss neck tip** at
+`boss_h` = **18 mm** from its wall (`rod_stop_z` = `lead_in + neck_len` =
+11.6 in collar coords). The bore transition at `flange_t + collar_lower_h` =
+19 mm is not a rod seat — the +1 mm in `collar_lower_h` is relief past the
+neck tip, and the ID opens there into the female bore. Double-bottom length
+is therefore wall-to-wall − **36 mm**; the product page recommends ≈ **40 mm**
+short (38–42 band) for install slack above that hard stop.
 Deep/shallow mouth heights off the wall are 47 / 31 mm (`flange_t` + collar
 height) — they set mouth-to-mouth, not the cut. Engagement depths (28 / 12)
 are how far the rod plugs past each mouth once it is in, not a span to
