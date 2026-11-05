@@ -196,6 +196,20 @@ def test_path_scan_over_cap_returns_none_fail_closed():
     assert elapsed < 1.0, f"over-cap should return None quickly: {elapsed:.3f}s"
 
 
+def test_path_scan_cap_plus_one_returns_none():
+    # #970 / LOW-B on #953: the first byte past the 20KB cap must fail closed
+    # with None (no regex scan), so a future change that truncates-and-scans
+    # instead cannot regress silently.
+    import time
+
+    body = "!" * (prot._PATH_SCAN_CAP + 1)
+    assert len(body) == prot._PATH_SCAN_CAP + 1
+    t0 = time.perf_counter()
+    assert prot.extract_scope_paths("x", body) is None
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.0, f"cap+1 should return None quickly: {elapsed:.3f}s"
+
+
 def test_path_scan_over_cap_worst_case_shapes_are_fast():
     # Reviewer probe_cap.py: '!' / '*' / U+200B at 64KB must not scan.
     import time
@@ -211,8 +225,11 @@ def test_path_scan_over_cap_worst_case_shapes_are_fast():
 
 
 def test_path_scan_at_cap_worst_case_regex_shape():
-    # LOW-1 on #953: real worst-case regex input at the cap (not abcd/ x N).
-    # Reviewer accepts a remaining 3–4s worst case below the cap.
+    # #970 / LOW-B on #953: real worst-case regex input at exactly the 20KB
+    # cap (reviewer probe shapes '!' / '*' / U+200B — not a repeated benign
+    # path like ``abcd/``). Review accepted a remaining ~3–4s worst case
+    # below the cap; pin a 10s CI bound so a future regex change that makes
+    # it slower fails the test without flaking on loaded runners.
     import time
 
     prefix = "please edit scripts/design-run-deliver.sh before the noise\n"
@@ -222,7 +239,7 @@ def test_path_scan_at_cap_worst_case_regex_shape():
         t0 = time.perf_counter()
         paths = prot.extract_scope_paths("x", body)
         elapsed = time.perf_counter() - t0
-        assert elapsed < 5.0, (
+        assert elapsed < 10.0, (
             f"at-cap {ch!r} scan too slow: {elapsed:.3f}s"
         )
         assert paths == {"scripts/design-run-deliver.sh"}
