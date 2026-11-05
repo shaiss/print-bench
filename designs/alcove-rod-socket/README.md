@@ -201,7 +201,8 @@ leaves only **0.2 mm** diametral slip — often too tight once the hole shrinks.
 Print the plain **`thread-coupon`** and **`bore-coupon`** wrappers (or the main
 file) with `rod_d = 25.4` and tune `thread_tol` / `rod_clearance` there. Use
 the same `rod_clearance` on plain **`boss`** / **`collar`** / **`collar-shallow`**
-exports (`rod_d = 25.4` or your measured barrel) — the holder bore follows
+exports (`rod_d = 25.4` or your measured barrel) and the same `thread_tol` on
+**`collar`** / **`collar-shallow`** (the female thread). The holder bore follows
 `rod_clearance`, not the fixed `*-25` downloads.
 
 ## Assembly & use
