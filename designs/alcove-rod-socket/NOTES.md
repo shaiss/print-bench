@@ -194,7 +194,9 @@ default-depth holder pair.
 ## Print this first
 
 Two fits to tune, two coupons. Both are include-override wrappers on the
-production modules — what you print *is* what ships.
+production modules — what you print *is* what ships. The wall-face ribs are
+not a third coupon — they validate on the proving print (item 3), not a
+dedicated part.
 
 1. **Thread coupon** (`alcove-rod-socket-coupon.scad`): male stub + female
    ring from the production thread. Screw the ring on: it should run free
@@ -211,6 +213,15 @@ production modules — what you print *is* what ships.
    - Visible wobble → lower it 0.1 mm.
    - In ASA print this coupon first: bore shrink is ~0.2–0.4 mm, most of
      the slip — expect +0.1–0.2 mm on `rod_clearance`.
+3. **Boss spin-check (no extra print):** the boss *is* its own coupon.
+   Press the printed flange onto scrap drywall or painted wood, hand-torque
+   the M5, and check for spin — five minutes. The ribs' bite validates on
+   the proving print / this press-check, not a rib coupon.
+4. **If the proving print still spins** (after the press-check and a real
+   wall install): deepen first — override `anti_rotate_h=1.2` /
+   `anti_rotate_w=2.4` (docs-only escalation; SCAD defaults stay 0.8 / 1.6)
+   before jumping to `screw_count=2`. Contingent on a spinning proving
+   print; do not pre-emptively deepen.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.

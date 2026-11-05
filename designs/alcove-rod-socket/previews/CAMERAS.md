@@ -23,3 +23,8 @@ once reviewed — add a line, never reframe one.
   brim protects. `collar-print`'s iso reads end-for-end misleadable (both
   round ends look alike from the side); this shot fixes which face meets
   the bed and where the mouth is.
+- **boss-bed** — the boss wall/bed face from below (same collar-bed camera
+  angles, `tz=9` to recenter the 18 mm boss, `part="boss"`): the eight
+  first-layer 45° V-grooves between the inner washer and outer rim — the
+  anti-rotation lands that bite drywall or paint when the flange sits
+  against the wall.
