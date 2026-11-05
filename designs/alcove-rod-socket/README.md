@@ -189,16 +189,23 @@ bore at `rod_d = 25`) before you trust boss/collar exports.
 ## Assembly & use
 
 1. Screw a boss to each facing wall, countersunk M5 head flush in the neck.
-   The wall-face ribs should face the wall (print orientation = use
-   orientation). Screw length: the boss is 18 mm through, so **M5 × 40 mm**
-   into a rated drywall anchor (the anchor card governs the exact pairing),
-   or **M5 × 55 mm** into a stud behind ~13 mm board (18 + 13 leaves ≥ 20 mm
-   in the stud). One M5 in a rated anchor holds a pair to roughly **10 kg**
-   of hung weight — the ribs take the *spin* of threading the collar so the
-   anchor does not ream out; they do not raise the load rating. Heavier
-   curtains than that want a stud or `screw_count=2` (derivation in NOTES).
-   On tile, masonry, or metal the ribs cannot bite — use `screw_count=2`
-   (or `anti_rotate=false` if you just want a flat flange).
+   Print orientation = use orientation (the printed flange face goes against
+   the wall). **v2.0 Release STLs are plain flanges** — no wall grooves; use
+   step 4's hold-the-flange note when you torque or unthread the collar.
+   Bosses printed from source with `anti_rotate` on (default for a single M5)
+   carry eight shallow V-grooves on that wall face — keep them against the
+   wall so they bite into paint or drywall paper. Screw length: the boss is
+   18 mm through, so **M5 × 40 mm** into a rated drywall anchor (the anchor
+   card governs the exact pairing), or **M5 × 55 mm** into a stud behind
+   ~13 mm board (18 + 13 leaves ≥ 20 mm in the stud). One M5 in a rated
+   anchor holds a pair to roughly **10 kg** of hung weight. On a **grooved**
+   boss those lands take the *spin* of threading the collar so the anchor
+   does not ream out; they do not raise the load rating. **Plain** Release
+   bosses do not — hold the flange when you torque the collar (step 4).
+   Heavier curtains than that want a stud or `screw_count=2` (derivation in
+   NOTES). On tile, masonry, or metal grooves cannot bite — use
+   `screw_count=2` (or `anti_rotate=false` for a flat flange you accept
+   may spin).
 2. Slide the collars over the rod before hanging it — one at each end.
 3. Thread each collar onto its boss until the rim seats on the plate. For a
    rigid rod between two fixed walls: use one default `collar` (deep) and one
@@ -209,9 +216,12 @@ bore at `rod_d = 25`) before you trust boss/collar exports.
    wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
    into their collars).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
-   thread) and lift the rod out. The wall-face ribs resist that unthread
-   torque on a single M5 in drywall or wood; still hold the flange on a
-   hard wall (tile) or if you turned `anti_rotate` off. No tools.
+   thread) and lift the rod out. **Grooved bosses** (`anti_rotate` on, a
+   source print): the wall-face lands resist that unthread torque on a
+   single M5 in drywall or wood. **Plain bosses** (v2.0 Release download,
+   or `anti_rotate=false`): the flange can spin — hold it with your other
+   hand while you unthread, especially on tile or other hard walls where
+   nothing bites. No tools.
 
 If a fit is off, don't resize the parts — reprint the coupon and move the
 tolerance (`thread_tol`, `rod_clearance`) in 0.05–0.1 mm steps; see

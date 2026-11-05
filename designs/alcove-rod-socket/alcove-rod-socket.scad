@@ -160,19 +160,22 @@ assert(anti_rotate_h >= 0.4 && anti_rotate_h <= 1.6, str(
 assert(anti_rotate_w >= 0.8 && anti_rotate_w <= 2 * anti_rotate_h + 1e-9, str(
     "anti_rotate_w ", anti_rotate_w, " mm — want [0.8, 2·h=", 2 * anti_rotate_h,
     "] so flanks stay ≥ 45°."));
-assert(anti_rotate_h + 2 * style_edge_chamfer < flange_t, str(
-    "anti_rotate_h ", anti_rotate_h, " mm would eat through the flange."));
-// Layout numbers the cutter uses (always derived so a collar-only render
-// still refuses an unprintable groove). Used only when the cut actually runs.
+// Layout numbers the cutter uses; layout asserts run only when the cut runs
+// (same gate as anti_rotate_cut()) so anti_rotate=false still exports a flat
+// flange at small rod_d / flange_d.
 anti_rotate_r_in = shank_d / 2 + 5.0;
 anti_rotate_r_out = flange_d / 2 - style_edge_chamfer - 1.6;
 anti_rotate_pitch_in = 2 * PI * anti_rotate_r_in / anti_rotate_n;
-assert(anti_rotate_pitch_in >= anti_rotate_w + 1.6, str(
-    "anti-rotate lands merge at r_in: pitch ", anti_rotate_pitch_in,
-    " mm vs groove ", anti_rotate_w, " mm. Cut anti_rotate_n or _w."));
-assert(anti_rotate_r_out - anti_rotate_r_in >= 8, str(
-    "anti-rotate annulus too short (", anti_rotate_r_out - anti_rotate_r_in,
-    " mm) — flange is too small for this groove layout."));
+if (anti_rotate && screw_count == 1) {
+    assert(anti_rotate_h + 2 * style_edge_chamfer < flange_t, str(
+        "anti_rotate_h ", anti_rotate_h, " mm would eat through the flange."));
+    assert(anti_rotate_pitch_in >= anti_rotate_w + 1.6, str(
+        "anti-rotate lands merge at r_in: pitch ", anti_rotate_pitch_in,
+        " mm vs groove ", anti_rotate_w, " mm. Cut anti_rotate_n or _w."));
+    assert(anti_rotate_r_out - anti_rotate_r_in >= 8, str(
+        "anti-rotate annulus too short (", anti_rotate_r_out - anti_rotate_r_in,
+        " mm) — flange is too small for this groove layout."));
+}
 
 // ---------------------------------------------------------------------------
 // Boss — wall plate + male thread. Printed flange-down (its use orientation:
