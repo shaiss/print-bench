@@ -156,7 +156,10 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   the collar's first-layer ring lifts, fix it with the brim above — don't
   flip the part.
 - **Print order:** both coupons first, then tune (below), then a pair
-  (deep+shallow: two bosses, one `collar`, one `collar-shallow`).
+  (deep+shallow: two bosses, one `collar`, one `collar-shallow`). The bore
+  and thread coupons prove slip and thread only — **not** the seat catch;
+  print a **full collar** (not just the bore coupon) when you want to feel
+  the seat click or scrape before you hang the rod (NOTES.md D13).
 
 | Coupon | When |
 |---|---|
@@ -199,6 +202,8 @@ you'll export the fused assembly preview instead of a printable part):
 | `anti_rotate` | on | wall-face 45° V-grooves for a single M5; ignored at `screw_count=2` (source default on for renders; **v2.0 Release STLs ship plain flanges**) |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
+| `seat_detent` | on | annular catch at the rod seat — feel "fully in" |
+| `witness_window` | on | two axial sight slots at the seat — see "fully in" |
 
 **Gated rod sizes:** **40 mm** (fit-proven in the field — production parts +
 40 mm coupons) and **25 mm** (CI-gated `thread-coupon-25` /
@@ -235,17 +240,22 @@ bore at `rod_d = 25`) before you trust boss/collar exports.
    `screw_count=2` (or `anti_rotate=false` for a flat flange you accept
    may spin).
 2. Slide the collars over the rod before hanging it — one at each end.
-3. Lower the rod between the bosses, slide each collar out to its boss, and
-   thread it on until the rim seats on the boss's flange. For a rigid rod between
-   two fixed walls: use one default `collar` (deep) and one `collar-shallow`
-   — the deep/shallow pairing is the retention margin on each end, not how
-   the rod goes in. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
-   shorter** (38–42 mm is the safe band): each end bottoms on its collar
-   shoulder 19 mm from that wall, so the seated rod spans nearly
-   wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
-   into their collars). Aim for ~40 mm shorter; if you land between sizes,
-   cut long (toward the 38 mm end of the band) and trim — a rod can be
-   shortened, but a too-short rod means buying another.
+3. Thread each collar onto its boss until the rim seats on the plate. Push
+   each rod end in until you feel a scrape or click past the seat ridge, then
+   bottom on the boss tip — that tactile catch is what the design targets,
+   but it is **unproven until the week-of-use proving print** (NOTES.md D13;
+   field test log). Look through the two thin slots at the grip band near the
+   flare: empty dark at the **seat end** of the slot means the tip is still
+   short of the boss; the tip edge appears there only when bottomed (the
+   witness starts 0.3 mm above the boss-tip stop, not the bore transition —
+   a rod ~1 mm short used to fill the window like a seated one). For a rigid
+   rod between two fixed walls: use one default `collar` (deep) and one
+   `collar-shallow` — push into the deep side, drop the shallow end in,
+   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈
+   **40 mm shorter** (38–42 mm is the safe band): each end bottoms on its
+   boss tip 18 mm from that wall, so the seated rod spans nearly
+   wall-to-wall (hard stop is wall-to-wall − **36 mm**; the 40 mm short cut
+   leaves install slack).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out. **Grooved bosses** (`anti_rotate` on, a
    source print): the wall-face lands resist that unthread torque on a

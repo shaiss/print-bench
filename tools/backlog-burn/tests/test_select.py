@@ -65,6 +65,21 @@ def burn_cooldown(hours_ago, **extra):
     }
 
 
+def deferred_no_outcome(hours_ago, **extra):
+    """A 🚢 DEFERRED — no ship outcome stop (issue #962 residual): posted by
+    backlog-burn-ship-check when subtype=success left HEAD on main with no
+    agent stop and no listed denials, so settle sees declined instead of the
+    opaque neither-delivered path."""
+    return {
+        "body": (
+            "🚢 DEFERRED — no ship outcome\n\n"
+            "<!-- burn-deferred-no-outcome:v1 -->\n"
+        ),
+        "createdAt": _iso(NOW - timedelta(hours=hours_ago)),
+        **extra,
+    }
+
+
 def snap(issues, *, open_prs=(), branches=()):
     return {
         "issues": list(issues),
@@ -645,6 +660,18 @@ def test_burn_cooldown_is_not_a_decline_or_defer():
     assert "burn-cool" in r["excluded"]["134"]
     assert "declin" not in r["excluded"]["134"]
     assert "defer" not in r["excluded"]["134"]
+
+
+def test_deferred_no_outcome_parks_as_defer_not_burn_cooldown():
+    # The #962 no-push success path posts 🚢 DEFERRED — no ship outcome so
+    # settle's declined=true fires; the picker must treat it as a defer
+    # cooldown (not leave the brief free to be re-picked every hour).
+    blocked = issue(135, "2026-08-01T00:00:00Z", comments=[deferred_no_outcome(3)])
+    runnable = issue(136, "2026-08-02T00:00:00Z")
+    r = select_issue(snap([blocked, runnable]), now=NOW)
+    assert r["selected"] == 136
+    assert "defer" in r["excluded"]["135"]
+    assert "burn-cool" not in r["excluded"]["135"]
 
 
 def _strip_created_at(comment, created_at):
