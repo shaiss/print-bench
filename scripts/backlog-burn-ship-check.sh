@@ -42,7 +42,9 @@ unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE \
       GIT_DIR GIT_WORK_TREE GIT_CONFIG_PARAMETERS GIT_SSH_COMMAND \
       GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY \
       GIT_EXEC_PATH \
-      REPO_OWNER || true
+      REPO_OWNER \
+      BB_SHIP_CHECK_COMMENT_SINK BB_SHIP_CHECK_COMMENT_FAIL \
+      BB_SHIP_CHECK_ALLOW_COMMENT_HOOKS || true
 export PYTHONNOUSERSITE=1
 
 # Workflow restores this script into $RUNNER_TEMP (issue #962 security: the
@@ -560,13 +562,20 @@ print("false" if "WITHDRAWN" in first.upper() else "true")
 }
 
 # Shared gh POST for a comment body. Returns 0/1. Opens its own GH_CONFIG_DIR.
-# Selftest hook: BB_SHIP_CHECK_COMMENT_SINK=<path> records "LABEL\n<body>\n---\n"
-# instead of calling gh; BB_SHIP_CHECK_COMMENT_FAIL=1 forces a post failure.
+# Selftest hook (ONLY when BB_SHIP_CHECK_ALLOW_COMMENT_HOOKS=1, set inside
+# selftest after the startup unset): BB_SHIP_CHECK_COMMENT_SINK=<path>
+# records posts instead of calling gh; BB_SHIP_CHECK_COMMENT_FAIL=1 forces
+# failure. A GITHUB_ENV plant of SINK alone is refused (Security Reviewer /
+# Bugbot on #999) — never divert live posts away from /usr/bin/gh.
 _post_issue_comment() {
   local issue="$1"
   local body="$2"
   local label="$3"
   if [[ -n "${BB_SHIP_CHECK_COMMENT_SINK:-}" ]]; then
+    if [[ "${BB_SHIP_CHECK_ALLOW_COMMENT_HOOKS:-}" != "1" ]]; then
+      echo "ship-check: refusing COMMENT_SINK without ALLOW_COMMENT_HOOKS (possible GITHUB_ENV plant)" >&2
+      return 1
+    fi
     if [[ "${BB_SHIP_CHECK_COMMENT_FAIL:-}" == "1" ]]; then
       echo "ship-check: forced post failure for ${label} (selftest)" >&2
       return 1
@@ -1960,6 +1969,7 @@ EOF
 EOF
   : >"$tmp/comment-sink.txt"
   set +e
+  BB_SHIP_CHECK_ALLOW_COMMENT_HOOKS=1 \
   BB_SHIP_CHECK_COMMENT_SINK="$tmp/comment-sink.txt" \
     post_deferred_no_outcome_stop 925 "$(cat "$tmp/active-lock.ndjson")" \
     >"$tmp/sink-post.out" 2>&1
@@ -1994,6 +2004,7 @@ EOF
 
   : >"$tmp/comment-sink-fail.txt"
   set +e
+  BB_SHIP_CHECK_ALLOW_COMMENT_HOOKS=1 \
   BB_SHIP_CHECK_COMMENT_SINK="$tmp/comment-sink-fail.txt" \
   BB_SHIP_CHECK_COMMENT_FAIL=1 \
     post_deferred_no_outcome_stop 925 "$(cat "$tmp/active-lock.ndjson")" \
@@ -2010,6 +2021,30 @@ EOF
     fails=$((fails + 1))
   else
     echo "ok    selftest: posting stub failure propagates with no withdraw"
+  fi
+
+  # Planted SINK without ALLOW must fail closed (not divert live posts).
+  : >"$tmp/comment-sink-plant.txt"
+  set +e
+  BB_SHIP_CHECK_COMMENT_SINK="$tmp/comment-sink-plant.txt" \
+    post_deferred_no_outcome_stop 925 "$(cat "$tmp/active-lock.ndjson")" \
+    >"$tmp/sink-plant.out" 2>&1
+  local sink_plant_rc=$?
+  set -e
+  if [[ "$sink_plant_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: COMMENT_SINK without ALLOW was honored (GITHUB_ENV plant)"
+    cat "$tmp/sink-plant.out" "$tmp/comment-sink-plant.txt"
+    fails=$((fails + 1))
+  elif [[ -s "$tmp/comment-sink-plant.txt" ]]; then
+    echo "FAIL  selftest: COMMENT_SINK plant diverted a post body"
+    cat "$tmp/comment-sink-plant.txt"
+    fails=$((fails + 1))
+  elif ! grep -q 'refusing COMMENT_SINK' "$tmp/sink-plant.out"; then
+    echo "FAIL  selftest: COMMENT_SINK plant missing refuse message"
+    cat "$tmp/sink-plant.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: COMMENT_SINK without ALLOW is refused (no live divert)"
   fi
 
   # Token-shaped subtype must be redacted on the hard-fail path (Copilot).
