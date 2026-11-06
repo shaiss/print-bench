@@ -1,0 +1,11 @@
+# Boolean fit checks (gate.sh), per the brief: a Ø 6.0 probe proxy (through
+# the Ø 6.2 bore the +0.2 clearance cuts) seats with zero interference
+# facets. The proxy is the NOMINAL size — never the bore size, which shares
+# boundary faces with the bore wall and CGAL-resolves to a zero-volume
+# facet shell, the exact false reading this check exists to prevent.
+probe_seats  empty
+gland_seats  empty
+# Negative controls: the same proxies grown +0.6 mm past the whole tunable
+# clearance band MUST interfere — else the empty proofs above prove nothing.
+probe_jams   interferes
+gland_jams   interferes
