@@ -18,7 +18,7 @@ once reviewed — add a line, never reframe one.
   through the boss. The internal-fit evidence shot.
 - **cutaway-wide** — orthographic diametral section (the +y half removed)
   face-on from +y: full flange-to-flange width in frame, the central
-  countersunk M5 in the section plane, and the boss rib / collar groove
+  countersunk M5 in the section plane, and the boss V-groove / collar groove
   mesh visible on both sides of the bore. Complements `cutaway` /
   `cutaway-section` without moving those frozen cameras.
 - **collar-print** — the collar alone in its print orientation, rod mouth

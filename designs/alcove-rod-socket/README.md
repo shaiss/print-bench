@@ -12,7 +12,8 @@ knurled collars that hand-thread onto the bosses. Curtains down for washing
 > printed **fused** in the field (a single STL of the two parts slices as one
 > welded body); v2 fixes the packaging (per-part STLs / plate as file format),
 > geometry unchanged — the proving print that confirms the customer-facing
-> cure (print, unthread, lift the rod) is still pending; see NOTES.md.
+> cure (print, unthread, lift the rod) is still pending (≈6¼ h / ~71 g
+> PLA-estimated for boss ×2 + collar + collar-shallow; see NOTES.md).
 > See *Deliverable* below and the field test log in NOTES.md.
 
 ![Product shot](previews/product-hero.png)
@@ -39,8 +40,8 @@ Printed **in pairs** (one holder per wall, one pair per rod):
   (no grooves; hold the flange when you torque, Assembly step 4). For heavier
   installs (a hung pair over ~10 kg — reasoned ceiling, not load-tested / not
   a measurement; see NOTES) set `screw_count=2` — that grows the flange for an
-  off-axis pair and **omits** the ribs (the two screws already pin the boss;
-  see Assembly). Gated **`boss-25`** is single-screw only (`screw_count=1`).
+  off-axis pair and **omits** the V-grooves (the two screws already pin the
+  boss; see Assembly). Gated **`boss-25`** is single-screw only (`screw_count=1`).
 
   ![Boss wall/bed face — eight anti-rotation V-grooves](previews/boss-bed.png)
 - `collar` — the rod socket: Ø54 × 40.6 mm knurled tube, internal printed
@@ -134,7 +135,11 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   half-percent shrink — still unproven until B4 (a material-specific
   preset is charter backlog B4). If that ASA coupon binds, the fix is a
   `thread_tol` change, which needs the clone/source path rather than the
-  Release STLs.
+  Release STLs. The seat detent is line-to-line by design; in ASA (or if
+  the rod stops dead instead of clicking) ease `seat_detent_radial` down
+  (e.g. 0.30 → 0.22–0.25) or set `seat_detent=false` — the shoulder is the
+  seat, the click is a nicety. Leave `rod_clearance` alone for that
+  symptom; it widens the whole bore.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Seam:** Scarf (Bambu Studio) or Back — the default Aligned seam stacks a
@@ -145,29 +150,39 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
 - **Bed adhesion:** brim the **collar** (and `collar-shallow`, and the
   **`*-25` collars**), per-object
   (Bambu Studio and most slicers brim per object — select just the collar).
-  Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
-  part that can lift; the boss doesn't need it — it prints flange-down on a
+  Its first layer is a thin ~2.2 mm annular rim (~1.6 mm of it flat after the
+  chamfers) carrying a 40.6 mm tube, the part that can lift; the **`*-25`
+  collar**'s own first-layer annulus is a Ø32 tube mouth under a ~Ø39 grip
+  band — not the 40 mm page's Ø47 / 40.6 — same per-object brim, same
+  kill-if-lifts. The boss doesn't need a brim — it prints flange-down on a
   full Ø58.8 disc (the anti-rotation keys are 0.8 mm 45° V-grooves in that
   disc — inner washer, outer rim, and the lands between still print on the
   bed). Layer-1 groove mouths print narrower than modeled (elephant foot
   pinches the 1.6 mm openings) — expected; the lands between still carry the
-  wall, so don't tune flow for it. Cheap insurance on the collar rim's own
-  merits (the v1 field failure was *packaging*, not adhesion — see NOTES.md
-  — so the plate is what fixes that; the brim is separate). If the rim's
-  outer edge starts lifting in the first centimeter, kill the print — more
-  brim won't save it mid-run, and a lifted rim is a cocked thread. A
-  per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
-  bridges. (Brim the *whole plate* instead and the two brims may meet in one
-  web; it should peel clean, but that is **untested** — predicted, not
-  observed, and the proving print is what confirms it. Per-object avoids the
-  question.) Trim the collar's brim tabs flush and set it on a flat surface
-  to confirm the rim sits flat before threading it onto the boss — the rim
-  is both the bed-contact face and the seating face on the flange.
+  wall, so don't tune flow for it. Coupons need **no brim** — both bodies
+  land on full discs; an auto brim webs the 8 mm gap between them and snaps
+  free. Cheap insurance on the collar rim's own merits (the v1 field failure
+  was *packaging*, not adhesion — see NOTES.md — so the plate is what fixes
+  that; the brim is separate). If the rim's outer edge starts lifting in the
+  first centimeter, kill the print — more brim won't save it mid-run, and a
+  lifted rim is a cocked thread. A per-object collar brim can't reach the
+  ~5.7 mm gap to the boss, so nothing bridges. (Brim the *whole plate*
+  instead and the two brims may meet in one web; it should peel clean, but
+  that is **untested** — predicted, not observed, and the proving print is
+  what confirms it. Per-object avoids the question. There is **no** 25 mm
+  plate — mirror the 40 mm layout and brim only the collar.) Trim the
+  collar's brim tabs flush and set it on a flat surface to confirm the rim
+  sits flat before threading it onto the boss — the rim is both the
+  bed-contact face and the seating face on the flange. A proud ring of brim
+  witness nubs can pass that flat test while standing the collar ~0.1 mm off
+  the flange: one blade pass flat on the rim OD, then re-run the flat test.
 - **Boss print-check (grooved source prints):** after the first layer (or on
-  the finished boss), look at the eight V-grooves between the inner washer
-  and outer rim — they must still read as open mouths, not fused over by
-  elephant foot. A filled-in groove ships as a good-looking boss that spins;
-  that failure is silent unless you check.
+  the finished boss), look at the eight 0.8 × 1.6 mm V-grooves between the
+  inner washer and outer rim — they must still read as open mouths, not fused
+  over by elephant foot. A pea of plastic at a groove **end** counts as
+  filled-in, not "close enough" — a ten-second knife twirl clears it. A
+  filled-in groove ships as a good-looking boss that spins; that failure is
+  silent unless you check.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   (and collar-shallow) rod-mouth-down (the internal thread prints at the top
   of the collar, never on the first layer). Never flip the collar
@@ -178,7 +193,10 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   (deep+shallow: two bosses, one `collar`, one `collar-shallow`). The bore
   and thread coupons prove slip and thread only — **not** the seat catch;
   print a **full collar** (not just the bore coupon) when you want to feel
-  the seat click or scrape before you hang the rod (NOTES.md D13).
+  the seat click or scrape before you hang the rod (NOTES.md D13). For
+  **25 mm:** `thread-coupon-25` + `bore-coupon-25` first, then a full
+  `collar-25` to feel the seat before hanging anything — no 25 mm plate;
+  mirror the 40 mm layout and brim only the collar.
 
 | Coupon | When |
 |---|---|
@@ -211,7 +229,10 @@ will too.
 ![The thread coupon — male stub and female ring side by side](previews/coupon.png)
 
 Measure your pole with calipers where it will sit and set `rod_d` to that
-barrel reading — "40 mm" is sometimes the finial size, not the pole.
+barrel reading — "40 mm" is sometimes the finial size, not the pole. Take
+two perpendicular readings at the seating end; if the end is swaged or the
+readings differ by more than ~0.2 mm, take the larger and expect a scrape
+rather than a click.
 
 ## Parameters
 
@@ -231,6 +252,7 @@ you'll export the fused assembly preview instead of a printable part):
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
 | `seat_detent` | on | annular catch at the rod seat — feel "fully in" |
+| `seat_detent_radial` | 0.30 mm | radial height of that catch (line-to-line at defaults); ease to 0.22–0.25 or set `seat_detent=false` if the rod stops dead — leave `rod_clearance` alone |
 | `witness_window` | on | two axial sight slots at the seat — see "fully in" |
 
 **Gated rod sizes:** **40 mm** (gated production size — coupon-proven; not yet
@@ -270,26 +292,38 @@ exports (`rod_d = 25.4` or your measured barrel) and the same `thread_tol` on
    the anchor does not ream out; they do not raise the load rating.
    **Plain** Release bosses do not — hold the flange when you torque the
    collar (step 4). Heavier curtains than that want a stud or
-   `screw_count=2`. On tile, masonry, or metal grooves cannot bite — use
-   `screw_count=2` (or `anti_rotate=false` for a flat flange you accept
-   may spin).
+   `screw_count=2`. For `screw_count=2`, use DIN 7991 / ISO 10642 M5 flat
+   heads (Ø9.4–9.5 seat flush in the Ø10.0 cone; heads >Ø10.0 park proud
+   under the collar rim) — lay a straightedge across both recesses before
+   threading the collar; any head above the flange face needs a deeper
+   countersink or a different screw. On tile, masonry, or metal grooves
+   cannot bite — use `screw_count=2` (or `anti_rotate=false` for a flat
+   flange you accept may spin).
 2. Slide the collars over the rod before hanging it — one at each end.
-3. Thread each collar onto its boss until the rim seats on the plate. Push
-   each rod end in until you feel a scrape or click past the seat ridge, then
-   bottom on the boss tip — that tactile catch is what the design targets,
-   but it is **unproven until the week-of-use proving print** (NOTES.md D13;
-   field test log). Look through the two thin slots at the grip band near the
-   flare: empty dark at the **seat end** of the slot means the tip is still
-   short of the boss; the tip edge appears there only when bottomed (the
-   witness starts 0.3 mm above the boss-tip stop, not the bore transition —
-   a rod ~1 mm short used to fill the window like a seated one). For a rigid
-   rod between two fixed walls: use one default `collar` (deep) and one
-   `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈
-   **40 mm shorter** (38–42 mm is the safe band): each end bottoms on its
-   boss tip 18 mm from that wall, so the seated rod spans nearly
-   wall-to-wall (hard stop is wall-to-wall − **36 mm**; the 40 mm short cut
-   leaves install slack).
+3. Thread each collar onto its boss until the rim seats on the flange.
+   **v2.0 Release collar has no detent and no witness slots** — bottom the
+   rod on the boss tip and trust your cut length (steps 1 and 4 already flag
+   their halves; use the clone path for the seat catch and slots). On a
+   source / post-B1 collar: push each rod end in until you feel a scrape or
+   click past the seat ridge, then bottom on the boss tip — that tactile
+   catch is what the design targets, but it is **unproven until the
+   week-of-use proving print** (NOTES.md D13; field test log). Deburr the
+   cut ends (or kiss a small chamfer onto each) before seating — a rolled
+   burr hangs on the detent. ASA: expect the click; PETG: expect the scrape
+   — both mean seated. Look through the two thin slots at the grip band near
+   the flare: empty dark at the **seat end** of the slot means the tip is
+   still short of the boss; the tip edge appears there only when bottomed
+   (the witness starts 0.3 mm above the boss-tip stop, not the bore
+   transition — a rod ~1 mm short used to fill the window like a seated
+   one). Hold a phone light against the far slot and look through the near
+   one — the tip edge's silhouette means bottomed. For a rigid rod between
+   two fixed walls: use one default `collar` (deep) and one
+   `collar-shallow` — lower the rod between the bosses, slide each collar
+   out to its boss, and thread it on. Measure **wall-to-wall**, then cut the
+   rod ≈ **40 mm shorter** (38–42 mm is the safe band; between sizes, cut
+   long toward 38 and trim): each end bottoms on its boss tip 18 mm from
+   that wall, so the seated rod spans nearly wall-to-wall (hard stop is
+   wall-to-wall − **36 mm**; the 40 mm short cut leaves install slack).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out. **Grooved bosses** (`anti_rotate` on, a
    source print): the wall-face lands resist that unthread torque on a
