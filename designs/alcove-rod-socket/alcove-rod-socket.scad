@@ -76,6 +76,24 @@ knurl_depth = 1.2;
 // Minimum printed flute width (mm) — 3 extrusion widths at a 0.4 nozzle
 knurl_min_width = 1.2;
 
+/* [Seat detent & witness] */
+// Light annular catch at the rod-seat so a 40 mm rod end clicks when fully in
+seat_detent = true;
+// Radial lip of the catch (mm) — peak bore = bore_d − 2·this
+seat_detent_radial = 0.30;
+// Axial height of the triangular ridge (mm)
+seat_detent_h = 0.8;
+// Ridge starts this far above the rod-seat plane (mm)
+seat_detent_lift = 0.4;
+// Axial sight slots through the rod-tube wall at the seat (rod tip visible)
+witness_window = true;
+// Number of through-wall sight slots (180° apart when 2)
+witness_slot_count = 2; // [1, 2]
+// Slot width in the hoop direction (mm) — bridge roof when printed mouth-down
+witness_slot_w = 1.6;
+// Slot length along the rod axis (mm)
+witness_slot_h = 8;
+
 /* [Quality] */
 // Thread helix segments per turn — 96 holds chord error under 0.02 mm at
 // this major diameter (the lib refuses coarser settings itself)
@@ -100,6 +118,11 @@ rod_tube_od = bore_d + 2 * wall;                   // 47.0
 collar_lower_h = lead_in + neck_len + 1.0;         // 12.6 — +1 relief past neck
 collar_h = engagement_depth + collar_lower_h;      // 40.6
 boss_h = flange_t + lead_in + neck_len;            // 18.0
+// Rod tip stop in collar coords (rim on flange): the boss neck tip. The
+// bore transition at collar_lower_h opens from bore_d up to female_bore_d,
+// so a Ørod_d rod passes that plane and bottoms on the boss — the +1 mm in
+// collar_lower_h is relief past this tip, not a collar seat for the rod.
+rod_stop_z = boss_h - flange_t;                    // 11.6 == lead_in + neck_len
 
 shank_d = screw_clearance_d(screw_size);           // 5.5 for M5
 csk_d = socket_head(screw_size)[0] + 0.5;          // 10.0 — flat-head recess
@@ -149,6 +172,40 @@ assert(knurl_depth <= wall - 1.2, str(
 // seats on the screw instead of the shoulder.
 assert(boss_h - csk_h < flange_t + collar_lower_h,
     "screw head recess breaks through the collar's rod seat — raise the neck.");
+// Seat detent: modest inward lip. Radial clearance is rod_clearance/2;
+// a lip of 0.2–0.4 mm is line-to-line or a tenth of a millimetre tight —
+// hand-pushable, not a press. Cap 0.5 so a Customizer slip cannot weld
+// the rod in. Height ≥ 2 layers at the pinned 0.2 mm.
+assert(seat_detent_radial > 0 && seat_detent_radial <= 0.5, str(
+    "seat_detent_radial ", seat_detent_radial,
+    " mm — want (0, 0.5]; 0.2–0.4 is the production band."));
+assert(seat_detent_h >= 0.4 && seat_detent_h <= 2, str(
+    "seat_detent_h ", seat_detent_h, " mm — want [0.4, 2]."));
+assert(seat_detent_lift >= 0 && seat_detent_lift <= 2, str(
+    "seat_detent_lift ", seat_detent_lift, " mm — want [0, 2]."));
+assert(!seat_detent ||
+    seat_detent_lift + seat_detent_h + 1.2 <= shallow_engagement_depth, str(
+    "seat detent occupies ", seat_detent_lift + seat_detent_h,
+    " mm of bore and must clear the shallow collar mouth chamfer."));
+// Witness slots: hoop width bridges on a stock 0.4/0.2 mouth-down print
+// (≤ 3 mm); floor 0.8 mm so the cut is a real window, not a hairline.
+assert(witness_slot_count == 1 || witness_slot_count == 2,
+    "witness_slot_count must be 1 or 2.");
+assert(witness_slot_w >= 0.8 && witness_slot_w <= 3.0, str(
+    "witness_slot_w ", witness_slot_w,
+    " mm — want [0.8, 3] so the mouth-down roof bridges."));
+assert(witness_slot_h >= 4 && witness_slot_h <= 16, str(
+    "witness_slot_h ", witness_slot_h, " mm — want [4, 16]."));
+// Slot is referenced to rod_stop_z (boss tip), not collar_lower_h, so a rod
+// still ~1 mm short of bottoming cannot fill the window like a seated one.
+// Keep the cut above the male neck tip (thread clearance) and below the
+// shallow mouth chamfer.
+assert(!witness_window ||
+    rod_stop_z + 0.3 + witness_slot_h + 1.2
+        <= collar_lower_h + shallow_engagement_depth, str(
+    "witness slot from rod_stop_z spans ",
+    rod_stop_z + 0.3 + witness_slot_h,
+    " mm and must clear the shallow collar mouth chamfer."));
 // Anti-rotation keys: shallow 45° V-grooves in the wall face. Depth is
 // 2–8 layers; opening ≤ 2·h so each flank is ≥ 45° (no pocket roof a
 // stock 0.4/0.2 profile cannot bridge); lands between grooves stay at
@@ -265,32 +322,86 @@ module collar_use(depth = engagement_depth) {
     flare_h = (collar_lower_od - rod_tube_od) / 2;  // 45° flare, 3.5
     difference() {
         union() {
-            chamfered_cylinder(d = collar_lower_od, h = collar_lower_h,
-                               chamfer1 = style_edge_chamfer,
-                               chamfer2 = style_edge_chamfer);
-            // 45° flare from the grip band down to the rod tube (embedded 1
-            // mm so the union welds, not kisses)
-            translate([0, 0, collar_lower_h - 1.0])
-                cylinder(d1 = collar_lower_od, d2 = rod_tube_od, h = 1.0 + flare_h);
-            translate([0, 0, collar_lower_h + flare_h - 0.5])
-                chamfered_cylinder(d = rod_tube_od,
-                                   h = depth - flare_h + 0.5,
-                                   chamfer1 = 0, chamfer2 = style_edge_chamfer);
+            difference() {
+                union() {
+                    chamfered_cylinder(d = collar_lower_od, h = collar_lower_h,
+                                       chamfer1 = style_edge_chamfer,
+                                       chamfer2 = style_edge_chamfer);
+                    // 45° flare from the grip band down to the rod tube (embedded 1
+                    // mm so the union welds, not kisses)
+                    translate([0, 0, collar_lower_h - 1.0])
+                        cylinder(d1 = collar_lower_od, d2 = rod_tube_od, h = 1.0 + flare_h);
+                    translate([0, 0, collar_lower_h + flare_h - 0.5])
+                        chamfered_cylinder(d = rod_tube_od,
+                                           h = depth - flare_h + 0.5,
+                                           chamfer1 = 0, chamfer2 = style_edge_chamfer);
+                }
+                // female thread: the mandatory minor bore, then the groove cutter
+                translate([0, 0, -0.01])
+                    cylinder(d = female_bore_d, h = collar_lower_h + 0.01);
+                translate([0, 0, lead_in])
+                    thread_bore_cut(thread_major, thread_depth, thread_pitch,
+                                    thread_starts, collar_lower_h - lead_in, thread_tol,
+                                    seg = thread_seg);
+                // rod bore with a 45° lead-in mouth where the rod enters
+                translate([0, 0, collar_lower_h - 0.01])
+                    cylinder(d = bore_d, h = depth + 0.02);
+                translate([0, 0, h - 1.0])
+                    cylinder(d1 = bore_d, d2 = bore_d + 2.0, h = 1.01);
+                knurl_cut();
+            }
+            // After the bore cut, or the Ø40.6 cylinder eats the lip. Shallow
+            // collar inherits this via depth= (B1 / D13). Witness slots are
+            // cut *after* this union so the ridge cannot grow back into them.
+            if (seat_detent)
+                seat_detent_ring();
         }
-        // female thread: the mandatory minor bore, then the groove cutter
-        translate([0, 0, -0.01])
-            cylinder(d = female_bore_d, h = collar_lower_h + 0.01);
-        translate([0, 0, lead_in])
-            thread_bore_cut(thread_major, thread_depth, thread_pitch,
-                            thread_starts, collar_lower_h - lead_in, thread_tol,
-                            seg = thread_seg);
-        // rod bore with a 45° lead-in mouth where the rod enters
-        translate([0, 0, collar_lower_h - 0.01])
-            cylinder(d = bore_d, h = depth + 0.02);
-        translate([0, 0, h - 1.0])
-            cylinder(d1 = bore_d, d2 = bore_d + 2.0, h = 1.01);
-        knurl_cut();
+        if (witness_window)
+            seat_witness_cut(depth);
     }
+}
+
+// Soft triangular annulus just above the bore transition. Peak bore =
+// bore_d − 2·seat_detent_radial (40.0 at the 0.30 default — line-to-line
+// with a 40 mm rod, a light scrape that becomes a catch as the end passes
+// the peak then continues ~1 mm onto the boss tip at rod_stop_z). Printed
+// mouth-down the ridge is only a changing inner diameter — no overhang.
+module seat_detent_ring() {
+    r_bore = bore_d / 2;
+    embed = 0.6;                                   // weld into the tube wall
+    translate([0, 0, collar_lower_h + seat_detent_lift])
+        rotate_extrude(convexity = 4)
+            polygon([
+                [r_bore + 0.2,               0],
+                [r_bore - seat_detent_radial, seat_detent_h / 2],
+                [r_bore + 0.2,               seat_detent_h],
+                [r_bore + embed,             seat_detent_h],
+                [r_bore + embed,             0]
+            ]);
+}
+
+// Through-wall axial windows at the rod stop. Capsule profile: hoop width
+// is the bridge when the collar prints rod-mouth-down. Referenced to
+// rod_stop_z (boss neck tip), not collar_lower_h: the Ørod_d tip bottoms
+// on the boss ~1 mm past the bore transition, so a window that started at
+// collar_lower_h + 0.3 filled the same whether the rod was seated or still
+// ~1 mm short. Lower tip sits 0.3 mm above the stop — above the male neck
+// (thread clearance) into the +1 mm relief — so empty dark at the seat end
+// means short-of-seat, and the tip edge appears only when bottomed.
+module seat_witness_cut(depth) {
+    z0 = rod_stop_z + 0.3 + witness_slot_w / 2;
+    z1 = min(z0 + witness_slot_h - witness_slot_w,
+             collar_lower_h + depth - 1.0 - witness_slot_w / 2);
+    for (i = [0 : witness_slot_count - 1])
+        rotate([0, 0, i * 180])
+            hull() {
+                translate([0, 0, z0])
+                    rotate([0, 90, 0])
+                        cylinder(d = witness_slot_w, h = collar_lower_od);
+                translate([0, 0, z1])
+                    rotate([0, 90, 0])
+                        cylinder(d = witness_slot_w, h = collar_lower_od);
+            }
 }
 
 // Print orientation: rod mouth on the bed, thread at the top of the print —
