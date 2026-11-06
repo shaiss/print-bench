@@ -77,13 +77,54 @@ def test_get_retries_502_then_succeeds(monkeypatch):
     assert sleeps[0] == github._GET_BACKOFF_BASE_S
 
 
+def test_get_closes_5xx_response_before_retry(monkeypatch):
+    """A retryable HTTPError must close its response before sleep (#904)."""
+    attempts = {"n": 0}
+    events: list[str] = []
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            err = _http_error(502)
+            orig_close = err.close
+
+            def tracked_close():
+                events.append("close")
+                orig_close()
+
+            err.close = tracked_close  # type: ignore[method-assign]
+            raise err
+        return _JsonResp(b'{"ok": true}')
+
+    def tracked_sleep(seconds: float) -> None:
+        events.append("sleep")
+
+    monkeypatch.setattr(github.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(github, "_sleep", tracked_sleep)
+    monkeypatch.setattr(github.random, "uniform", lambda a, b: 0.0)
+
+    body, _ = github._get("https://api.github.com/x", "t")
+    assert body == {"ok": True}
+    assert attempts["n"] == 2
+    assert events == ["close", "sleep"]
+
+
 def test_get_persistent_5xx_raises_after_bounded_tries(monkeypatch):
     attempts = {"n": 0}
     sleeps: list[float] = []
+    closes = {"n": 0}
 
     def always_502(req, timeout=None):
         attempts["n"] += 1
-        raise _http_error(502)
+        err = _http_error(502)
+        orig_close = err.close
+
+        def tracked_close():
+            closes["n"] += 1
+            orig_close()
+
+        err.close = tracked_close  # type: ignore[method-assign]
+        raise err
 
     monkeypatch.setattr(github.urllib.request, "urlopen", always_502)
     monkeypatch.setattr(github, "_sleep", sleeps.append)
@@ -94,6 +135,8 @@ def test_get_persistent_5xx_raises_after_bounded_tries(monkeypatch):
     assert caught.value.code == 502
     assert attempts["n"] == github._GET_ATTEMPTS
     assert len(sleeps) == github._GET_ATTEMPTS - 1
+    # Close only on the retry path (before each sleep), not on the final raise.
+    assert closes["n"] == github._GET_ATTEMPTS - 1
 
 
 def test_get_4xx_is_not_retried(monkeypatch):
@@ -189,6 +232,17 @@ def test_next_link_extracts_next():
 def test_next_link_absent():
     assert github._next_link('<https://api.github.com/x?page=5>; rel="last"') == ""
     assert github._next_link("") == ""
+
+
+def test_next_link_refuses_off_host():
+    """Pager must not follow a Link next URL off api.github.com (#904)."""
+    with pytest.raises(ValueError, match="off API host"):
+        github._next_link('<https://evil.example/x?page=2>; rel="next"')
+
+
+def test_next_link_refuses_wrong_scheme():
+    with pytest.raises(ValueError, match="off API host"):
+        github._next_link('<http://api.github.com/x?page=2>; rel="next"')
 
 
 # --------------------------------------------------------------------------
