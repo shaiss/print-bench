@@ -32,3 +32,10 @@ once reviewed — add a line, never reframe one.
   first-layer 45° V-grooves between the inner washer and outer rim — the
   anti-rotation lands that bite drywall or paint when the flange sits
   against the wall.
+- **collar-25-print** — the 25 mm deep collar in print orientation (same
+  angles as `collar-print`, closer `dist` for the smaller OD): rod mouth
+  down for the 25 mm buyer — tube on the bed, flare to the grip band,
+  internal thread at the top of the print.
+- **boss-25-iso** — the 25 mm wall boss alone, front-right iso (`tz=9` /
+  closer `dist` for the ~18 mm boss and Ø43.8 flange): sells the smaller
+  holder’s flange-to-neck proportions and male thread to a 25 mm buyer.
