@@ -464,7 +464,7 @@ shape cannot be applied to frozen units by re-extraction — it needs a
 `refreeze` (comments and issues are outside Actions retention and can be
 re-read), and every digest records its version.
 
-### Body digest (`body-digest@2`)
+### Body digest (`body-digest@3`)
 
 For every issue body, PR body, issue comment, review, review comment and
 release body:
@@ -482,7 +482,7 @@ release body:
 | `lead` | the class of the lead line — the first non-blank line that is not a full-line marker — under the lead rules below; else `null` |
 | `lead_fields` | validated fields the lead's class carries (below); `{}` otherwise |
 | `refs_closes` | sorted unique issue numbers after a GitHub closing keyword (`close[sd]`, `fix(e[sd])`, `resolve[sd]`, optional colon); only a PR body's are used |
-| `digest` | `body-digest@2`. An `@1` digest (the contract still accepts it) predates the deliverers' `shipped` line and the `ship_lock_settle` and `contract` classes, so its `lead` is `null` (or `ship_lock` for a settle stub) where `@2` classifies differently |
+| `digest` | `body-digest@3`. The contract still accepts `@1` and `@2`. An `@1` digest predates the deliverers' `shipped` line and the `ship_lock_settle` and `contract` classes, so its `lead` is `null` (or `ship_lock` for a settle stub) where a later version classifies differently; an `@2` digest predates the `burn_cooldown` class, so a cooldown's `lead` is `null` |
 
 Lead rules (first match wins, anchored at the start of the stripped lead line):
 
@@ -493,6 +493,7 @@ Lead rules (first match wins, anchored at the start of the stripped lead line):
 | `ship_lock` | `🚢 SHIP-LOCK` | `design_name` |
 | `declined` | `🚢 DECLINED` | `design_name` |
 | `deferred` | `🚢 DEFERRED` | `design_name` |
+| `burn_cooldown` | exactly `🚢 BURN-COOLDOWN` — the picker cooldown `scripts/routine-lock-cleanup.sh` posts since #924 for a run that neither delivered nor declined, beside its dead-run notice or alone when the run held no lock (`COOLDOWN_MARKER`, drift-pinned, with the body built from the script's own `printf`) | — |
 | `shipped` | `✅ **SHIPPED … #N` or `📦 **Draft PR opened: #N**` (the agent's own line, before #858; `#0` names no PR), or exactly `🚢 design-run delivered — branch and draft PR verified` / `🚢 backlog-burn delivered — branch and draft PR verified` (the deliverers' line since #858 — drift-pinned to `DELIVERED_LINE` in `scripts/design-run-deliver.sh`; the PR comes from the body's `- pull request: https://github.com/<o>/<r>/pull/<N>` line) | `shipped_pr`, `design_name` |
 | `decision_needed` | `🚦 DECISION NEEDED` | — |
 | `coach_lock` | `🎓 COACH-LOCK` | — |
@@ -797,7 +798,7 @@ ambiguous), **N** not derivable (null with an explicit basis, never inferred).
 | `fields` | D | the closed per-kind set (`field_sets` in the contract) |
 | `edges.verifies` | J | the fix shas a sign-off covers |
 
-Kinds (closed): `brief.filed|claimed|shipped|declined|deferred|withdrawn|closed`,
+Kinds (closed): `brief.filed|claimed|shipped|declined|deferred|withdrawn|cooldown|closed`,
 `pr.opened|ready_for_review|merged|closed`,
 `commit.design|fix|human|merge_main|regen`, `review.signoff`,
 `triage.verdict`, `coach.lock`, `coach.round`, `oracle.review`,
@@ -808,6 +809,7 @@ Kinds (closed): `brief.filed|claimed|shipped|declined|deferred|withdrawn|closed`
 Per-kind fields (all required, closed): `brief.*` `design_name` (+
 `settle` for claimed — true for the settle job's `ship_lock_settle` stub;
 `death` for withdrawn — true for routine-lock-cleanup's dead-run notice;
+nothing more for cooldown, whose `design_name` is always null;
 `shipped_pr` for shipped; `state_reason`, `closed_by_pr` for closed);
 `pr.opened` `draft`; `pr.merged` `merge_method`, `merged_by_login`,
 `main_subject` (main's squash subject, owner decision 5); `commit.design|fix|
@@ -854,7 +856,7 @@ whether an owner-login event was a human click or an owner-token session
 | `release` | `tag` | `tag`, `published_at`, `designs`, `evidence` |
 
 Every record carries `format`, `kind`, `extractor`
-(`provenance-extract 2`), `incomplete` and `events` (sorted by the event sort
+(`provenance-extract 3`), `incomplete` and `events` (sorted by the event sort
 key). `evidence` = `{raw, raw_sha256, revision, receipts, source}`
 (`raw_sha256` over the decompressed document). No record or view carries
 main's sha: a main push that touches no `designs/` file must leave every
@@ -1051,7 +1053,9 @@ Pure (`serving.py`) over receipts, records and a `CodeBasis`
    keeping its time) counts as the lock it was. The settle job's stub
    (`settle: true`) and routine-lock-cleanup's dead-run notice (`death:
    true`) never count and are never window-attributed — both are posted
-   after every agent step, so only other runs' windows can hold them — and
+   after every agent step, so only other runs' windows can hold them; the
+   picker cooldown the same script posts (`brief.cooldown`, #924) has no
+   `KIND_ROLES` entry for that reason, so it is never joined to a window — and
    an Actions-bot lock counts toward one routine: toward design-run
    when it names the design (the #860–#864 runs' agent posted its §2
    contract as the bot), toward backlog-burn when it does not (the

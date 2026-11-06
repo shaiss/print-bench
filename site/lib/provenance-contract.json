@@ -33,7 +33,7 @@
   "raw_snapshot_statuses": "raw-snapshot-statuses@1",
   "state": "state@1",
   "intent": "intent@1",
-  "body_digest": "body-digest@2",
+  "body_digest": "body-digest@3",
   "message_digest": "message-digest@1",
   "checkpoint": "checkpoint@1"
  },
@@ -45,6 +45,7 @@
    "brief.declined",
    "brief.deferred",
    "brief.withdrawn",
+   "brief.cooldown",
    "brief.closed",
    "pr.opened",
    "pr.ready_for_review",
@@ -138,6 +139,7 @@
    "ship_lock",
    "declined",
    "deferred",
+   "burn_cooldown",
    "shipped",
    "decision_needed",
    "coach_lock",
@@ -243,7 +245,8 @@
      "t": "enum",
      "of": [
       "body-digest@1",
-      "body-digest@2"
+      "body-digest@2",
+      "body-digest@3"
      ]
     },
     "sha256": {
@@ -297,6 +300,7 @@
       "ship_lock",
       "declined",
       "deferred",
+      "burn_cooldown",
       "shipped",
       "decision_needed",
       "coach_lock",
@@ -921,6 +925,14 @@
     "tag": "D"
    }
   },
+  "brief.cooldown": {
+   "design_name": {
+    "t": "ref",
+    "to": "design",
+    "null": true,
+    "tag": "D"
+   }
+  },
   "brief.closed": {
    "design_name": {
     "t": "ref",
@@ -1425,6 +1437,7 @@
       "brief.declined",
       "brief.deferred",
       "brief.withdrawn",
+      "brief.cooldown",
       "brief.closed",
       "pr.opened",
       "pr.ready_for_review",
@@ -2312,7 +2325,8 @@
        "t": "enum",
        "of": [
         "body-digest@1",
-        "body-digest@2"
+        "body-digest@2",
+        "body-digest@3"
        ]
       }
      }
@@ -2896,7 +2910,8 @@
        "t": "enum",
        "of": [
         "body-digest@1",
-        "body-digest@2"
+        "body-digest@2",
+        "body-digest@3"
        ]
       }
      }
@@ -3110,7 +3125,8 @@
        "t": "enum",
        "of": [
         "body-digest@1",
-        "body-digest@2"
+        "body-digest@2",
+        "body-digest@3"
        ]
       }
      }
@@ -3262,7 +3278,8 @@
        "t": "enum",
        "of": [
         "body-digest@1",
-        "body-digest@2"
+        "body-digest@2",
+        "body-digest@3"
        ]
       },
       "step_grammar": {
