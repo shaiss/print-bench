@@ -74,14 +74,15 @@ the one motion the part really performs — seeded from the hero.
 | B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints. Rider: the proving print runs the page's own instructions verbatim, and its FIELD-TEST entry logs one full wash-day cycle (unthread → lift → re-hang) | one print + NOTES entry |
 | ~~B1~~ | ~~Witness slot / seat detent ("is the rod fully in?")~~ | **Done** (#989, supersedes #787): seat detent (0.30 mm radial lip) + two 1.6×8 mm witness slots on `collar_use`; shallow collar inherits via `depth=`. Field click/visibility still waits on the proving print's week-of-use seat check. | — |
 | ~~B2~~ | ~~Anti-rotation rib (screwless alternative to `screw_count=2`)~~ | **Done** (#991, supersedes #792): eight 0.8 mm 45° V-grooves on the boss wall face, default on for `screw_count=1`; omitted at `screw_count=2`. Field bite still waits on the proving print. | — |
+| B5c | 25 mm preview shots (`collar-25` print-orientation + `boss-25` iso as **new** `cameras.conf` lines) | every frozen camera is still 40 mm; the 25 mm buyer buys sight-unseen. Due before the Release that ships the 25 mm STLs (#992 Jane/Drik queue) | two camera lines + regen |
 | ~~B5~~ | ~~25 mm reference coupons (thread + bore)~~ | **Done** (#809): gated `thread-coupon-25` + `bore-coupon-25`; knurl flute cap by OD (NOTES) | — |
-| B5b | Gated 25 mm production holders (`boss` / `collar` / `collar-shallow` at fixed 25 mm, Release + plate policy) | coupons prove the size; holders still need Customizer `rod_d=25` export until gated parts ship | ci.parts + README |
-| B7 | v2.1 Release cut — re-gate the grooved `boss` from the source default (`anti_rotate` on) into a tagged Release | v2.0 STLs ship plain flanges; the B2 feature only reaches Release downloaders with this cut. Blocked on this PR's merge; the proving print (B4 / v1-DoD field test) outranks it | owner tag push + Release bundle |
+| ~~B5b~~ | ~~Gated 25 mm production holders (`boss-25` / `collar-25` / `collar-shallow-25`)~~ | **Done** (#814): ci.parts + wrappers; no 25 mm plate (mirror 40 mm: plate stays default-depth pair only) | — |
+| B7 | v2.1 Release cut — re-gate the grooved `boss` from the source default (`anti_rotate` on) into a tagged Release | v2.0 STLs ship plain flanges; the B2 feature only reaches Release downloaders with this cut. The proving print (B4 / v1-DoD field test) outranks it | owner tag push + Release bundle |
 
-Re-ranked 2026-08-24 per the #379 thread's ruling (Vera's note: the issue
-body's order was two rounds stale — the committed order wins). A "B6" appears
-in early thread drafts but never gained a recoverable definition; it is not
-carried here.
+Re-ranked 2026-11-05 per #992 PM triage (B1 was #1, now Done via #989; B2 Done
+via #991; B4 → #1 open; B5c added; B5b Done via #814/#992). Earlier 2026-08-24
+re-rank per #379 still stands for the pre-B5 history. A "B6" appears in early
+thread drafts but never gained a recoverable definition; it is not carried here.
 
 ## Open decisions
 
@@ -109,6 +110,9 @@ All four are the brief's own open questions, non-blocking for modeling.
 | 2026-08-24 | v1 → v2 numbering (not v0.2) | the field-test failure forced a second version before any release shipped: v1 = the frozen geometry, v2 = the packaging fix |
 | 2026-09-12 | Ship `collar-shallow` as a gated part (B3 / #631) | `ci.parts` cannot carry a free-form `-D engagement_depth=12`; dual-`-D` hand-render is the foot-gun the deliverable rules stop. Depth threaded into `collar`/`collar_use`; plate unchanged (boss+collar only) |
 | 2026-10-04 | B5: gate 25 mm thread + bore coupons; cap knurl flutes by collar OD | 36 flutes fail N6 merge guard at 25 mm (collar OD 39); auto-cap to 32 keeps asserts without weakening floors — slip still 0.6 until a coupon says otherwise (#809) |
+| 2026-10-04 | B5b: gate 25 mm holders; no 25 mm plate | Same plate policy as B3: `ci.plate` stays the 40 mm default-depth `boss`+`collar` pair only; 25 mm users download gated `boss-25` / `collar-25` / `collar-shallow-25` STLs (and shallow is off-plate, like 40 mm `collar-shallow`) (#814) |
 | 2026-11-05 | Seat detent + witness window (B1 / #989; supersedes #787) | Closed socket hid full-seat; both features, small and supportless, on `collar_use` so the shallow collar inherits. See NOTES D13. |
 | 2026-11-05 | Anti-rotation V-grooves on the boss wall face (B2 / #991; supersedes #792) | Screwless spin-lock for `screw_count=1` so collar torque does not ream a drywall anchor. See NOTES D14. |
 | 2026-11-05 | v2.0 ships plain flanges; grooved bosses ship from source until v2.1 | Release STLs predate B2. Source default keeps `anti_rotate` on for renders; the v2.1 Release cut (backlog B7) re-gates the grooved boss after merge, with the proving print still outranking that cut. |
+| 2026-11-05 | `boss-25` stays `screw_count=1` (policy) | Wrapper pins the Customizer default, mirroring the gated 40 mm boss; `screw_count=2` grows the flange (`alcove-rod-socket.scad`) and remains available on plain `boss` at `rod_d=25` — not a geometry limit at Ø43.8 (#992 PM triage) |
+| 2026-11-05 | README: drop "fit-proven in the field" for 40 mm | Charter DoD and the field log's single FAILED entry say the holder is still unproven on a hung rod; say coupon-proven instead (#992 Drik/PM act-now) |
