@@ -1,13 +1,16 @@
 """Command-line entry point for the scheduled backlog burn.
 
-    backlog-burn select   # snapshot JSON on stdin -> selection record
-    backlog-burn gather    # live GitHub read -> snapshot JSON
-    backlog-burn run       # gather then select (what the workflow runs)
+    backlog-burn select          # snapshot JSON on stdin -> selection record
+    backlog-burn gather           # live GitHub read -> snapshot JSON
+    backlog-burn run              # gather then select (what the workflow runs)
+    backlog-burn triage-classify   # fold ship-step outcomes into provider triage
 
 ``select`` is the pure, tested core; ``gather`` is the thin live read; ``run``
-composes them. Any command can write GitHub Actions outputs (``--gh-output``)
-and a job-summary block (``--summary``) so the workflow stays a few lines of
-glue with no policy of its own.
+composes them. ``triage-classify`` overlays ship-step outcomes onto a provider
+probe so a walk where no link served cannot report servable/served (issue
+#897). Any command can write GitHub Actions outputs (``--gh-output``) and a
+job-summary block (``--summary``) so the workflow stays a few lines of glue
+with no policy of its own.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .select import DEFAULT_REQUIRED_LABEL, render_summary, select_issue
+from .triage import classify_with_ship_outcomes, format_report_lines
 
 
 def _emit(record: dict[str, Any], args: argparse.Namespace) -> None:
@@ -95,6 +99,46 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_triage_classify(args: argparse.Namespace) -> int:
+    """`triage-classify`: fold ship-step outcomes into a provider class/reason.
+
+    The provider-triage composite probes the registry chain; this overlays the
+    ship links' Actions outcomes so a walk where every link failed install
+    cannot print ``servable`` / ``served`` (issue #897). Prints the same
+    REASON/CLASS (/RESET) lines ``model_registry classify`` emits, and appends
+    ``class=`` / ``reason=`` (/ ``reset=``) to ``--gh-output`` when set.
+    Exit 0 always: the class/reason ARE the signal.
+    """
+    # Empty --outcomes means "not provided" (identity overlay for callers
+    # that have no ship walk). A real walk always passes at least one token
+    # (failure / skipped / success / cancelled).
+    raw = args.outcomes
+    if raw is None or str(raw).strip() == "":
+        outcomes = None
+    else:
+        outcomes = [p.strip() for p in str(raw).split(",") if p.strip()]
+    klass, reason = classify_with_ship_outcomes(
+        outcomes,
+        args.provider_class,
+        args.provider_reason,
+        disposition=args.disposition or None,
+    )
+    reset = (args.provider_reset or "").strip()
+    # A demotion to infra drops a provider quota reset — it no longer applies.
+    if (klass, reason) != (args.provider_class.strip(), args.provider_reason.strip()):
+        reset = ""
+    for line in format_report_lines(args.chain, klass, reason, reset=reset):
+        print(line)
+    gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as fh:
+            fh.write(f"class={klass}\n")
+            fh.write(f"reason={reason}\n")
+            if reset:
+                fh.write(f"reset={reset}\n")
+    return 0
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     """`config`: read or write a value in the committed policy file.
 
@@ -164,6 +208,46 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--repo", required=True, help="owner/name")
     _add_output_flags(p_run)
     p_run.set_defaults(func=cmd_run)
+
+    p_triage = sub.add_parser(
+        "triage-classify",
+        help="fold ship-step outcomes into provider triage (issue #897)",
+    )
+    p_triage.add_argument(
+        "--outcomes",
+        default="",
+        help="comma-separated ship-step outcomes (success|failure|skipped|cancelled)",
+    )
+    p_triage.add_argument(
+        "--provider-class",
+        required=True,
+        help="class from model_registry classify / provider-triage",
+    )
+    p_triage.add_argument(
+        "--provider-reason",
+        required=True,
+        help="reason from model_registry classify / provider-triage",
+    )
+    p_triage.add_argument(
+        "--provider-reset",
+        default="",
+        help="optional quota reset timestamp from the provider probe",
+    )
+    p_triage.add_argument(
+        "--disposition",
+        default="",
+        help="optional settle disposition: deferred|declined|delivered (#981)",
+    )
+    p_triage.add_argument(
+        "--chain",
+        default="backlog-burn",
+        help="chain id for the REASON/CLASS lines (default: backlog-burn)",
+    )
+    p_triage.add_argument(
+        "--gh-output",
+        help="path to append class=/reason=/reset= (defaults to $GITHUB_OUTPUT)",
+    )
+    p_triage.set_defaults(func=cmd_triage_classify)
 
     p_config = sub.add_parser("config", help="read or write the committed policy file")
     p_config.add_argument("--get", choices=["enabled", "label", "provider", "cadence"],
