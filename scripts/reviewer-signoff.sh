@@ -872,14 +872,24 @@ No fusecheck STRONG WARN is not the cell.
 
 _fuse_warn_yaml_pin() {  # _fuse_warn_yaml_pin <auto-review.yml>
   local f="$1" lit
-  # fuse-warn runs from the base.sha restore into RUNNER_TEMP ($SIGNOFF),
-  # never a PR-head scripts/reviewer-signoff.sh copy.
+  # fuse-warn runs from the TRUSTED_SHA (default-branch tip) restore into
+  # RUNNER_TEMP ($SIGNOFF), never a PR-head scripts/reviewer-signoff.sh copy
+  # and never event base.sha (stale on open PRs).
   for lit in \
     'startswith("<!-- printcheck-gate-report -->")' \
     '"$SIGNOFF" fuse-warn' \
-    'BASE_SHA}:scripts/reviewer-signoff.sh'; do
+    'TRUSTED_SHA}:scripts/reviewer-signoff.sh' \
+    'github-actions[bot]' \
+    'user.type'; do
     grep -qF -- "$lit" "$f" || { printf '%s' "$lit"; return 1; }
   done
+  # Sticky must be Actions-bot authored (LOW-2), same trust rule as markers.
+  if ! grep -qF 'user.login // "") == "github-actions[bot]"' "$f"; then
+    printf '%s' 'printcheck sticky missing github-actions[bot] login filter'; return 1
+  fi
+  if ! grep -qF 'user.type // "") == "Bot"' "$f"; then
+    printf '%s' 'printcheck sticky missing type Bot filter'; return 1
+  fi
   # The two #634 bugs: contains() last picks a reviewer mention; grep of
   # "STRONG WARN" matches "No fusecheck STRONG WARN".
   if grep -qF 'contains("printcheck-gate-report")' "$f"; then
@@ -887,6 +897,10 @@ _fuse_warn_yaml_pin() {  # _fuse_warn_yaml_pin <auto-review.yml>
   fi
   if grep -qE 'grep[[:space:]]+-qi[[:space:]]+"STRONG WARN"' "$f"; then
     printf '%s' 'grep -qi "STRONG WARN"'; return 1
+  fi
+  # Event-payload base.sha must not restore the signoff helper (stale tip hole).
+  if grep -qE 'git show "\$\{BASE_SHA\}:scripts/reviewer-signoff\.sh"' "$f"; then
+    printf '%s' 'BASE_SHA}:scripts/reviewer-signoff.sh'; return 1
   fi
   # A PR-head checkout path must not return on a runnable line (comments
   # naming the script are fine): that was the pre-restore hole. Optional

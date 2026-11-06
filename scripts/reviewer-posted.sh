@@ -86,9 +86,10 @@
 # Jane/Drik/pm-triage/design-coach ship step (the chain walk's fall-through
 # key), the review stamp's confirmation before a round is called
 # complete, and signoff-status's marker discovery (issue #947; restored
-# from base.sha). Issue #770 closed the exit-code hole for pm-triage and
-# the design coach with per-head completion markers (PM_TRIAGE_DONE /
-# COACH_DONE) that this script reads the same way it reads JANE/DRIK_SIGNOFF.
+# from the trusted tip of the default branch — never event base.sha).
+# Issue #770 closed the exit-code hole for pm-triage and the design coach
+# with per-head completion markers (PM_TRIAGE_DONE / COACH_DONE) that this
+# script reads the same way it reads JANE/DRIK_SIGNOFF.
 set -euo pipefail
 
 # A prior Bash-capable coach/reviewer step can write PYTHONPATH/LD_PRELOAD
