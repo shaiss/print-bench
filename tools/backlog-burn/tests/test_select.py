@@ -24,10 +24,18 @@ def _iso(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def issue(number, created, *, labels=(LABEL,), comments=()):
+# Default body names a concrete non-protected path so existing eligibility
+# tests keep selecting under the fail-closed protected-path guard. Tests that
+# exercise that guard pass title=/body= explicitly.
+_SAFE_BODY = "Touches: docs/example.md\n"
+
+
+def issue(number, created, *, labels=(LABEL,), comments=(),
+          title=None, body=_SAFE_BODY):
     return {
         "number": number,
-        "title": f"issue {number}",
+        "title": title if title is not None else f"issue {number}",
+        "body": body,
         "createdAt": created,
         "labels": list(labels),
         "comments": list(comments),
@@ -739,3 +747,138 @@ def test_render_summary_selected_and_empty():
     assert "#80" in chosen
     none = render_summary(select_issue(snap([issue(81, "2026-08-01T00:00:00Z", labels=[])])))
     assert "No issue selected" in none
+
+
+# --------------------------------------------------------------------------
+# Guard: protected delivery paths (deliverer refuse list; fail closed)
+# --------------------------------------------------------------------------
+
+def test_protected_path_in_title_is_skipped():
+    # #885 shape: title names CLAUDE.md — an agent-instruction path the
+    # deliverer refuses. Selecting it burns a firing that can never push.
+    bad = issue(
+        885, "2026-08-01T00:00:00Z",
+        title="CLAUDE.md: restore newline between scripts/ and styles/",
+        body="",
+    )
+    r = select_issue(snap([bad]))
+    assert r["selected"] is None
+    assert "protected path" in r["excluded"]["885"]
+    # Negative control: same issue pointing at a docs path is eligible.
+    good = issue(
+        885, "2026-08-01T00:00:00Z",
+        title="docs/contributing: restore newline between bullets",
+        body="Touches: docs/contributing/autonomy.md\n",
+    )
+    assert select_issue(snap([good]))["selected"] == 885
+
+
+def test_design_path_in_touches_is_kept():
+    kept = issue(
+        200, "2026-08-01T00:00:00Z",
+        title="phone-stand: thicken the brim",
+        body="Touches: designs/phone-stand/phone-stand.scad\n",
+    )
+    assert select_issue(snap([kept]))["selected"] == 200
+
+
+def test_bare_scripts_word_in_prose_does_not_count_as_path():
+    # Bugbot on #953: bare "scripts"/"tools" in prose must not look like a
+    # protected path. With no concrete path the issue still fail-closes
+    # (unknown scope) for every required label.
+    prose = issue(
+        201, "2026-08-01T00:00:00Z",
+        labels=["design-brief"],
+        title="Design brief: phone stand with better tools",
+        body="Ship a stand. Mention scripts only as a word, not a path.\n",
+    )
+    r = select_issue(snap([prose]), required_label="design-brief")
+    assert r["selected"] is None
+    assert "could not be determined" in r["excluded"]["201"]
+    # Negative control: naming a design path keeps a design-brief selectable.
+    named = issue(
+        201, "2026-08-01T00:00:00Z",
+        labels=["design-brief"],
+        title="Design brief: phone stand with better tools",
+        body="Touches: designs/phone-stand/phone-stand.scad\n",
+    )
+    assert select_issue(snap([named]), required_label="design-brief")["selected"] == 201
+    opaque = issue(
+        202, "2026-08-01T00:00:00Z",
+        title="improve the scripts somehow",
+        body="please fix the tools we use\n",
+    )
+    r = select_issue(snap([opaque]))
+    assert r["selected"] is None
+    assert "could not be determined" in r["excluded"]["202"]
+
+
+
+def test_scripts_path_in_body_is_skipped():
+    # #886 / #889 shape: body names scripts/design-run-deliver.sh.
+    bad = issue(
+        886, "2026-08-01T00:00:00Z",
+        title="design-run selftest: replace grep-based workflow guards",
+        body=(
+            "Replace the selftest guards in scripts/design-run-deliver.sh "
+            "with a YAML-parsing check.\n"
+        ),
+    )
+    r = select_issue(snap([bad]))
+    assert r["selected"] is None
+    assert "protected path" in r["excluded"]["886"]
+    assert "scripts/design-run-deliver.sh" in r["excluded"]["886"]
+
+
+def test_unknown_scope_is_skipped_fail_closed():
+    # No concrete path in title or body — cannot prove the deliverer would
+    # accept the work, so EVERY required label fail-closes (Security on #953).
+    opaque = issue(
+        300, "2026-08-01T00:00:00Z",
+        title="improve something somewhere",
+        body="please fix the bug\n",
+    )
+    r = select_issue(snap([opaque]))
+    assert r["selected"] is None
+    assert "could not be determined" in r["excluded"]["300"]
+    # Negative control: naming a docs path makes it eligible.
+    named = issue(
+        300, "2026-08-01T00:00:00Z",
+        title="improve something somewhere",
+        body="Touches: docs/licensing.md\n",
+    )
+    assert select_issue(snap([named]))["selected"] == 300
+    # design-brief / chunker labels fail closed the same way.
+    brief = issue(
+        301, "2026-08-01T00:00:00Z",
+        labels=["design-brief"],
+        title="Design brief: phone stand",
+        body="Make a phone stand.\n",
+    )
+    r = select_issue(snap([brief]), required_label="design-brief")
+    assert r["selected"] is None
+    assert "could not be determined" in r["excluded"]["301"]
+
+
+def test_glob_in_touches_is_skipped_fail_closed():
+    # A Touches glob is not a concrete path set — fail closed for every label.
+    globbed = issue(
+        302, "2026-08-01T00:00:00Z",
+        title="touch many docs",
+        body="Touches: docs/**\n",
+    )
+    r = select_issue(snap([globbed]))
+    assert r["selected"] is None
+    assert "could not be determined" in r["excluded"]["302"]
+
+
+def test_nested_github_path_is_skipped():
+    # Security on #953: ./.github/x and sub/.github/x are protected.
+    for n, title, body in (
+        (910, "wire ./.github/workflows/x.yml", "Touches: ./.github/workflows/x.yml\n"),
+        (911, "nested", "Touches: sub/.github/hooks/evil.sh\n"),
+    ):
+        bad = issue(n, "2026-08-01T00:00:00Z", title=title, body=body)
+        r = select_issue(snap([bad]))
+        assert r["selected"] is None, title
+        assert "protected path" in r["excluded"][str(n)]
