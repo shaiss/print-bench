@@ -73,9 +73,10 @@ the one motion the part really performs — seeded from the hero.
 | ~~B3~~ | ~~Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release)~~ | **Done** (#631): `collar-shallow` gated via `ci.parts`; plate stays boss+collar; README points at the Release/gated part | — |
 | B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
 | ~~B1~~ | ~~Witness slot / seat detent ("is the rod fully in?")~~ | **Done** (#989, supersedes #787): seat detent (0.30 mm radial lip) + two 1.6×8 mm witness slots on `collar_use`; shallow collar inherits via `depth=`. Field click/visibility still waits on the proving print's week-of-use seat check. | — |
-| B2 | Anti-rotation rib (screwless alternative to `screw_count=2`) | protects drywall anchors from spin torque | small geometry + re-gate |
+| ~~B2~~ | ~~Anti-rotation rib (screwless alternative to `screw_count=2`)~~ | **Done** (#991, supersedes #792): eight 0.8 mm 45° V-grooves on the boss wall face, default on for `screw_count=1`; omitted at `screw_count=2`. Field bite still waits on the proving print. | — |
 | ~~B5~~ | ~~25 mm reference coupons (thread + bore)~~ | **Done** (#809): gated `thread-coupon-25` + `bore-coupon-25`; knurl flute cap by OD (NOTES) | — |
 | B5b | Gated 25 mm production holders (`boss` / `collar` / `collar-shallow` at fixed 25 mm, Release + plate policy) | coupons prove the size; holders still need Customizer `rod_d=25` export until gated parts ship | ci.parts + README |
+| B7 | v2.1 Release cut — re-gate the grooved `boss` from the source default (`anti_rotate` on) into a tagged Release | v2.0 STLs ship plain flanges; the B2 feature only reaches Release downloaders with this cut. Blocked on this PR's merge; the proving print (B4 / v1-DoD field test) outranks it | owner tag push + Release bundle |
 
 Re-ranked 2026-08-24 per the #379 thread's ruling (Vera's note: the issue
 body's order was two rounds stale — the committed order wins). A "B6" appears
@@ -90,7 +91,7 @@ All four are the brief's own open questions, non-blocking for modeling.
 |---|---|---|
 | Actual rod barrel Ø where it sits | before printing, not modeling | 40.0 given value; bore coupon verifies |
 | Alcove width vs rod length (install gap) | install, not modeling | deep+shallow pair via `engagement_depth` |
-| Mount surface (drywall/wood/masonry) | no | M5 wood screw, recessed; anchor is the user's call |
+| Mount surface (drywall/wood/masonry) | no | M5 wood screw, recessed; anchor is the user's call. B2 ribs bite drywall/paint/wood; tile/masonry → `screw_count=2` |
 | Witness slot wanted? | no | **shipped** — two axial sight slots + seat detent, both on by default (B1 / NOTES D13); turn either off with `witness_window` / `seat_detent` |
 
 ## Decision log
@@ -109,3 +110,5 @@ All four are the brief's own open questions, non-blocking for modeling.
 | 2026-09-12 | Ship `collar-shallow` as a gated part (B3 / #631) | `ci.parts` cannot carry a free-form `-D engagement_depth=12`; dual-`-D` hand-render is the foot-gun the deliverable rules stop. Depth threaded into `collar`/`collar_use`; plate unchanged (boss+collar only) |
 | 2026-10-04 | B5: gate 25 mm thread + bore coupons; cap knurl flutes by collar OD | 36 flutes fail N6 merge guard at 25 mm (collar OD 39); auto-cap to 32 keeps asserts without weakening floors — slip still 0.6 until a coupon says otherwise (#809) |
 | 2026-11-05 | Seat detent + witness window (B1 / #989; supersedes #787) | Closed socket hid full-seat; both features, small and supportless, on `collar_use` so the shallow collar inherits. See NOTES D13. |
+| 2026-11-05 | Anti-rotation V-grooves on the boss wall face (B2 / #991; supersedes #792) | Screwless spin-lock for `screw_count=1` so collar torque does not ream a drywall anchor. See NOTES D14. |
+| 2026-11-05 | v2.0 ships plain flanges; grooved bosses ship from source until v2.1 | Release STLs predate B2. Source default keeps `anti_rotate` on for renders; the v2.1 Release cut (backlog B7) re-gates the grooved boss after merge, with the proving print still outranking that cut. |

@@ -102,7 +102,8 @@ default-depth holder pair.
   flush at the *neck's* top face; assert keeps the head below the plane the
   rod bottoms on (rod seats on the collar shoulder, never on the screw).
   `screw_count=2` grows the flange so both off-axis heads clear the neck —
-  the brief's anti-spin option.
+  the brief's anti-spin option. The screwless path for `screw_count=1` is
+  D14's wall-face ribs.
 - **D10 — Style: builds from the `workshop-utility` tokens, does not claim
   the pack (printability wins).** The brief named the pack and the geometry
   uses its tokens (`style_fn` 64 everywhere but the lib-pinned thread helix
@@ -189,6 +190,22 @@ default-depth holder pair.
   Field confirmation — does the click survive ~730 axial curtain-tugs/yr,
   and is the tip readable in the slot — waits on the proving print's
   week-of-use seat check. Geometry is otherwise v2.
+- **D14 — (B2) Anti-rotation keys on the boss wall face, on by default for
+  `screw_count=1`.** D9's off-axis pair still grows the flange for heavier
+  installs; this is the screwless path so a single central M5 in a drywall
+  anchor does not spin when the knurled collar is torqued on/off (brief
+  #355; Drik: make the boss resist spin). Eight radial **45° V-grooves**,
+  `anti_rotate_h` 0.8 mm (4 layers), `anti_rotate_w` 1.6 mm (= 2·h, so
+  flanks are exactly 45°), cut into the flange's bed/wall face (z≈0)
+  between an inner washer and the outer rim. Printed flange-down those
+  slots are first-layer gaps whose walls are self-supporting — no pocket
+  roof, no spike below z=0, no new overhang (N4). `screw_count=2` omits
+  the grooves so they never cross the off-axis shanks; the two screws
+  already pin rotation. Toggle `anti_rotate=false` for a flat flange
+  (tile/masonry, where the lands cannot bite). Thread/bore coupons
+  unchanged — they never include the flange. Collar untouched (B1's seat
+  detent lives there). Field confirmation that the bite holds a week's
+  unthread torque waits on the proving print; geometry is otherwise v2.
 
 ## Print settings
 
@@ -211,7 +228,9 @@ default-depth holder pair.
 ## Print this first
 
 Two fits to tune, two coupons. Both are include-override wrappers on the
-production modules — what you print *is* what ships.
+production modules — what you print *is* what ships. The wall-face ribs are
+not a third coupon — they validate on the proving print (item 3), not a
+dedicated part.
 
 1. **Thread coupon** (`alcove-rod-socket-coupon.scad`): male stub + female
    ring from the production thread. Screw the ring on: it should run free
@@ -230,6 +249,15 @@ production modules — what you print *is* what ships.
      the slip — expect +0.1–0.2 mm on `rod_clearance`.
    - The seat detent is **not** on this coupon (D13): it proves the slip
      bore, not the seat catch. Tune the catch on a full collar.
+3. **Boss spin-check (no extra print):** the boss *is* its own coupon.
+   Press the printed flange onto scrap drywall or painted wood, hand-torque
+   the M5, and check for spin — five minutes. The ribs' bite validates on
+   the proving print / this press-check, not a rib coupon.
+4. **If the proving print still spins** (after the press-check and a real
+   wall install): deepen first — override `anti_rotate_h=1.2` /
+   `anti_rotate_w=2.4` (docs-only escalation; SCAD defaults stay 0.8 / 1.6)
+   before jumping to `screw_count=2`. Contingent on a spinning proving
+   print; do not pre-emptively deepen.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.
@@ -294,7 +322,10 @@ M5 in a rated anchor; heavier than that → find a stud, or set
 `screw_count=2`** — the second off-axis screw also pins the boss against
 the spin of unthreading. The cyclic half of this load (~730 axial
 curtain-tugs a year against single-digit unthreads) is charter B1's
-vibration case, not this rating's.
+vibration case, not this rating's. **B2's wall-face ribs** take that same
+unthread torque on `screw_count=1` so the single anchor is not asked to
+resist spin in drywall; they do not change the ~10 kg hung-weight ceiling
+— heavier still wants a stud or `screw_count=2`.
 
 ## Field test log
 
