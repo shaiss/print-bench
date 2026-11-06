@@ -261,6 +261,74 @@ def test_ship_lock_marker_plus_claude_bot_is_not_a_lock():
     assert select_issue(snap([issue_]))["selected"] == 148
 
 
+def test_ship_lock_backtick_quoted_marker_is_not_a_lock():
+    # #872: a spec comment quotes the HTML authenticity marker inside
+    # backticks mid-body — substring match alone must not exclude the issue.
+    from backlog_burn.select import SHIP_LOCK_HTML_MARKER
+    issue_ = issue(872, "2026-08-01T00:00:00Z", comments=[
+        {"body": (
+            "Scope addition (agreed with the eng merge gate)\n\n"
+            f"A spec quotes the marker in backticks: `{SHIP_LOCK_HTML_MARKER}`."
+         ),
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "shaiss", "authorType": "User"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 872
+
+
+def test_ship_lock_marker_not_on_first_line_is_not_a_lock():
+    # First non-blank line must start with the SHIP-LOCK lead.
+    issue_ = issue(873, "2026-08-01T00:00:00Z", comments=[
+        {"body": (
+            "Preamble.\n\n"
+            "🚢 SHIP-LOCK — not the first line\n\n"
+            "<!-- design-run-ship-lock:v1 -->"
+         ),
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "github-actions[bot]", "authorType": "Bot"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 873
+
+
+def test_ship_lock_non_allowlisted_author_is_not_a_lock():
+    issue_ = issue(874, "2026-08-01T00:00:00Z", comments=[
+        {"body": "🚢 SHIP-LOCK — forged\n\n<!-- design-run-ship-lock:v1 -->",
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "random-user", "authorType": "User"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 874
+
+
+@pytest.mark.parametrize("body", [
+    "\ufeff🚢 SHIP-LOCK — claim\n\n<!-- design-run-ship-lock:v1 -->",
+    "## 🚢 SHIP-LOCK — claim\n\n<!-- design-run-ship-lock:v1 -->",
+    "**🚢 SHIP-LOCK — claim**\n\n<!-- design-run-ship-lock:v1 -->",
+    "# **🚢 SHIP-LOCK — claim**\n\n<!-- design-run-ship-lock:v1 -->",
+])
+def test_ship_lock_bom_heading_bold_lead_still_locks(body):
+    # BOM / heading / bold wrappers around the lead still authenticate.
+    issue_ = issue(875, "2026-08-01T00:00:00Z", comments=[
+        {"body": body, "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "github-actions[bot]", "authorType": "Bot"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] is None
+    assert select_issue(snap([issue_]))["excluded"]["875"].startswith("an active")
+
+
+def test_ship_lock_partial_bold_prefix_is_not_a_lock():
+    # Leading ** without a matching trailing ** must not unwrap.
+    from backlog_burn.select import SHIP_LOCK_HTML_MARKER
+    issue_ = issue(876, "2026-08-01T00:00:00Z", comments=[
+        {"body": (
+            "**🚢 SHIP-LOCK** is the lead the routine writes.\n\n"
+            f"Quoted marker: `{SHIP_LOCK_HTML_MARKER}`."
+         ),
+         "createdAt": "2026-08-02T00:00:00Z",
+         "authorLogin": "shaiss", "authorType": "User"},
+    ])
+    assert select_issue(snap([issue_]))["selected"] == 876
+
+
 # --------------------------------------------------------------------------
 # Guard: an open PR already closes the issue
 # --------------------------------------------------------------------------

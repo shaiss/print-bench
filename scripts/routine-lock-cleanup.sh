@@ -84,10 +84,11 @@ set -euo pipefail
 SELF="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 
-# Visible first line for humans. A comment is a lock ONLY when it also
-# carries LOCK_HTML_MARKER and is authored by a LOCK_AUTHOR_LOGINS login —
-# never because it merely starts with LOCK_MARKER (Cipher, #864). Mirrored
-# in scripts/design-run-deliver.sh and tools/backlog-burn select.py.
+# Visible first-line lead. A comment is a lock ONLY when its first
+# non-blank line starts with LOCK_MARKER, it also carries LOCK_HTML_MARKER,
+# and it is authored by a LOCK_AUTHOR_LOGINS login (Cipher #864 + #872).
+# Mirrored in scripts/design-run-deliver.sh, tools/backlog-burn select.py,
+# and tools/reeve github.py.
 LOCK_MARKER='🚢 SHIP-LOCK'
 LOCK_HTML_MARKER='<!-- design-run-ship-lock:v1 -->'
 # Exact GitHub logins that may author a lock (space-separated). Cipher, #864:
@@ -117,15 +118,28 @@ COOLDOWN_HTML_MARKER='<!-- burn-cooldown:v1 -->'
 BURN_COOLDOWN_HOURS=24
 
 # jq prelude: first non-blank line of a body, stripped — the line
-# backlog_burn.select._first_line classifies on. is_lock requires the HTML
-# authenticity marker plus login in $settle_logins (LOCK_AUTHOR_LOGINS).
+# backlog_burn.select._first_line classifies on. lock_lead additionally
+# strips a UTF-8 BOM and a bold (**…**) or markdown heading (#…) wrapper
+# so a rendered lead still authenticates. is_lock is the one authentic-
+# lock rule (Cipher #864 + #872), mirrored in reeve.github,
+# backlog_burn.select, and design-run-deliver.sh: lock_lead starts with
+# $lock_marker (LOCK_MARKER), HTML authenticity marker present, login in
+# $settle_logins (LOCK_AUTHOR_LOGINS). A backtick-quoted marker mid-body
+# is never a lock.
 JQ_FL='def fl($b): ($b // "") | split("\n")
   | map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))
   | map(select(length > 0)) | (.[0] // "");
+def lock_lead($b):
+  fl($b)
+  | gsub("^\ufeff"; "")
+  | gsub("^#{1,6}[[:space:]]+"; "")
+  | if (startswith("**") and endswith("**") and length > 4) then .[2:-2]
+    else . end;
 def lock_logins:
   ($settle_logins / " ") | map(select(length > 0) | ascii_downcase);
 def is_lock:
-  ((.body // "") | contains($html_marker))
+  (lock_lead(.body) | startswith($lock_marker))
+  and ((.body // "") | contains($html_marker))
   and (((.login // "") | ascii_downcase) as $l
        | (lock_logins | index($l)) != null);'
 
@@ -185,14 +199,16 @@ JQ_LATEST_LOCK='def latest_lock:
 # selector's _ship_lock_state split by cause: "withdrawn" distinguishes a
 # claim somebody released from "none" (no lock comment at all), because only
 # the former is evidence of a deliberate terminal stop by the run that claimed.
-# Authenticity = HTML marker + settle login (Cipher, #864).
+# Authenticity = first-line LOCK_MARKER + HTML marker + settle login
+# (Cipher #864 + #872).
 lock_state() {
-  jq -rs --arg html_marker "$LOCK_HTML_MARKER" \
+  jq -rs --arg lock_marker "$LOCK_MARKER" \
+    --arg html_marker "$LOCK_HTML_MARKER" \
     --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
     | if $l == null then "none"
-      elif ($l | fl(.body) | ascii_upcase | contains("WITHDRAWN")) then "withdrawn"
+      elif ($l | lock_lead(.body) | ascii_upcase | contains("WITHDRAWN")) then "withdrawn"
       else "active" end'
 }
 
@@ -256,7 +272,8 @@ JQ_THIS_RUN='def stop_trusted:
 # Neither branch counts the marker mid-line: the skill leads its stop
 # comments with the marker.
 decline_indicated() {  # [run-started-at]
-  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
+  jq -rs --arg lock_marker "$LOCK_MARKER" \
+    --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     --arg d1 "$DECLINE_MARKER_1" --arg d2 "$DECLINE_MARKER_2" \
     --arg since "${1:-}" --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
@@ -289,7 +306,8 @@ decline_indicated() {  # [run-started-at]
 #     claim timestamp to anchor on: JQ_THIS_RUN's claimless_stop, the same
 #     test decline_indicated's claimless branch runs.
 deferred_indicated() {  # [run-started-at]
-  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
+  jq -rs --arg lock_marker "$LOCK_MARKER" \
+    --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     --arg d "$DEFER_MARKER" --arg since "${1:-}" \
     --arg owner "${REPO%%/*}" \
     "$JQ_FL $JQ_LATEST_LOCK $JQ_THIS_RUN"'
@@ -311,12 +329,13 @@ deferred_indicated() {  # [run-started-at]
 # skill's §0.6 edit) carries its own wording, never this prefix — and must
 # not be read as a deliberate stop by the current run.
 death_marked() {
-  jq -rs --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
+  jq -rs --arg lock_marker "$LOCK_MARKER" \
+    --arg html_marker "$LOCK_HTML_MARKER" --arg settle_logins "$LOCK_AUTHOR_LOGINS" \
     --arg prefix "$DEATH_PREFIX" \
     "$JQ_FL $JQ_LATEST_LOCK"'
     latest_lock as $l
     | if $l == null then false
-      else ($l | fl(.body) | startswith($prefix))
+      else ($l | lock_lead(.body) | startswith($prefix))
       end'
 }
 
@@ -649,7 +668,56 @@ EOF
 EOF
   [ "$(lock_state < "$tmp/laterline.ndjson")" = "none" ] \
     || st_fail "a marker below a non-blank first line was counted as a lock"
-  echo "ok    selftest: lock classification (active / withdrawn / none / mid-line / first-non-blank / settle-login-only)"
+  # #872: a spec comment quotes the HTML authenticity marker inside
+  # backticks mid-body — allowlisted author, but first line is not the
+  # SHIP-LOCK lead, so it is never a held lock.
+  cat > "$tmp/backtick-quoted.ndjson" <<EOF
+{"body": "Scope addition (agreed with the eng merge gate)\n\nA spec quotes the marker in backticks: \`${LOCK_HTML_MARKER}\`.", "created_at": "2026-08-01T00:00:00Z", "login": "shaiss", "type": "User"}
+EOF
+  [ "$(lock_state < "$tmp/backtick-quoted.ndjson")" = "none" ] \
+    || st_fail "a backtick-quoted marker mid-body (#872) was counted as a lock"
+  # Marker + allowlisted author, but SHIP-LOCK lead not on the first line.
+  cat > "$tmp/laterline-marked.ndjson" <<'EOF'
+{"body": "Preamble.\n\n🚢 SHIP-LOCK — not the first line\n\n<!-- design-run-ship-lock:v1 -->", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+EOF
+  [ "$(lock_state < "$tmp/laterline-marked.ndjson")" = "none" ] \
+    || st_fail "a marker+lead below a non-blank first line was counted as a lock"
+  # BOM / markdown heading / bold wrappers around the lead still lock.
+  python3 -c '
+import json, sys
+sys.stdout.write(json.dumps({
+    "body": "\ufeff🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed",
+    "created_at": "2026-08-01T00:00:00Z",
+    "login": "github-actions[bot]",
+    "type": "Bot",
+}) + "\n")
+' > "$tmp/bom-lead.ndjson"
+  [ "$(lock_state < "$tmp/bom-lead.ndjson")" = "active" ] \
+    || st_fail "a UTF-8 BOM before the SHIP-LOCK lead was not counted as a lock"
+  cat > "$tmp/heading-lead.ndjson" <<'EOF'
+{"body": "## 🚢 SHIP-LOCK\n\n<!-- design-run-ship-lock:v1 -->\nclaimed", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+EOF
+  [ "$(lock_state < "$tmp/heading-lead.ndjson")" = "active" ] \
+    || st_fail "a markdown-heading-wrapped SHIP-LOCK lead was not counted as a lock"
+  cat > "$tmp/bold-lead.ndjson" <<'EOF'
+{"body": "**🚢 SHIP-LOCK — claim**\n\n<!-- design-run-ship-lock:v1 -->", "created_at": "2026-08-01T00:00:00Z", "login": "github-actions[bot]", "type": "Bot"}
+EOF
+  [ "$(lock_state < "$tmp/bold-lead.ndjson")" = "active" ] \
+    || st_fail "a bold-wrapped SHIP-LOCK lead was not counted as a lock"
+  # Partial bold prefix (leading ** without trailing **) must NOT unwrap.
+  python3 -c '
+import json, sys
+sys.stdout.write(json.dumps({
+    "body": "**🚢 SHIP-LOCK** is the lead the routine writes.\n\n"
+            "Quoted: `<!-- design-run-ship-lock:v1 -->`.",
+    "created_at": "2026-08-01T00:00:00Z",
+    "login": "shaiss",
+    "type": "User",
+}) + "\n")
+' > "$tmp/partial-bold.ndjson"
+  [ "$(lock_state < "$tmp/partial-bold.ndjson")" = "none" ] \
+    || st_fail "a partial-bold lead prefix was counted as a lock"
+  echo "ok    selftest: lock classification (active / withdrawn / none / mid-line / first-non-blank / settle-login-only / #872-backtick / bom-heading-bold)"
 
   # -- decline detection: the skill's §1/§8 stop markers AFTER the claim -----
   # Positive: a DECLINED or DECISION NEEDED comment strictly after the latest
