@@ -872,9 +872,15 @@ run_check() {
     echo "ship-check: HEAD is not claude/issue-${issue}-*"
   fi
 
-  local comments=""
+  # comments_fetched=1 only after a successful comments-file read or a
+  # successful gh list. A failed live fetch must NOT synthesize DEFERRED:
+  # posting the stop without knowing whether a SHIP-LOCK is active skips
+  # withdraw, settle scores declined=true and returns before releasing the
+  # claim, and later firings starve (Bugbot on #999).
+  local comments="" comments_fetched=0
   if [[ -n "$comments_file" ]]; then
     comments="$(cat -- "$comments_file")"
+    comments_fetched=1
   elif [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
     # Live: fetch issue comments as NDJSON {body,created_at,login,type,id}.
     # ALWAYS mktemp a fresh empty GH_CONFIG_DIR immediately before gh —
@@ -933,13 +939,16 @@ run_check() {
       )"; then
         echo "ship-check: gh comment fetch failed — stop-marker path unavailable" >&2
         comments=""
+      else
+        comments_fetched=1
       fi
       rm -rf -- "$gh_cfg"
     fi
   fi
 
-  if [[ -n "$comments" ]]; then
-    if printf '%s\n' "$comments" | stop_indicated_from_ndjson "$since" | grep -qx true; then
+  if [[ "$comments_fetched" -eq 1 ]]; then
+    if [[ -n "$comments" ]] \
+        && printf '%s\n' "$comments" | stop_indicated_from_ndjson "$since" | grep -qx true; then
       on_stop=1
       echo "ship-check: explicit decline/defer/decision stop marker present"
     else
@@ -960,9 +969,21 @@ run_check() {
   # A denial on a failed/exhausted provider walk must not mint declined=true
   # and suppress triage (#981); only synthesize when subtype=success.
   if [[ "$denial_subtype" == "success" ]]; then
+    # Live synthesize needs a successful comment fetch so withdraw can see
+    # an active SHIP-LOCK. Without it, fail hard and let settle's death
+    # path release the claim (Bugbot on #999).
+    local live_synthesize=0
+    if [[ -z "$comments_file" && -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+      live_synthesize=1
+    fi
+    if [[ "$live_synthesize" -eq 1 && "$comments_fetched" -ne 1 ]]; then
+      echo "::error::backlog-burn ship walk left no delivery/stop and comment fetch failed — refusing to post 🚢 DEFERRED without lock-withdraw visibility (issue #962 / #999)"
+      return 1
+    fi
+
     if [[ "$denial_count" -gt 0 ]]; then
       echo "ship-check: permission_denials=${denial_count} tools=${denial_tools_csv} subtype=success with no ship branch/stop — deferred outcome"
-      if [[ -z "$comments_file" && -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+      if [[ "$live_synthesize" -eq 1 ]]; then
         if ! post_deferred_denial_stop "$issue" "$denial_tools_csv" "$comments"; then
           echo "::error::backlog-burn ship walk hit permission denial (${denial_tools_csv}) but could not post 🚢 DEFERRED — refusing opaque success (issue #962)"
           return 1
@@ -979,7 +1000,7 @@ run_check() {
     # #962 gap after #963/#981 — ship-check exit 1 alone still left settle
     # on the opaque neither-delivered path (run 41711782585).
     echo "ship-check: subtype=success with no ship branch/stop and no listed denials — deferred outcome (no-push success path)"
-    if [[ -z "$comments_file" && -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+    if [[ "$live_synthesize" -eq 1 ]]; then
       if ! post_deferred_no_outcome_stop "$issue" "$comments"; then
         echo "::error::backlog-burn ship walk left no delivery/stop and could not post 🚢 DEFERRED — refusing opaque success (issue #962)"
         return 1
@@ -1875,6 +1896,34 @@ EOF
     fails=$((fails + 1))
   else
     echo "ok    selftest: missing execution log on main still fails hard check"
+  fi
+
+  # Live synthesize with a failed comment fetch must fail hard — posting
+  # DEFERRED without withdraw visibility leaves SHIP-LOCK standing (Bugbot
+  # on #999). Plant a bad token so /usr/bin/gh cannot list comments.
+  set +e
+  env -u GITHUB_TOKEN \
+      GH_TOKEN=bb-ship-check-selftest-bad-token \
+      GITHUB_REPOSITORY=shaiss/print-bench \
+      "$0" --issue 925 --head-ref main \
+      --run-started-at 2026-11-01T21:21:01Z --execution-log "$tmp/exec-no-deny.json" \
+      >"$tmp/fetch-fail.out" 2>&1
+  local fetch_fail_rc=$?
+  set -e
+  if [[ "$fetch_fail_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: live fetch-failure walk unexpectedly passed (would strand SHIP-LOCK)"
+    cat "$tmp/fetch-fail.out"
+    fails=$((fails + 1))
+  elif grep -q 'ship-check: ok (deferred' "$tmp/fetch-fail.out"; then
+    echo "FAIL  selftest: live fetch-failure still synthesized deferred"
+    cat "$tmp/fetch-fail.out"
+    fails=$((fails + 1))
+  elif ! grep -q 'comment fetch failed' "$tmp/fetch-fail.out"; then
+    echo "FAIL  selftest: live fetch-failure missing refuse-without-withdraw message"
+    cat "$tmp/fetch-fail.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: live comment-fetch failure refuses deferred (no stranded lock)"
   fi
 
   # list_denial_tools helper: WebFetch extracted, input not.
