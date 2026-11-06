@@ -560,10 +560,24 @@ print("false" if "WITHDRAWN" in first.upper() else "true")
 }
 
 # Shared gh POST for a comment body. Returns 0/1. Opens its own GH_CONFIG_DIR.
+# Selftest hook: BB_SHIP_CHECK_COMMENT_SINK=<path> records "LABEL\n<body>\n---\n"
+# instead of calling gh; BB_SHIP_CHECK_COMMENT_FAIL=1 forces a post failure.
 _post_issue_comment() {
   local issue="$1"
   local body="$2"
   local label="$3"
+  if [[ -n "${BB_SHIP_CHECK_COMMENT_SINK:-}" ]]; then
+    if [[ "${BB_SHIP_CHECK_COMMENT_FAIL:-}" == "1" ]]; then
+      echo "ship-check: forced post failure for ${label} (selftest)" >&2
+      return 1
+    fi
+    {
+      printf 'LABEL=%s\n' "$label"
+      printf '%s\n' "$body"
+      printf -- '---\n'
+    } >>"${BB_SHIP_CHECK_COMMENT_SINK}" || return 1
+    return 0
+  fi
   unset GH_ENTERPRISE_TOKEN GH_FORCE_TTY HTTP_PROXY HTTPS_PROXY ALL_PROXY \
     http_proxy https_proxy all_proxy \
     SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE REQUESTS_CA_BUNDLE \
@@ -599,9 +613,11 @@ _post_issue_comment() {
   return 0
 }
 
-# Live: release an active SHIP-LOCK before a synthesized deferred stop so
+# Live: release an active SHIP-LOCK after a synthesized deferred stop so
 # settle does not leave the claim standing after deferred→declined
-# (routine-lock-cleanup returns before withdrawing). $2 is a short reason
+# (routine-lock-cleanup returns before withdrawing). The deferred stop is
+# posted FIRST so a later withdraw/post failure still leaves the picker
+# parked on the defer cooldown (CodeRabbit on #999). $2 is a short reason
 # fragment for the withdraw body (already sanitized by the caller).
 # Returns 0/1.
 _withdraw_active_ship_lock_for_defer() {
@@ -623,13 +639,15 @@ Released by backlog-burn-ship-check after a subtype=success walk left no deliver
   if ! _post_issue_comment "$issue" "$withdraw_body" "SHIP-LOCK WITHDRAWN"; then
     return 1
   fi
-  echo "ship-check: posted 🚢 SHIP-LOCK WITHDRAWN (active claim released before deferred stop)"
+  echo "ship-check: posted 🚢 SHIP-LOCK WITHDRAWN (active claim released after deferred stop)"
   return 0
 }
 
 # Live: post a 🚢 DEFERRED stop for a denied-tool walk so settle's decline
 # detector fires (github.token → github-actions[bot]). Tool names only.
-# Returns 0 on success, 1 on post failure. Offline callers must not invoke.
+# Deferred first, then withdraw — so a withdraw failure cannot erase the
+# picker park. Returns 0 on success, 1 on post failure. Offline callers
+# must not invoke.
 post_deferred_denial_stop() {
   local issue="$1"
   local tools_csv="$2"
@@ -639,10 +657,6 @@ post_deferred_denial_stop() {
   # is already allowlist+redact sanitized. Cap length.
   if [[ ${#tools_csv} -gt 200 ]]; then
     tools_csv="${tools_csv:0:200}…"
-  fi
-
-  if ! _withdraw_active_ship_lock_for_defer "$issue" "permission denial" "$comments_ndjson"; then
-    return 1
   fi
 
   body="🚢 DEFERRED — permission denial: ${tools_csv}
@@ -655,21 +669,23 @@ The ship walk hit a permission denial and left no \`claude/issue-${issue}-*\` br
     return 1
   fi
   echo "ship-check: posted 🚢 DEFERRED — permission denial: ${tools_csv}"
+
+  if ! _withdraw_active_ship_lock_for_defer "$issue" "permission denial" "$comments_ndjson"; then
+    echo "ship-check: deferred stop posted but SHIP-LOCK withdraw failed — defer cooldown still parks picking" >&2
+    return 1
+  fi
   return 0
 }
 
 # Live: post a 🚢 DEFERRED stop for a no-push success walk (HEAD still on
 # the default branch, subtype=success, no listed denials, no agent stop).
 # Same settle contract as the denial path — declined=true, no opaque
-# neither-delivered failure. Returns 0/1. Offline callers must not invoke.
+# neither-delivered failure. Deferred first, then withdraw. Returns 0/1.
+# Offline callers must not invoke.
 post_deferred_no_outcome_stop() {
   local issue="$1"
   local comments_ndjson="${2:-}"
   local body
-
-  if ! _withdraw_active_ship_lock_for_defer "$issue" "no ship outcome" "$comments_ndjson"; then
-    return 1
-  fi
 
   body="🚢 DEFERRED — no ship outcome
 
@@ -681,6 +697,11 @@ The ship walk reported subtype=success but left HEAD off \`claude/issue-${issue}
     return 1
   fi
   echo "ship-check: posted 🚢 DEFERRED — no ship outcome"
+
+  if ! _withdraw_active_ship_lock_for_defer "$issue" "no ship outcome" "$comments_ndjson"; then
+    echo "ship-check: deferred stop posted but SHIP-LOCK withdraw failed — defer cooldown still parks picking" >&2
+    return 1
+  fi
   return 0
 }
 
@@ -1012,11 +1033,16 @@ run_check() {
     return 0
   fi
 
+  # Copilot on #999: denial_subtype is allowlisted but not key-shape
+  # redacted — a planted ghp_/JWT-shaped subtype must not hit public logs.
+  local subtype_print
+  subtype_print="$(BB_IN="${denial_subtype:-missing}" diag_redact 64)"
+
   if [[ "$denial_count" -gt 0 ]]; then
-    echo "ship-check: permission_denials=${denial_count} tools=${denial_tools_csv} but subtype='${denial_subtype:-missing}' — not synthesizing deferred (failed/exhausted walk keeps triage path)"
+    echo "ship-check: permission_denials=${denial_count} tools=${denial_tools_csv} but subtype='${subtype_print}' — not synthesizing deferred (failed/exhausted walk keeps triage path)"
   fi
 
-  echo "::error::backlog-burn ship walk ended with HEAD='${head_print}' (not claude/issue-${issue}-*) and no 🚢 DECLINED / 🚦 DECISION NEEDED / 🚢 DEFERRED stop — refusing opaque outcome (issue #962; subtype='${denial_subtype:-missing}')"
+  echo "::error::backlog-burn ship walk ended with HEAD='${head_print}' (not claude/issue-${issue}-*) and no 🚢 DECLINED / 🚦 DECISION NEEDED / 🚢 DEFERRED stop — refusing opaque outcome (issue #962; subtype='${subtype_print}')"
   return 1
 }
 
@@ -1924,6 +1950,94 @@ EOF
     fails=$((fails + 1))
   else
     echo "ok    selftest: live comment-fetch failure refuses deferred (no stranded lock)"
+  fi
+
+  # Transport-stub posting (Copilot on #999): deferred stop is recorded
+  # before SHIP-LOCK WITHDRAWN, POST failure propagates, and the deferred
+  # body is recognizable as settle's decline marker.
+  cat >"$tmp/active-lock.ndjson" <<EOF
+{"body":"🚢 SHIP-LOCK — claim\n\n${SHIP_LOCK_HTML_MARKER}\n","created_at":"2026-11-01T21:22:00Z","login":"github-actions[bot]","type":"Bot","id":50}
+EOF
+  : >"$tmp/comment-sink.txt"
+  set +e
+  BB_SHIP_CHECK_COMMENT_SINK="$tmp/comment-sink.txt" \
+    post_deferred_no_outcome_stop 925 "$(cat "$tmp/active-lock.ndjson")" \
+    >"$tmp/sink-post.out" 2>&1
+  local sink_rc=$?
+  set -e
+  if [[ "$sink_rc" -ne 0 ]]; then
+    echo "FAIL  selftest: posting stub deferred+withdraw unexpectedly failed"
+    cat "$tmp/sink-post.out" "$tmp/comment-sink.txt"
+    fails=$((fails + 1))
+  elif ! grep -q '🚢 DEFERRED — no ship outcome' "$tmp/comment-sink.txt" \
+      || ! grep -q 'burn-deferred-no-outcome:v1' "$tmp/comment-sink.txt"; then
+    echo "FAIL  selftest: posting stub missing deferred stop body"
+    cat "$tmp/comment-sink.txt"
+    fails=$((fails + 1))
+  elif ! grep -q 'SHIP-LOCK WITHDRAWN' "$tmp/comment-sink.txt"; then
+    echo "FAIL  selftest: posting stub missing SHIP-LOCK WITHDRAWN after deferred"
+    cat "$tmp/comment-sink.txt"
+    fails=$((fails + 1))
+  else
+    # Deferred label must appear before WITHDRAWN in the sink.
+    local def_pos wd_pos
+    def_pos="$(grep -n 'LABEL=🚢 DEFERRED for no ship outcome' "$tmp/comment-sink.txt" | head -1 | cut -d: -f1)"
+    wd_pos="$(grep -n 'LABEL=SHIP-LOCK WITHDRAWN' "$tmp/comment-sink.txt" | head -1 | cut -d: -f1)"
+    if [[ -z "$def_pos" || -z "$wd_pos" || "$def_pos" -ge "$wd_pos" ]]; then
+      echo "FAIL  selftest: deferred was not recorded before WITHDRAWN (def=$def_pos wd=$wd_pos)"
+      cat "$tmp/comment-sink.txt"
+      fails=$((fails + 1))
+    else
+      echo "ok    selftest: posting stub records deferred before WITHDRAWN"
+    fi
+  fi
+
+  : >"$tmp/comment-sink-fail.txt"
+  set +e
+  BB_SHIP_CHECK_COMMENT_SINK="$tmp/comment-sink-fail.txt" \
+  BB_SHIP_CHECK_COMMENT_FAIL=1 \
+    post_deferred_no_outcome_stop 925 "$(cat "$tmp/active-lock.ndjson")" \
+    >"$tmp/sink-fail.out" 2>&1
+  local sink_fail_rc=$?
+  set -e
+  if [[ "$sink_fail_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: forced post failure unexpectedly succeeded"
+    cat "$tmp/sink-fail.out"
+    fails=$((fails + 1))
+  elif [[ -s "$tmp/comment-sink-fail.txt" ]]; then
+    echo "FAIL  selftest: forced post failure still wrote a sink body (would strand lock)"
+    cat "$tmp/comment-sink-fail.txt"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: posting stub failure propagates with no withdraw"
+  fi
+
+  # Token-shaped subtype must be redacted on the hard-fail path (Copilot).
+  local ghp_sub="gh"'p_'"ABCDEFGHIJKLMNOPQRSTUVWX123456"
+  cat >"$tmp/exec-tok-sub.json" <<EOF
+{
+  "type": "result",
+  "subtype": "${ghp_sub}",
+  "permission_denials": [],
+  "result": ""
+}
+EOF
+  set +e
+  "$0" --issue 925 --head-ref main --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-11-01T21:21:01Z --execution-log "$tmp/exec-tok-sub.json" \
+      >"$tmp/tok-sub.out" 2>&1
+  local tok_sub_rc=$?
+  set -e
+  if [[ "$tok_sub_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: token-shaped subtype unexpectedly passed"
+    cat "$tmp/tok-sub.out"
+    fails=$((fails + 1))
+  elif grep -q 'ghp_ABCDEF' "$tmp/tok-sub.out"; then
+    echo "FAIL  selftest: token-shaped subtype leaked into failure path"
+    cat "$tmp/tok-sub.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: token-shaped subtype is redacted on hard-fail path"
   fi
 
   # list_denial_tools helper: WebFetch extracted, input not.
