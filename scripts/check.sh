@@ -646,8 +646,9 @@ if ! ./scripts/coach-lock-check.sh --selftest; then
 fi
 
 # backlog-burn post-agent outcome gate (issue #962): subtype=success with
-# HEAD still on main and no decline must fail clearly; diag redacts tokens
-# and caps the final message; show_full_output stays false on the ship steps.
+# HEAD still on main and no stop maps to deferred-no-outcome (settle sees
+# declined); missing/non-success subtype still fails hard; diag redacts
+# tokens and caps the final message; show_full_output stays false.
 echo "-- backlog-burn-ship-check selftest: scripts/backlog-burn-ship-check.sh --selftest"
 if ! ./scripts/backlog-burn-ship-check.sh --selftest; then
   fail=1

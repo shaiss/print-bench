@@ -14,12 +14,17 @@
 # the message text (MED-C on #963: shape redaction cannot beat /proc env
 # dumps or split/encoded keys).
 #
-# Denied-tool path (issue #962 follow-up): when the execution log lists
-# permission_denials and there is no ship branch / stop marker, this is a
-# clear 🚢 DEFERRED outcome — not the opaque settle failure. Live mode
-# posts the deferred stop (tool names only) so settle's decline detector
-# fires; offline / --comments-file mode accepts the same path without
-# posting. Never widens the allow list.
+# Clear deferred outcomes (issue #962): when subtype=success and there is
+# no ship branch / stop marker, settle must see declined — never the opaque
+# "neither delivered nor declined" path. Two shapes:
+#   - execution log lists permission_denials → 🚢 DEFERRED — permission denial
+#   - no listed denials (incl. show_full_output:false hiding names) →
+#     🚢 DEFERRED — no ship outcome (the residual after #963/#981; run
+#     41711782585 still hit settle's neither-path because ship-check only
+#     failed the step and did not post a stop)
+# Live mode posts the stop so settle's decline detector fires; offline /
+# --comments-file mode accepts the same path without posting. Never widens
+# the allow list. A non-success subtype still fails hard (provider triage).
 #
 # Live:
 #   ./scripts/backlog-burn-ship-check.sh --issue <N> \
@@ -594,36 +599,50 @@ _post_issue_comment() {
   return 0
 }
 
+# Live: release an active SHIP-LOCK before a synthesized deferred stop so
+# settle does not leave the claim standing after deferred→declined
+# (routine-lock-cleanup returns before withdrawing). $2 is a short reason
+# fragment for the withdraw body (already sanitized by the caller).
+# Returns 0/1.
+_withdraw_active_ship_lock_for_defer() {
+  local issue="$1"
+  local reason="$2"
+  local comments_ndjson="${3:-}"
+  local withdraw_body
+  if [[ -z "$comments_ndjson" ]] \
+      || ! printf '%s\n' "$comments_ndjson" | comments_have_active_ship_lock | grep -qx true; then
+    return 0
+  fi
+  # Non-death wording (must NOT start with the death prefix) so settle
+  # classifies this as an agent-style self-withdraw, not a death count.
+  withdraw_body="🚢 SHIP-LOCK WITHDRAWN — deferred (${reason})
+
+${SHIP_LOCK_HTML_MARKER}
+
+Released by backlog-burn-ship-check after a subtype=success walk left no delivery (issue #962). The claim above is released so the next firing is not starved until staleness."
+  if ! _post_issue_comment "$issue" "$withdraw_body" "SHIP-LOCK WITHDRAWN"; then
+    return 1
+  fi
+  echo "ship-check: posted 🚢 SHIP-LOCK WITHDRAWN (active claim released before deferred stop)"
+  return 0
+}
+
 # Live: post a 🚢 DEFERRED stop for a denied-tool walk so settle's decline
 # detector fires (github.token → github-actions[bot]). Tool names only.
-# When $3 (comments NDJSON) shows an active SHIP-LOCK, also post a
-# WITHDRAWN lock comment FIRST so settle does not leave the claim standing
-# after deferred→declined (routine-lock-cleanup returns before withdrawing).
 # Returns 0 on success, 1 on post failure. Offline callers must not invoke.
 post_deferred_denial_stop() {
   local issue="$1"
   local tools_csv="$2"
   local comments_ndjson="${3:-}"
-  local body withdraw_body
+  local body
   # Keep body free of workflow-command injection / secret shapes: tools_csv
   # is already allowlist+redact sanitized. Cap length.
   if [[ ${#tools_csv} -gt 200 ]]; then
     tools_csv="${tools_csv:0:200}…"
   fi
 
-  if [[ -n "$comments_ndjson" ]] \
-      && printf '%s\n' "$comments_ndjson" | comments_have_active_ship_lock | grep -qx true; then
-    # Non-death wording (must NOT start with the death prefix) so settle
-    # classifies this as an agent-style self-withdraw, not a death count.
-    withdraw_body="🚢 SHIP-LOCK WITHDRAWN — deferred on permission denial
-
-${SHIP_LOCK_HTML_MARKER}
-
-Released by backlog-burn-ship-check after a permission denial left no delivery (issue #962). The claim above is released so the next firing is not starved until staleness."
-    if ! _post_issue_comment "$issue" "$withdraw_body" "SHIP-LOCK WITHDRAWN"; then
-      return 1
-    fi
-    echo "ship-check: posted 🚢 SHIP-LOCK WITHDRAWN (active claim released before deferred stop)"
+  if ! _withdraw_active_ship_lock_for_defer "$issue" "permission denial" "$comments_ndjson"; then
+    return 1
   fi
 
   body="🚢 DEFERRED — permission denial: ${tools_csv}
@@ -636,6 +655,32 @@ The ship walk hit a permission denial and left no \`claude/issue-${issue}-*\` br
     return 1
   fi
   echo "ship-check: posted 🚢 DEFERRED — permission denial: ${tools_csv}"
+  return 0
+}
+
+# Live: post a 🚢 DEFERRED stop for a no-push success walk (HEAD still on
+# the default branch, subtype=success, no listed denials, no agent stop).
+# Same settle contract as the denial path — declined=true, no opaque
+# neither-delivered failure. Returns 0/1. Offline callers must not invoke.
+post_deferred_no_outcome_stop() {
+  local issue="$1"
+  local comments_ndjson="${2:-}"
+  local body
+
+  if ! _withdraw_active_ship_lock_for_defer "$issue" "no ship outcome" "$comments_ndjson"; then
+    return 1
+  fi
+
+  body="🚢 DEFERRED — no ship outcome
+
+<!-- burn-deferred-no-outcome:v1 -->
+
+The ship walk reported subtype=success but left HEAD off \`claude/issue-${issue}-*\` with no agent-posted stop and no listed permission_denials. Deferred so settle classifies a clear deferred outcome instead of \"neither delivered nor declined\" (issue #962; residual after #963/#981). claude-code-action subtype=success only means the model ended without an API error — it is not a delivery."
+
+  if ! _post_issue_comment "$issue" "$body" "🚢 DEFERRED for no ship outcome"; then
+    return 1
+  fi
+  echo "ship-check: posted 🚢 DEFERRED — no ship outcome"
   return 0
 }
 
@@ -911,27 +956,46 @@ run_check() {
     return 0
   fi
 
-  # Denied-tool → clear deferred outcome (issue #962), but ONLY when the
-  # walk itself reported subtype=success. A denial on a failed/exhausted
-  # provider walk must not mint declined=true and suppress triage (#981).
-  if [[ "$denial_count" -gt 0 && "$denial_subtype" == "success" ]]; then
-    echo "ship-check: permission_denials=${denial_count} tools=${denial_tools_csv} subtype=success with no ship branch/stop — deferred outcome"
+  # subtype=success + no branch/stop → clear deferred outcome (issue #962).
+  # A denial on a failed/exhausted provider walk must not mint declined=true
+  # and suppress triage (#981); only synthesize when subtype=success.
+  if [[ "$denial_subtype" == "success" ]]; then
+    if [[ "$denial_count" -gt 0 ]]; then
+      echo "ship-check: permission_denials=${denial_count} tools=${denial_tools_csv} subtype=success with no ship branch/stop — deferred outcome"
+      if [[ -z "$comments_file" && -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+        if ! post_deferred_denial_stop "$issue" "$denial_tools_csv" "$comments"; then
+          echo "::error::backlog-burn ship walk hit permission denial (${denial_tools_csv}) but could not post 🚢 DEFERRED — refusing opaque success (issue #962)"
+          return 1
+        fi
+      else
+        echo "ship-check: offline/no-token — accepting deferred outcome without posting"
+      fi
+      echo "ship-check: ok (deferred-on-denial tools=${denial_tools_csv})"
+      return 0
+    fi
+
+    # No-push success path: subtype=success, HEAD off ship branch, no stop,
+    # no listed denials. Posting DEFERRED here is what closes the residual
+    # #962 gap after #963/#981 — ship-check exit 1 alone still left settle
+    # on the opaque neither-delivered path (run 41711782585).
+    echo "ship-check: subtype=success with no ship branch/stop and no listed denials — deferred outcome (no-push success path)"
     if [[ -z "$comments_file" && -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
-      if ! post_deferred_denial_stop "$issue" "$denial_tools_csv" "$comments"; then
-        echo "::error::backlog-burn ship walk hit permission denial (${denial_tools_csv}) but could not post 🚢 DEFERRED — refusing opaque success (issue #962)"
+      if ! post_deferred_no_outcome_stop "$issue" "$comments"; then
+        echo "::error::backlog-burn ship walk left no delivery/stop and could not post 🚢 DEFERRED — refusing opaque success (issue #962)"
         return 1
       fi
     else
       echo "ship-check: offline/no-token — accepting deferred outcome without posting"
     fi
-    echo "ship-check: ok (deferred-on-denial tools=${denial_tools_csv})"
+    echo "ship-check: ok (deferred-no-outcome)"
     return 0
   fi
-  if [[ "$denial_count" -gt 0 && "$denial_subtype" != "success" ]]; then
+
+  if [[ "$denial_count" -gt 0 ]]; then
     echo "ship-check: permission_denials=${denial_count} tools=${denial_tools_csv} but subtype='${denial_subtype:-missing}' — not synthesizing deferred (failed/exhausted walk keeps triage path)"
   fi
 
-  echo "::error::backlog-burn ship walk ended with HEAD='${head_print}' (not claude/issue-${issue}-*) and no 🚢 DECLINED / 🚦 DECISION NEEDED / 🚢 DEFERRED stop — refusing to treat subtype=success as an outcome (issue #962)"
+  echo "::error::backlog-burn ship walk ended with HEAD='${head_print}' (not claude/issue-${issue}-*) and no 🚢 DECLINED / 🚦 DECISION NEEDED / 🚢 DEFERRED stop — refusing opaque outcome (issue #962; subtype='${denial_subtype:-missing}')"
   return 1
 }
 
@@ -1760,7 +1824,9 @@ EOF
     echo "ok    selftest: denial + agent-posted DEFERRED uses stop path"
   fi
 
-  # Control: no denials + main + no stop still fails (must not weaken gate).
+  # No-push success path (issue #962 residual / run 41711782585): subtype=
+  # success, no listed denials, HEAD=main, no stop → deferred-no-outcome
+  # (settle must see declined, not the opaque neither-delivered path).
   cat >"$tmp/exec-no-deny.json" <<'EOF'
 {
   "type": "result",
@@ -1775,16 +1841,40 @@ EOF
       >"$tmp/no-deny.out" 2>&1
   local no_deny_rc=$?
   set -e
-  if [[ "$no_deny_rc" -eq 0 ]]; then
-    echo "FAIL  selftest: no-denial main walk unexpectedly passed"
+  if [[ "$no_deny_rc" -ne 0 ]]; then
+    echo "FAIL  selftest: no-push success walk did not accept deferred-no-outcome"
     cat "$tmp/no-deny.out"
     fails=$((fails + 1))
   elif grep -q 'deferred-on-denial' "$tmp/no-deny.out"; then
     echo "FAIL  selftest: no-denial walk took deferred-on-denial path"
     cat "$tmp/no-deny.out"
     fails=$((fails + 1))
+  elif ! grep -q 'deferred-no-outcome' "$tmp/no-deny.out"; then
+    echo "FAIL  selftest: deferred-no-outcome marker missing from outcome"
+    cat "$tmp/no-deny.out"
+    fails=$((fails + 1))
   else
-    echo "ok    selftest: no-denial main walk still fails hard check"
+    echo "ok    selftest: no-push success on main → deferred-no-outcome (offline)"
+  fi
+
+  # Missing execution log (unknown subtype) on main still fails — must not
+  # mint deferred without subtype=success evidence.
+  set +e
+  "$0" --issue 925 --head-ref main --comments-file "$tmp/empty-comments.ndjson" \
+      --run-started-at 2026-11-01T21:21:01Z --execution-log /nonexistent \
+      >"$tmp/no-log.out" 2>&1
+  local no_log_rc=$?
+  set -e
+  if [[ "$no_log_rc" -eq 0 ]]; then
+    echo "FAIL  selftest: missing execution log on main unexpectedly passed"
+    cat "$tmp/no-log.out"
+    fails=$((fails + 1))
+  elif grep -q 'deferred-no-outcome\|deferred-on-denial' "$tmp/no-log.out"; then
+    echo "FAIL  selftest: missing-log walk synthesized deferred without subtype=success"
+    cat "$tmp/no-log.out"
+    fails=$((fails + 1))
+  else
+    echo "ok    selftest: missing execution log on main still fails hard check"
   fi
 
   # list_denial_tools helper: WebFetch extracted, input not.

@@ -732,11 +732,13 @@ jobs:
       # #962: claude-code-action exits 0 with subtype=success whenever the
       # model ends its turn without an API error (#538). A green ship step
       # with HEAD still on main and no decline used to reach settle, which
-      # then redded with "neither delivered nor declined". Fail clearly
-      # here — after the walk, before the bundle — unless HEAD is on
-      # claude/issue-<N>-* or the thread carries an explicit stop marker
-      # settle already recognizes. Also print bounded redacted diag
-      # (subtype, denial tool names only, final-message len+sha256 — no text).
+      # then redded with "neither delivered nor declined". After the walk,
+      # before the bundle: pass when HEAD is on claude/issue-<N>-* or a
+      # trusted stop exists; when subtype=success leaves neither, the
+      # restored ship-check posts 🚢 DEFERRED (denial or no-ship-outcome)
+      # so settle sees declined — never the opaque neither path. Also
+      # print bounded redacted diag (subtype, denial tool names only,
+      # final-message len+sha256 — no text).
       #
       # The script is NOT the worktree copy. Write/Edit are allowed in the
       # ship steps, and dontAsk denies cannot stop the agent rewriting
