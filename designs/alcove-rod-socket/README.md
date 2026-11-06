@@ -24,9 +24,11 @@ knurled collars that hand-thread onto the bosses. Curtains down for washing
 
 ![Section through the seated socket — face-on cut](previews/cutaway-section.png)
 
-![Diametral section — full flange-to-flange width; boss V-groove / collar groove mesh on both sides of the bore; rod shown ghosted, seats fully into the bore; the black notches at the flange floor are the anti-rotation grooves in section](previews/cutaway-wide.png)
+![Diametral section — full flange-to-flange width; printed thread engaged on both sides of the bore; the black notches at the flange floor are the anti-rotation grooves in section](previews/cutaway-wide.png)
 
 ![The seated pair with the rod through it (shown ghosted) — boss, collar, thread engaged](previews/assembly.png)
+
+Shots render source defaults; the v2.0 Release STLs predate the detent, witness slots and V-grooves.
 
 ## What you get
 
@@ -135,11 +137,12 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   half-percent shrink — still unproven until B4 (a material-specific
   preset is charter backlog B4). If that ASA coupon binds, the fix is a
   `thread_tol` change, which needs the clone/source path rather than the
-  Release STLs. The seat detent is line-to-line by design; on the same
-  geometry, coupons often report a firmer click in PETG than in ASA — in ASA
-  (or if the rod stops dead instead of clicking) ease `seat_detent_radial` down
-  (e.g. 0.30 → 0.22–0.25) or set `seat_detent=false` — the shoulder is the
-  seat, the click is a nicety. Leave `rod_clearance` alone for that
+  Release STLs. The seat detent is line-to-line by design, and its feel is
+  unproven in any material until the B4 proving print (the coupons don't
+  carry it; NOTES.md D13). If the rod stops before bottoming on the boss
+  tip, ease `seat_detent_radial` down (e.g. 0.30 → 0.22–0.25) or set
+  `seat_detent=false` — the boss tip is the seat; the click is a nicety.
+  Leave `rod_clearance` alone for that
   symptom; it widens the whole bore.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
@@ -193,8 +196,9 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
 - **Print order:** both coupons first, then tune (below), then a pair
   (deep+shallow: two bosses, one `collar`, one `collar-shallow`). The bore
   and thread coupons prove slip and thread only — **not** the seat catch;
-  print a **full collar** (not just the bore coupon) when you want to feel
-  the seat click or scrape before you hang the rod (NOTES.md D13). For
+  print a **full collar** (not just the bore coupon) when you want to try
+  the seat catch on your own rod before you hang it (NOTES.md D13; its feel
+  is unproven until the proving print). For
   **25 mm:** `thread-coupon-25` + `bore-coupon-25` first, then a full
   `collar-25` to feel the seat before hanging anything — no 25 mm plate;
   mirror the 40 mm layout and brim only the collar.
@@ -232,8 +236,7 @@ will too.
 Measure your pole with calipers where it will sit and set `rod_d` to that
 barrel reading — "40 mm" is sometimes the finial size, not the pole. Take
 two perpendicular readings at the seating end; if the end is swaged or the
-readings differ by more than ~0.2 mm, take the larger and expect a scrape
-rather than a click.
+readings differ by more than ~0.2 mm, take the larger.
 
 ## Parameters
 
@@ -305,13 +308,13 @@ exports (`rod_d = 25.4` or your measured barrel) and the same `thread_tol` on
    **v2.0 Release collar has no detent and no witness slots** — bottom the
    rod on the boss tip and trust your cut length (steps 1 and 4 already flag
    their halves; use the clone path for the seat catch and slots). On a
-   source / post-B1 collar: push each rod end in until you feel a scrape or
-   click past the seat ridge, then bottom on the boss tip — that tactile
-   catch is what the design targets, but it is **unproven until the
-   week-of-use proving print** (NOTES.md D13; field test log). Deburr the
-   cut ends (or kiss a small chamfer onto each) before seating — a rolled
-   burr hangs on the detent. ASA: expect the click; PETG: expect the scrape
-   — both mean seated. Look through the two thin slots at the grip band near
+   source / post-B1 collar: push each rod end in past the seat ridge until
+   it bottoms on the boss tip. You may feel a click or a scrape at the
+   ridge, but neither is a verified seating indicator — seating feel is
+   **unproven until the week-of-use proving print** (NOTES.md D13; field
+   test log); the slot check below confirms bottomed. Deburr the cut ends
+   (or kiss a small chamfer onto each) before seating — a rolled burr hangs
+   on the detent. Look through the two thin slots at the grip band near
    the flare: empty dark at the **seat end** of the slot means the tip is
    still short of the boss; the tip edge appears there only when bottomed
    (the witness starts 0.3 mm above the boss-tip stop, not the bore
