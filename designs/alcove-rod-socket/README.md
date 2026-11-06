@@ -14,7 +14,9 @@ the bosses. Curtains down for washing = unthread two collars, no tools.
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
-![Section through the seated socket](previews/cutaway.png)
+![Kept half of the seated socket — exterior silhouette](previews/cutaway.png)
+
+![Section through the seated socket — face-on cut](previews/cutaway-section.png)
 
 ![The seated pair with the rod through it — boss, collar, thread engaged](previews/assembly.png)
 
@@ -23,9 +25,16 @@ the bosses. Curtains down for washing = unthread two collars, no tools.
 Printed **in pairs** (one holder per wall, one pair per rod):
 
 - `boss` — the wall plate: Ø58.8 × 18 mm disc with a countersunk M5 screw
-  hole and an external printed thread (an optional second off-axis screw
-  setting, `screw_count=2`, grows the flange for heavier installs — a hung
-  pair over ~10 kg; see Assembly).
+  hole and an external printed thread. The wall face carries eight shallow
+  45° V-grooves (source default on for renders) so a single central M5 in a
+  drywall anchor does not spin when the collar is torqued — **v2.0 Release
+  STLs ship plain flanges** (no grooves; hold the flange when you torque,
+  Assembly step 4). For heavier installs (a hung pair over ~10 kg —
+  reasoned ceiling, not load-tested / not a measurement; see NOTES) set
+  `screw_count=2` — that grows the flange for an off-axis pair and
+  **omits** the ribs (the two screws already pin the boss; see Assembly).
+
+  ![Boss wall/bed face — eight anti-rotation V-grooves](previews/boss-bed.png)
 - `collar` — the rod socket: Ø54 × 40.6 mm knurled tube, internal printed
   thread below, Ø40.6 rod bore above (default `engagement_depth=28`).
 - `collar-shallow` — the same collar at `engagement_depth=12` (far side of
@@ -107,8 +116,12 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   (Bambu Studio and most slicers brim per object — select just the collar).
   Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
   part that can lift; the boss doesn't need it — it prints flange-down on a
-  full Ø58.8 disc, the best contact on the plate. Cheap insurance on the
-  collar rim's own merits (the v1 field failure was *packaging*, not adhesion
+  full Ø58.8 disc (the anti-rotation keys are 0.8 mm 45° V-grooves in that
+  disc — inner washer, outer rim, and the lands between still print on the
+  bed). Layer-1 groove mouths print narrower than modeled (elephant foot
+  pinches the 1.6 mm openings) — expected; the lands between still carry the
+  wall, so don't tune flow for it. Cheap insurance on the collar rim's own merits (the v1 field failure
+  was *packaging*, not adhesion
   — see NOTES.md — so the plate is what fixes that; the brim is separate). A
   per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
   bridges. (Brim the *whole plate* instead and the two brims may meet in one
@@ -117,6 +130,11 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   question.) Trim the collar's brim tabs flush and set it on a flat surface
   to confirm the rim sits flat before threading it onto the boss — the rim
   is both the bed-contact face and the seating face on the flange.
+- **Boss print-check (grooved source prints):** after the first layer (or on
+  the finished boss), look at the eight V-grooves between the inner washer
+  and outer rim — they must still read as open mouths, not fused over by
+  elephant foot. A filled-in groove ships as a good-looking boss that spins;
+  that failure is silent unless you check.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   (and collar-shallow) rod-mouth-down (the internal thread prints at the top
   of the collar, never on the first layer). Never flip the collar
@@ -164,6 +182,7 @@ you'll export the fused assembly preview instead of a printable part):
 | `engagement_depth` | 28 mm | deep-side rod plug depth (`collar`); far side is the gated `collar-shallow` part at 12 mm |
 | `thread_tol` | 0.3 mm | radial thread fit — dial on the thread coupon |
 | `screw_count` | 1 | 1 central M5, or 2 off-axis (grows the flange; stops boss spin) |
+| `anti_rotate` | on | wall-face 45° V-grooves for a single M5; ignored at `screw_count=2` (source default on for renders; **v2.0 Release STLs ship plain flanges**) |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
 
@@ -183,12 +202,24 @@ bore at `rod_d = 25`) before you trust boss/collar exports.
 ## Assembly & use
 
 1. Screw a boss to each facing wall, countersunk M5 head flush in the neck.
-   Screw length: the boss is 18 mm through, so **M5 × 40 mm** into a rated
-   drywall anchor (the anchor card governs the exact pairing), or **M5 ×
-   55 mm** into a stud behind ~13 mm board (18 + 13 leaves ≥ 20 mm in the
-   stud). One M5 in a rated anchor holds a pair to roughly **10 kg** of hung
-   weight — heavier curtains than that want a stud or `screw_count=2`
-   (derivation in NOTES).
+   Print orientation = use orientation (the printed flange face goes against
+   the wall). **v2.0 Release STLs are plain flanges** — no wall grooves; use
+   step 4's hold-the-flange note when you torque or unthread the collar.
+   Bosses printed from source with `anti_rotate` on (default for a single M5)
+   carry eight shallow V-grooves on that wall face — keep them against the
+   wall so they bite into paint or drywall paper. Screw length: the boss is
+   18 mm through, so **M5 × 40 mm** into a rated drywall anchor (the anchor
+   card governs the exact pairing), or **M5 × 55 mm** into a stud behind
+   ~13 mm board (18 + 13 leaves ≥ 20 mm in the stud). One M5 in a rated
+   anchor holds a pair to roughly **10 kg** of hung weight (a reasoned
+   ceiling, not load-tested / not a measurement — derivation in NOTES). On
+   a **grooved** boss those lands take the *spin* of threading the collar so
+   the anchor does not ream out; they do not raise the load rating.
+   **Plain** Release bosses do not — hold the flange when you torque the
+   collar (step 4). Heavier curtains than that want a stud or
+   `screw_count=2`. On tile, masonry, or metal grooves cannot bite — use
+   `screw_count=2` (or `anti_rotate=false` for a flat flange you accept
+   may spin).
 2. Slide the collars over the rod before hanging it — one at each end.
 3. Thread each collar onto its boss until the rim seats on the plate. For a
    rigid rod between two fixed walls: use one default `collar` (deep) and one
@@ -199,9 +230,13 @@ bore at `rod_d = 25`) before you trust boss/collar exports.
    wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
    into their collars).
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
-   thread) and lift the rod out — **holding the flange still** as you
-   unthread, because unscrewing friction can walk the single M5 out of the
-   wall over enough wash days. No tools.
+   thread) and lift the rod out. **Grooved bosses** (`anti_rotate` on, a
+   source print): the wall-face lands resist that unthread torque on a
+   single M5 in drywall or wood. **Plain bosses** (v2.0 Release download,
+   or `anti_rotate=false`): the flange can spin — hold it with your other
+   hand while you unthread, especially on tile or other hard walls where
+   nothing bites. No tools. Grooved bosses bite paint and drywall paper by
+   design; removing them may leave marks that need touch-up paint.
 
 If a fit is off, don't resize the parts — reprint the coupon and move the
 tolerance (`thread_tol`, `rod_clearance`) in 0.05–0.1 mm steps; see
