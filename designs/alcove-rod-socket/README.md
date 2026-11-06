@@ -16,7 +16,7 @@ knurled collars that hand-thread onto the bosses. Curtains down for washing
 > PLA-estimated for boss ×2 + collar + collar-shallow; see NOTES.md).
 > See *Deliverable* below and the field test log in NOTES.md.
 
-![Product shot](previews/product-hero.png)
+![Product shot — slots are the seat window — see the section below](previews/product-hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
@@ -24,9 +24,9 @@ knurled collars that hand-thread onto the bosses. Curtains down for washing
 
 ![Section through the seated socket — face-on cut](previews/cutaway-section.png)
 
-![Diametral section — full width, countersink in plane, thread mesh](previews/cutaway-wide.png)
+![Diametral section — full flange-to-flange width; boss V-groove / collar groove mesh on both sides of the bore; rod shown ghosted, seats fully into the bore; the black notches at the flange floor are the anti-rotation grooves in section](previews/cutaway-wide.png)
 
-![The seated pair with the rod through it — boss, collar, thread engaged](previews/assembly.png)
+![The seated pair with the rod through it (shown ghosted) — boss, collar, thread engaged](previews/assembly.png)
 
 ## What you get
 
@@ -135,8 +135,9 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   half-percent shrink — still unproven until B4 (a material-specific
   preset is charter backlog B4). If that ASA coupon binds, the fix is a
   `thread_tol` change, which needs the clone/source path rather than the
-  Release STLs. The seat detent is line-to-line by design; in ASA (or if
-  the rod stops dead instead of clicking) ease `seat_detent_radial` down
+  Release STLs. The seat detent is line-to-line by design; on the same
+  geometry, coupons often report a firmer click in PETG than in ASA — in ASA
+  (or if the rod stops dead instead of clicking) ease `seat_detent_radial` down
   (e.g. 0.30 → 0.22–0.25) or set `seat_detent=false` — the shoulder is the
   seat, the click is a nicety. Leave `rod_clearance` alone for that
   symptom; it widens the whole bore.
