@@ -508,9 +508,12 @@ module cutaway() {
 // thread mesh on both sides. Preview-only — does not touch cutaway() or
 // gated parts.
 module cutaway_wide() {
+    // Preview-only cutter: size from flange/collar so extreme Customizer
+    // values (rod_d > 150 / engagement_depth > 100) still clear the +y half.
     difference() {
         assembly();
-        translate([-75, 0, -1]) cube([150, 75, 120]);
+        translate([-flange_d / 2 - 1, 0, -1])
+            cube([flange_d + 2, flange_d / 2 + 1, collar_h + flange_t + 2]);
     }
 }
 

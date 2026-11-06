@@ -70,8 +70,9 @@ STL imports as one fused body and welds them together — v1's field-test failur
   STLs / zip / manifest) — the plate stays a local build artifact (see the
   clone path below). That is a tracked follow-up: the platform release-bundle
   does not upload the multi-object plate 3MF today. Release STLs are as of
-  the tag; if this README names a part or parameter the Release lacks, use
-  the clone path.
+  the tag. The v2.0 collar predates B1 / #989 and has no `seat_detent` or
+  `witness_window`; use the clone path for those features. If this README
+  names any other part or parameter the Release lacks, use the clone path.
 - **Cloned the repo (advanced / local):** `./scripts/plate.sh alcove-rod-socket`
   bundles the two default-depth parts into one multi-object 3MF
   (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.

@@ -17,7 +17,7 @@ once reviewed — add a line, never reframe one.
   neck, female groove in the collar, rod bore above, countersunk screw hole
   through the boss. The internal-fit evidence shot.
 - **cutaway-wide** — orthographic diametral section (the +y half removed)
-  face-on from −y: full flange-to-flange width in frame, the central
+  face-on from +y: full flange-to-flange width in frame, the central
   countersunk M5 in the section plane, and the boss rib / collar groove
   mesh visible on both sides of the bore. Complements `cutaway` /
   `cutaway-section` without moving those frozen cameras.
