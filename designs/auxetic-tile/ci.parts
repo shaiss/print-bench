@@ -1,0 +1,5 @@
+# Printable parts (scripts/gate.sh renders each as build/<name>-<part>.stl,
+# printcheck + test-slice). The coupon renders separately through the
+# auxetic-tile-coupon.scad wrapper, which gate.sh discovers itself.
+# No ci.fitchecks — auxetics are coupon-based, no mate (brief #977).
+tile
