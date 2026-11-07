@@ -6,7 +6,7 @@ carries the auxetic lattice, a conventional honeycomb contrast column, and an
 embossed callout of the live parameters and the mechanism; a 3-cell coupon
 lets you feel ν < 0 on your own PLA.
 
-![Product shot](previews/product-hero.png)
+![Product view (studio hero when CI regen lands Cycles; OpenSCAD iso meantime)](previews/product-hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
@@ -18,8 +18,8 @@ lets you feel ν < 0 on your own PLA.
   conventional contrast column on the left, solid callout strip on the right
   embossed with θ / edge / rib and the mechanism (`pull -> wider`, `nu < 0`).
   Prints flat, no supports.
-- `coupon` — a 3-cell-wide strip with solid grip tabs for a hand-stretch
-  check against the tile.
+- `coupon` — a 3-cell-wide open rib strip with grip tabs on the ends only
+  (no solid rails) for a hand-stretch check.
 
 The embossed numbers are computed inside the `.scad` from the same parameters
 that build the mesh, so the strip cannot state a value the lattice didn't
@@ -44,7 +44,7 @@ published ν are upper bounds and strain-dependent on FDM cells.
 |---|---|---|
 | `reentrant_angle` | 30° | slanted-rib angle from vertical — hard-capped at 45° |
 | `cell_edge` | 8 mm | slanted rib length |
-| `cell_horiz` | 10 mm | horizontal rib length (keeps the neck open at 30°/45°) |
+| `cell_horiz` | 10 mm | horizontal rib length (keeps the neck open at the 30° default; neck guard caps the shipped defaults near ~33°, below the 45° printability max) |
 | `rib_width` | 1.2 mm | in-plane rib thickness (≥ 0.8) |
 | `rib_depth` | 8 mm | out-of-plane thickness / print height |
 | `tile_w` / `tile_d` | 120 / 70 mm | overall tile footprint |
@@ -55,9 +55,11 @@ sections; override on the command line with `-D 'reentrant_angle=25'`.
 ## Assembly & use
 
 1. Print the `coupon` first. Grip the tabs and pull gently along the strip —
-   it should get **wider**. That is ν < 0.
+   it should get **wider**. That is ν < 0. If it does not widen along the
+   strip axis, try the transverse axis and log which way responded.
 2. Print the `tile`. The left column is a conventional (outward-neck)
-   honeycomb for in-hand contrast; the right strip repeats the parameters
+   honeycomb for **look-side-by-side** contrast with the auxetic patch (it is
+   framed — not a pull comparison); the right strip repeats the parameters
    and the mechanism statement.
 3. Log what you felt as a FIELD-TEST entry if you like
    (`templates/FIELD-TEST.md`) — qualitative is enough for v1.

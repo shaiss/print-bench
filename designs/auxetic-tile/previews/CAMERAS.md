@@ -22,4 +22,7 @@ new region gets a new `cameras.conf` line, never a moved camera.
 - **cell-close.png** — close on one re-entrant cell so the inward necks
   resolve.
 - **coupon.png** — the hand-stretch coupon (`auxetic-tile-coupon.scad`) with
-  grip tabs, as printed.
+  grip tabs on the ends only (free-sided rib network), as printed.
+
+Frozen camera numbers are unchanged from Round 0; the `render` opt was
+added so CGAL evaluates the lattice booleans (OpenCSG under-draws them).

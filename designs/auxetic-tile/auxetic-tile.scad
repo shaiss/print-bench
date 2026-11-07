@@ -14,7 +14,8 @@ reentrant_angle = 30;
 // Slanted rib length / characteristic cell edge (mm)
 cell_edge = 8;
 // Horizontal rib length (mm) — longer than cell_edge so the neck stays open
-// at 30° (and through the 45° printability max); see NOTES.md
+// at the 30° default; neck guard (not the 45° printability max) caps θ at
+// the shipped defaults — see NOTES.md
 cell_horiz = 10;
 // Rib width in-plane (mm) — repo wall floor 1.2; never below 0.8
 rib_width = 1.2;
@@ -42,9 +43,9 @@ coupon_cells_x = 3;
 // Cells along the coupon strip
 coupon_cells_y = 2;
 // Solid grip-tab length beyond the lattice (mm), each end
-grip_tab = 14;
-// Extra Y padding around the coupon lattice window (mm)
-grip_tab_w_extra = 4;
+grip_tab = 16;
+// Grip-tab depth as a fraction of lattice body depth (finger pad, not a rail)
+grip_tab_d_frac = 0.72;
 
 /* [Emboss] */
 // Raised text height above the callout strip (mm) — two 0.2 mm layers
@@ -66,12 +67,16 @@ part = "tile";
 // Derived cell pitches (Yang-style re-entrant honeycomb; θ from vertical)
 //   pitch_x = 2·l_horiz − 2·cell_edge·sin(θ)
 //   pitch_y = 2·cell_edge·cos(θ)
+// Brick (auxetic) rows sit on pitch_y/2 so neighbouring cells share slanted
+// edges; an unshifted column (contrast) keeps full pitch_y so stacked cells
+// share the horizontal ribs instead.
 // ---------------------------------------------------------------------------
 function _s(th) = sin(th);
 function _c(th) = cos(th);
 function pitch_x(th) = 2 * cell_horiz - 2 * cell_edge * _s(th);
 function pitch_y(th) = 2 * cell_edge * _c(th);
 function neck_w(th) = cell_horiz - 2 * cell_edge * _s(th);
+function row_pitch(th, brick = true) = brick ? pitch_y(th) / 2 : pitch_y(th);
 
 // Six centerline vertices of one re-entrant cell, origin at cell centre.
 // Positive θ → necks indent (auxetic). Negative θ → necks push out
@@ -98,16 +103,22 @@ function lattice_span_x(nx, ny, th, brick = true) =
     (nx - 1) * px + (brick && ny > 1 ? px / 2 : 0)
         + 2 * cell_half_extent_x(th);
 
-function lattice_span_y(ny, th) =
-    (ny - 1) * pitch_y(th) + 2 * cell_edge * abs(_c(th));
+function lattice_span_y(ny, th, brick = true) =
+    (ny - 1) * row_pitch(th, brick) + 2 * cell_edge * abs(_c(th));
+
+// Soft max θ the neck stays ≥ rib at the shipped cell_horiz/cell_edge.
+function neck_theta_max() =
+    asin(max(0, min(1, (cell_horiz - rib_width) / (2 * cell_edge))));
 
 // ---------------------------------------------------------------------------
 // Guards — fail the render, not the reviewer
 // ---------------------------------------------------------------------------
 module lattice_guards(th) {
-    assert(reentrant_angle >= 0 && reentrant_angle <= 45,
+    // θ = 0 collapses the re-entrant indent (xn == xo → rectangle) while the
+    // emboss still claims auxetic — refuse it for this demonstrator (T3 / Copilot).
+    assert(reentrant_angle > 0 && reentrant_angle <= 45,
         str("reentrant_angle ", reentrant_angle,
-            "° outside [0, 45] — docs/metamaterials-4d.md §1 printability bound"));
+            "° outside (0, 45] — must be re-entrant; docs/metamaterials-4d.md §1"));
     assert(abs(th) <= 45,
         str("|θ|=", abs(th), "° exceeds the 45° from-vertical printability max"));
     assert(rib_width >= 0.8,
@@ -125,23 +136,50 @@ module lattice_guards(th) {
 }
 
 // ---------------------------------------------------------------------------
-// Lattice as solid-minus-voids (guarantees one body with the frame)
-// Centerline hex inset by rib_width/2 → the cell VOID; ribs are whatever
-// solid remains between neighbouring voids.
+// Lattice as solid-minus-voids.
+// Brick rows use half-height spacing so slanted edges are shared. The SOLID
+// is offset(union(cell polygons), +rib/2) — not a bounding rectangle — so
+// material outside the tiling cannot form thick bypass webs; after punching
+// inset voids the leftover is ~rib_width ribs. Tile still subtracts the same
+// voids from its framed plate (frame = look-at demo).
 // ---------------------------------------------------------------------------
+module cell_poly_2d(th) {
+    polygon(cell_verts(th));
+}
+
 module cell_void_2d(th) {
     offset(delta = -rib_width / 2)
-        polygon(cell_verts(th));
+        cell_poly_2d(th);
+}
+
+module lattice_cells_2d(nx, ny, th, brick = true) {
+    px = pitch_x(th);
+    rp = row_pitch(th, brick);
+    for (j = [0 : ny - 1]) {
+        row_shift = brick ? (j % 2) * px / 2 : 0;
+        for (i = [0 : nx - 1])
+            translate([i * px + row_shift, j * rp])
+                cell_poly_2d(th);
+    }
 }
 
 module lattice_voids_2d(nx, ny, th, brick = true) {
     px = pitch_x(th);
-    py = pitch_y(th);
+    rp = row_pitch(th, brick);
     for (j = [0 : ny - 1]) {
         row_shift = brick ? (j % 2) * px / 2 : 0;
         for (i = [0 : nx - 1])
-            translate([i * px + row_shift, j * py])
+            translate([i * px + row_shift, j * rp])
                 cell_void_2d(th);
+    }
+}
+
+// Rib-network plate: thicken the tiled cell union, then voids punch the cells.
+module lattice_network_2d(nx, ny, th, brick = true) {
+    difference() {
+        offset(delta = rib_width / 2)
+            lattice_cells_2d(nx, ny, th, brick);
+        lattice_voids_2d(nx, ny, th, brick);
     }
 }
 
@@ -149,6 +187,11 @@ module lattice_voids_3d(nx, ny, th, brick = true) {
     translate([0, 0, -1])
         linear_extrude(rib_depth + 2, convexity = 8)
             lattice_voids_2d(nx, ny, th, brick);
+}
+
+module lattice_network_3d(nx, ny, th, brick = true) {
+    linear_extrude(rib_depth, convexity = 8)
+        lattice_network_2d(nx, ny, th, brick);
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +221,7 @@ module callout_text() {
 
 // ---------------------------------------------------------------------------
 // Tile — one solid plate, voids punched for auxetic + contrast bands
+// Frame stays (look-at demo); the band itself is a tessellating rib network.
 // ---------------------------------------------------------------------------
 module tile_part() {
     lattice_guards(reentrant_angle);
@@ -190,14 +234,18 @@ module tile_part() {
     assert(band_d > pitch_y(reentrant_angle),
         "tile footprint too shallow for one auxetic row — grow tile_d");
 
+    ax_rp = row_pitch(reentrant_angle, true);
     ax_nx = max(2, floor((ax_band_w - 2 * cell_half_extent_x(reentrant_angle))
                          / pitch_x(reentrant_angle)) + 1);
     ax_ny = max(2, floor((band_d - 2 * cell_edge * abs(_c(reentrant_angle)))
-                         / pitch_y(reentrant_angle)) + 1);
+                         / ax_rp) + 1);
 
     cx_th = -reentrant_angle;
+    cx_rp = row_pitch(cx_th, false);
     cx_nx = 1;
-    cx_ny = ax_ny;
+    // Contrast column keeps full-pitch stacking; fit as many as the band holds.
+    cx_ny = max(1, floor((band_d - 2 * cell_edge * abs(_c(cx_th)))
+                         / cx_rp) + 1);
 
     ax_span_x = lattice_span_x(ax_nx, ax_ny, reentrant_angle, true);
     cx_span_x = lattice_span_x(cx_nx, cx_ny, cx_th, false);
@@ -205,24 +253,24 @@ module tile_part() {
         str("contrast cell span ", cx_span_x,
             " exceeds contrast_w ", contrast_w, " — widen the strip"));
 
-    ax_band_xmin = -tile_w / 2 + border + contrast_w + divider;
-    ax_origin_x = ax_band_xmin + ax_band_w / 2
+    ax_origin_x = -tile_w / 2 + border + contrast_w + divider + ax_band_w / 2
                 - ((ax_nx - 1) * pitch_x(reentrant_angle)
                    + (ax_ny > 1 ? pitch_x(reentrant_angle) / 2 : 0)) / 2;
     ax_origin_y = -tile_d / 2 + border + band_d / 2
-                - ((ax_ny - 1) * pitch_y(reentrant_angle)) / 2;
+                - ((ax_ny - 1) * ax_rp) / 2;
     cx_origin_x = -tile_w / 2 + border + contrast_w / 2;
-    cx_origin_y = ax_origin_y;
+    cx_origin_y = -tile_d / 2 + border + band_d / 2
+                - ((cx_ny - 1) * cx_rp) / 2;
 
     union() {
         difference() {
             translate([-tile_w / 2, -tile_d / 2, 0])
                 rounded_box([tile_w, tile_d, rib_depth], r = 3,
                             bottom_chamfer = bottom_chamfer);
-            // Auxetic voids
+            // Auxetic voids — brick / half-height tessellation
             translate([ax_origin_x, ax_origin_y, 0])
                 lattice_voids_3d(ax_nx, ax_ny, reentrant_angle, true);
-            // Conventional contrast voids (θ negated, no brick)
+            // Conventional contrast voids (θ negated, full-pitch, no brick)
             translate([cx_origin_x, cx_origin_y, 0])
                 lattice_voids_3d(cx_nx, cx_ny, cx_th, false);
         }
@@ -239,36 +287,64 @@ module tile_part() {
              " cells=", ax_nx, "x", ax_ny,
              " pitch=", pitch_x(reentrant_angle), "x", pitch_y(reentrant_angle),
              " neck=", neck_w(reentrant_angle),
+             " neck_th_max~", neck_theta_max(),
              " ; mechanism: nu<0 from re-entrant rib rotation; no promised nu"));
 }
 
 // ---------------------------------------------------------------------------
-// Coupon — solid plate with grip tabs; voids punched for the 3-cell strip
+// Grip tab — rounded finger pad; attaches to a lattice end only (never spans
+// tab-to-tab as a rail). Light top ridges for finger purchase — no through
+// cuts that would non-manifold the mesh.
+// ---------------------------------------------------------------------------
+module grip_tab_solid(w, d) {
+    ridge_h = 0.8;
+    ridge_w = 1.2;
+    union() {
+        rounded_box([w, d, rib_depth], r = min(2.5, w * 0.28),
+                    bottom_chamfer = bottom_chamfer);
+        // Two shallow raised ridges on the top face for grip comfort —
+        // sunk 0.2 mm into the pad so the union is manifold. Coordinates
+        // are from the tab's corner origin (rounded_box convention).
+        for (yy = [d * 0.30, d * 0.70])
+            translate([w * 0.28, yy - ridge_w / 2, rib_depth - 0.2])
+                cube([w * 0.5, ridge_w, ridge_h + 0.2]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Coupon — free-sided rib network with grip tabs on the ±X ends only.
+// Lattice solid is the offset cell-union network (no rectangular rails);
+// tabs bury into the ±X ends so the pull loads cells.
 // ---------------------------------------------------------------------------
 module coupon_part() {
     lattice_guards(reentrant_angle);
     nx = coupon_cells_x;
     ny = coupon_cells_y;
     span_x = lattice_span_x(nx, ny, reentrant_angle, true);
-    span_y = lattice_span_y(ny, reentrant_angle);
-    body_d = span_y + 2 * border + grip_tab_w_extra;
-    total_w = span_x + 2 * grip_tab;
+    span_y = lattice_span_y(ny, reentrant_angle, true);
+    // Tab depth tracks the lattice span so the pad sits on the end ribs.
+    tab_d = max(span_y * grip_tab_d_frac, 2 * cell_edge * abs(_c(reentrant_angle)));
+    tab_ov = max(1.2, rib_width);
+    total_w = span_x + rib_width + 2 * grip_tab;
 
     origin_x = -((nx - 1) * pitch_x(reentrant_angle)
                  + (ny > 1 ? pitch_x(reentrant_angle) / 2 : 0)) / 2;
-    origin_y = -((ny - 1) * pitch_y(reentrant_angle)) / 2;
+    origin_y = -((ny - 1) * row_pitch(reentrant_angle, true)) / 2;
 
-    difference() {
-        translate([-total_w / 2, -body_d / 2, 0])
-            rounded_box([total_w, body_d, rib_depth], r = 2,
-                        bottom_chamfer = bottom_chamfer);
+    union() {
         translate([origin_x, origin_y, 0])
-            lattice_voids_3d(nx, ny, reentrant_angle, true);
+            lattice_network_3d(nx, ny, reentrant_angle, true);
+        // Left / right grip tabs — bury into the network for a manifold weld
+        translate([-total_w / 2, -tab_d / 2, 0])
+            grip_tab_solid(grip_tab + tab_ov, tab_d);
+        translate([total_w / 2 - grip_tab - tab_ov, -tab_d / 2, 0])
+            grip_tab_solid(grip_tab + tab_ov, tab_d);
     }
 
     echo(str("auxetic-tile coupon: cells=", nx, "x", ny,
              " th=", reentrant_angle, " edge=", cell_edge,
-             " rib=", rib_width, " span=", span_x, "x", span_y));
+             " rib=", rib_width, " span=", span_x, "x", span_y,
+             " tabs=", grip_tab, "x", tab_d));
 }
 
 // ---------------------------------------------------------------------------

@@ -94,5 +94,6 @@ the physics is readable without a second print.
 |---|---|---|
 | 2026-11-07 | Emboss = mechanism + bound, not a ν value | brief assumption; metamaterials §1 strain caveat |
 | 2026-11-07 | Include conventional contrast column | brief non-blocking open Q; sells the physics on the bed |
-| 2026-11-07 | `cell_horiz = 10` (not equal to `cell_edge`) | equal-edge at 30° pinches neck to 0; 10 mm keeps neck printable through 45° |
+| 2026-11-07 | `cell_horiz = 10` (not equal to `cell_edge`) | equal-edge at 30° pinches neck to 0; 10 mm keeps neck ≈ 2 mm open at the 30° default. Neck guard (not the 45° printability max) caps the shipped defaults near ~33° — raise `cell_horiz` to push that cap toward 45°. |
 | 2026-11-07 | No lib harvest in this PR | brief open Q → follow-up (B2) |
+| 2026-11-07 | Brick auxetic rows at half-height; coupon free-sided | Round 1 (Drik block): full-pitch voids were isolated bowties; coupon rails loaded instead of cells. Tessellate so webs are `rib_width`; tabs attach to lattice ends only. |
