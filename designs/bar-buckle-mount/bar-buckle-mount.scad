@@ -14,6 +14,10 @@
 // Buckle-side numbers are community-measured (not a published GoPro spec) —
 // sourced from Jay Abbott's 2014 quick-release clip (j-h-a/go-pro-mounts),
 // caliper-fit to a genuine male buckle. Latch feel is coupon-tuned.
+//
+// The receiver sits entirely outside the continuing-bar silhouette on the
+// end pad (y >= bar crown + margin), so a mid-bar ISO 4210 grip section
+// can close without the fin colliding with the bar.
 
 use <printability.scad>
 include <styles/workshop-utility/style.scad>
@@ -22,6 +26,8 @@ include <styles/workshop-utility/style.scad>
 // Handlebar grip-section diameter (mm) — ISO 4210-2 flat-bar default.
 bar_d = 22.2;
 // Diametral bore clearance over bar_d (mm) — repo FDM 0.2–0.4; coupon-tuned.
+// Also the total clamping take-up: each half leaves takeup/2 at the split
+// so the flanges can close onto the bar instead of bottoming shell-to-shell.
 bore_clear = 0.3;
 // Clamp bearing width along the bar (mm) — the print height under the pad.
 clamp_w = 20;
@@ -55,7 +61,9 @@ latch_l = 2.5;
 latch_depth = 1.0;
 floor_t = 1.6;
 buckle_fit = 0.2;
-// Rotate receiver 90° (0 = slide along bar / +Y, 1 = slide across / +X)
+// Rotate receiver 90° on the end pad.
+// 0 = slide radially (over the bar); 1 = slide across the bar.
+// No setting slides along the bar — the channel lives in the pad plane.
 buckle_rot = 0; // [0, 1]
 
 /* [Style / quality] */
@@ -64,7 +72,7 @@ edge_chamfer = style_edge_chamfer;
 $fn = style_fn;
 
 /* [Part] */
-part = "preview"; // [preview, clamp-receiver, clamp-plain, coupon, assembled]
+part = "preview"; // [preview, clamp-receiver, clamp-plain, coupon, assembled, fit-close, fit-close-ctrl, fit-insert, fit-insert-ctrl]
 
 // ---------------------------------------------------------------------------
 // Derived
@@ -75,6 +83,8 @@ bore_r = bore_d / 2;
 outer_r = bore_r + shell;
 bolt_x = outer_r + flange_w / 2;
 overall_x = 2 * (outer_r + flange_w);
+takeup = bore_clear;               // total split-face close; half each side
+bar_keepout_r = bar_d / 2 + 0.5;   // continuing-bar clearance radius past the pad
 
 recv_outer_w = buckle_w + 2 * wall_max + buckle_fit;
 recv_outer_l = max(buckle_l, guide_l) + wall_max;
@@ -82,13 +92,15 @@ ch_h_nom = buckle_h + buckle_fit;
 roof_t = max(roof_top - ch_h_nom, 1.2);
 recv_h = floor_t + ch_h_nom + roof_t;
 
-// Receiver footprint on the top pad after buckle_rot. Half_y must cover
-// the FULL span so nothing cantilevers past the split or the pad face.
+// Receiver parked entirely outside the continuing-bar silhouette so a
+// mid-bar grip section can close and a buckle can slide to the latch.
 pad_margin = 1.0;
+recv_y0 = bar_keepout_r + pad_margin;
 recv_span_y = (buckle_rot == 0) ? recv_outer_l : recv_outer_w;
 recv_span_x = (buckle_rot == 0) ? recv_outer_w : recv_outer_l;
-half_y = max(outer_r, recv_span_y + 2 * pad_margin);
-// Flanges already set overall_x; assert the pad is wide enough in X too.
+half_y = recv_y0 + recv_span_y + pad_margin;
+// Through-both-halves bolt path (rule for the BOM): 2·half_y + nyloc stack.
+bolt_len = 2 * half_y + nut_h + 2;
 assert(overall_x >= recv_span_x + 2,
        "clamp overall_x too narrow for the receiver — widen flange_w");
 
@@ -99,6 +111,7 @@ assert(buckle_fit >= 0 && buckle_fit <= 1.0, "buckle_fit out of sane range");
 assert(buckle_w > guide_w + 2, "buckle_w must clear the centre guide");
 assert(roof_overhang > 0 && roof_overhang < buckle_w / 4, "roof_overhang");
 assert(bar_d > 10 && bar_d < 50, "bar_d out of ISO flat-bar range");
+assert(recv_y0 >= bar_keepout_r, "receiver must clear the continuing bar");
 
 // ---------------------------------------------------------------------------
 // Clamp half — PRINT ORIENTATION
@@ -111,6 +124,13 @@ assert(bar_d > 10 && bar_d < 50, "bar_d out of ISO flat-bar range");
 module bore_cut(extra = 0.02) {
     translate([0, 0, -extra])
         cylinder(d = bore_d, h = clamp_w + 2 * extra);
+}
+
+// Continuing bar past the clamp end — used to carve residual fin collision
+// and as the fitcheck mating solid.
+module continuing_bar(grow = 0, extra_z = 40) {
+    translate([0, 0, -extra_z])
+        cylinder(d = bar_d + grow, h = clamp_w + recv_h + 2 * extra_z);
 }
 
 module clamp_half_body() {
@@ -128,6 +148,11 @@ module clamp_half_body() {
                 cube([overall_x + 2, half_y + 1, clamp_w + 2]);
         }
         bore_cut();
+        // Clamping take-up: leave takeup/2 at the split so the flanges can
+        // close onto the bar (effective bore → bar_d) instead of bottoming
+        // shell-to-shell on an oversized hole.
+        translate([-overall_x / 2 - 1, -0.01, -1])
+            cube([overall_x + 2, takeup / 2 + 0.01, clamp_w + 2]);
     }
 }
 
@@ -141,22 +166,27 @@ module bolt_features(nut_side = false) {
                         cylinder(d = nut_af / cos(30), h = nut_h + 0.02,
                                  center = true, $fn = 6);
             } else {
+                // Socket recess with a light cheek chamfer on the outer rim
+                // so the proud head doesn't present a sharp corner to knees.
                 translate([0, half_y / 2 - socket_h / 2 + 0.01, 0])
                     rotate([90, 0, 0])
                         cylinder(d = socket_od, h = socket_h + 0.02,
                                  center = true);
+                translate([0, half_y / 2 + 0.01, 0])
+                    rotate([90, 0, 0])
+                        cylinder(d1 = socket_od + 1.2, d2 = socket_od,
+                                 h = 0.8, center = false);
             }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Buckle receiver
+// Buckle receiver — Abbott 2014 channel table (N2) untouched.
+// Cross-section is a T-slot: full-width body under the lips, narrower
+// centre opening between them so the 3 mm side shelves retain the fingers.
 // ---------------------------------------------------------------------------
 
-// Roof lips are a flat 3 mm shelf — under printcheck's 5 mm bridge budget,
-// so they print without supports (the brief's bridge-free choice with the
-// slot facing up). Keep the cut a clean cube; no 0.01-sliver hulls.
 module buckle_receiver() {
     ch_w = buckle_w + buckle_fit;
     ch_h = buckle_h + buckle_fit;
@@ -165,31 +195,27 @@ module buckle_receiver() {
         translate([-recv_outer_w / 2, 0, 0])
             cube([recv_outer_w, recv_outer_l, recv_h]);
 
-        // Main channel above the floor
+        // Main channel above the floor (full Abbott width)
         translate([-ch_w / 2, -0.01, floor_t])
             cube([ch_w, buckle_l + 0.01, ch_h + 0.01]);
 
-        // Finger slots under the roof lips (bridge = roof_overhang <= 5)
-        for (sx = [-1, 1]) {
-            translate([
-                sx * (ch_w / 2 - roof_overhang) - (sx < 0 ? roof_overhang : 0),
-                ease_in,   // leave the entry lip open over ease_in
-                floor_t + ch_h
-            ])
-                cube([roof_overhang,
-                      buckle_l - hook_backlash - ease_in + 0.01,
-                      roof_t + 0.02]);
-        }
+        // Centre top opening BETWEEN the roof lips — lips stay as shelves
+        // of width roof_overhang on each side.
+        translate([
+            -(ch_w - 2 * roof_overhang) / 2,
+            ease_in,
+            floor_t + ch_h - 0.01
+        ])
+            cube([
+                ch_w - 2 * roof_overhang,
+                buckle_l - ease_in - hook_backlash + 0.02,
+                roof_t + 0.04
+            ]);
 
-        // Entry ease-in: open the first ease_in mm of each lip fully
-        for (sx = [-1, 1]) {
-            translate([
-                sx * (ch_w / 2 - roof_overhang) - (sx < 0 ? roof_overhang : 0),
-                -0.01,
-                floor_t + ch_h
-            ])
-                cube([roof_overhang, ease_in + 0.02, roof_t + 0.02]);
-        }
+        // Lead-in: open the roof fully for the first ease_in of travel so
+        // fingers can enter, then the lips catch.
+        translate([-ch_w / 2, -0.01, floor_t + ch_h - 0.01])
+            cube([ch_w, ease_in + 0.02, roof_t + 0.04]);
 
         // Latch catch recess in the floor
         translate([-latch_w / 2,
@@ -197,26 +223,36 @@ module buckle_receiver() {
                    floor_t - latch_depth])
             cube([latch_w, latch_l, latch_depth + 0.01]);
 
-        // Thumb-access window through the roof
+        // Thumb-access window through the roof (push-out port)
         translate([-latch_w / 2 - 1,
                    buckle_l - hook_backlash - latch_l - 1,
                    floor_t + ch_h])
             cube([latch_w + 2, latch_l + 4, roof_t + 0.02]);
     }
 
-    // Centre guide ridge on the channel floor
-    translate([-guide_w / 2, 0, floor_t])
-        cube([guide_w, min(guide_l, recv_outer_l - 0.2), guide_h]);
+    // Centre guide ridge on the channel floor — stops short of the latch
+    // recess so the lock tab can drop into the pocket.
+    guide_end = min(guide_l, buckle_l - hook_backlash - latch_l - 0.5);
+    if (guide_end > 0.5) {
+        translate([-guide_w / 2, 0, floor_t])
+            cube([guide_w, guide_end, guide_h]);
+    }
 }
 
-// Centre the receiver on the top pad. half_y / overall_x are sized so the
-// rotated footprint stays inside the pad (no cantilever).
+// Park the receiver entirely at y >= recv_y0 (clear of the continuing bar).
 module receiver_on_top() {
     bury = 0.2;
-    translate([0, half_y / 2, clamp_w - bury])
-        rotate([0, 0, buckle_rot * 90])
-            translate([0, -recv_outer_l / 2, 0])
-                buckle_receiver();
+    if (buckle_rot == 0) {
+        translate([0, recv_y0, clamp_w - bury])
+            buckle_receiver();
+    } else {
+        // 90°: channel runs along X; keep the block's world-Y span at
+        // [recv_y0, recv_y0 + recv_outer_w].
+        translate([0, recv_y0 + recv_outer_w / 2, clamp_w - bury])
+            rotate([0, 0, 90])
+                translate([0, -recv_outer_l / 2, 0])
+                    buckle_receiver();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +266,9 @@ module part_clamp_receiver() {
             receiver_on_top();
         }
         bolt_features(nut_side = false);
+        // Belt-and-suspenders: carve any residual fin collision with the
+        // continuing bar past the clamp end.
+        continuing_bar(grow = 1.0);
     }
 }
 
@@ -240,8 +279,8 @@ module part_clamp_plain() {
     }
 }
 
-// Fit coupon — one base plate, vertical bore slice, three channel strips.
-// Strips use the same 45° lip so they stay support-free and one body.
+// Fit coupon — bore section + three open W/H troughs (0.0 / 0.2 / 0.4) +
+// one closed production-geometry strip (roof lips + latch) for the click.
 module part_coupon() {
     bore_h = 8;
     fits = [0.0, 0.2, 0.4];
@@ -250,11 +289,13 @@ module part_coupon() {
     ox = recv_outer_w;
     base_t = 1.6;
     bury = 0.3;
+    closed_oy = buckle_l + 2;
 
     bore_x = 2 * outer_r;
     bore_y = outer_r + 1;
     y0 = bore_y + 4;
-    base_y1 = y0 + 3 * (oy + strip_gap) - strip_gap + 2;
+    y_closed = y0 + 3 * (oy + strip_gap);
+    base_y1 = y_closed + closed_oy + 2;
     base_x0 = -max(bore_x, ox) / 2 - 2;
     base_x1 = max(bore_x, ox) / 2 + 2;
 
@@ -277,7 +318,9 @@ module part_coupon() {
                     cube([bore_x + 2, bore_y, bore_h + 2]);
             }
 
-        // Channel strips — open trough with 45° lips, no floating chips
+        // Open troughs — width/height drag ladder (tight → loose:
+        // buckle_fit 0.0 / 0.2 / 0.4). No roof, no latch — they do not
+        // test the click.
         for (i = [0 : len(fits) - 1]) {
             f = fits[i];
             ch_w = buckle_w + f;
@@ -287,10 +330,8 @@ module part_coupon() {
                        base_t - bury]) {
                 difference() {
                     cube([ox, oy, floor_t + ch_h + 1.2]);
-                    // Channel
                     translate([(ox - ch_w) / 2, -0.01, floor_t])
                         cube([ch_w, oy + 0.02, ch_h + 1.3]);
-                    // 45° lip chamfers (same idea as the production receiver)
                     for (sx = [0, 1]) {
                         x_edge = (ox - ch_w) / 2 + (sx == 0 ? 0 : ch_w);
                         hull() {
@@ -299,7 +340,7 @@ module part_coupon() {
                                 cube([0.01, oy + 0.02, 1.3]);
                             translate([
                                 x_edge + (sx == 0 ? roof_overhang
-                                                  : -roof_overhang) 
+                                                  : -roof_overhang)
                                     - (sx == 0 ? 0 : 0.01),
                                 -0.01,
                                 floor_t + ch_h + roof_overhang - 0.01
@@ -312,6 +353,11 @@ module part_coupon() {
                     cube([guide_w, oy, guide_h]);
             }
         }
+
+        // Closed latch strip — production roof lips + latch recess at the
+        // default buckle_fit. This is the strip that hears the click.
+        translate([0, y_closed, base_t - bury])
+            buckle_receiver();
     }
 }
 
@@ -328,7 +374,7 @@ module part_assembled() {
         half_in_use_frame(plain = false);
     color("Silver", 0.35)
         rotate([90, 0, 0])
-            cylinder(d = bar_d, h = clamp_w + 30, center = true);
+            cylinder(d = bar_d, h = clamp_w + 40, center = true);
 }
 
 module part_preview() {
@@ -336,6 +382,53 @@ module part_preview() {
         part_clamp_receiver();
     translate([overall_x / 2 + 8, 0, 0])
         part_clamp_plain();
+}
+
+// ---------------------------------------------------------------------------
+// Boolean fit proofs (ci.fitchecks) — never printed or sliced.
+// fit-close: closed clamp ∩ continuing bar → empty at grow=0.
+// fit-insert: buckle travel column ∩ continuing bar → empty at grow=0.
+// Each empty row has a grown-bar interferes control so the check can fail.
+// ---------------------------------------------------------------------------
+
+module closed_clamp() {
+    union() {
+        part_clamp_receiver();
+        mirror([0, 1, 0]) part_clamp_plain();
+    }
+}
+
+module fit_close(grow = 0) {
+    intersection() {
+        closed_clamp();
+        continuing_bar(grow = grow);
+    }
+}
+
+// Channel cross-section extruded from fully-out through the seat — the
+// volume a buckle sweeps. Buckle-agnostic and strictly stronger than any
+// real two-finger buckle (fingers span ±buckle_w/2).
+module buckle_travel_column() {
+    ch_w = buckle_w + buckle_fit;
+    ch_h = buckle_h + buckle_fit;
+    // From the channel mouth (fully-out, still clear of the bar) through
+    // the seat. Do not start below recv_y0 — that re-enters the bar disc.
+    if (buckle_rot == 0) {
+        translate([-ch_w / 2, recv_y0, clamp_w - 0.2 + floor_t])
+            cube([ch_w, buckle_l + 2, ch_h]);
+    } else {
+        translate([-buckle_l / 2 - 1,
+                   recv_y0 + (recv_outer_w - ch_w) / 2,
+                   clamp_w - 0.2 + floor_t])
+            cube([buckle_l + 2, ch_w, ch_h]);
+    }
+}
+
+module fit_insert(grow = 0) {
+    intersection() {
+        buckle_travel_column();
+        continuing_bar(grow = grow);
+    }
 }
 
 if (part == "clamp-receiver")
@@ -346,5 +439,13 @@ else if (part == "coupon")
     part_coupon();
 else if (part == "assembled")
     part_assembled();
+else if (part == "fit-close")
+    fit_close();
+else if (part == "fit-close-ctrl")
+    fit_close(grow = 2.0);
+else if (part == "fit-insert")
+    fit_insert();
+else if (part == "fit-insert-ctrl")
+    fit_insert(grow = 8.0);
 else
     part_preview();

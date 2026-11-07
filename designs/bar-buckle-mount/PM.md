@@ -32,7 +32,7 @@ bar diameter (use `bar_d`); guessing buckle geometry without a source.
 ## v1 — definition of done
 
 - [ ] `clamp-receiver` and `clamp-plain` gate green (printcheck + test-slice)
-- [ ] Coupon ships bore + buckle_fit ladders and gates green
+- [ ] Coupon ships bore + buckle_fit open troughs + closed latch strip and gates green
 - [ ] Bore on the export measures Ø(22.2 + bore_clear) ± 0.05
 - [ ] Buckle channel on the export measures within 0.1 mm of the sourced table (+ `buckle_fit`)
 - [ ] Product page passes `readme-gate.sh`; bill of hardware lists M5 + nyloc
@@ -41,10 +41,15 @@ bar diameter (use `bar_d`); guessing buckle geometry without a source.
 ## Backlog (ranked)
 
 1. **Field-measure a named buckle** — replace Abbott 2014 defaults if the
-   owner's buckle disagrees; keep parameters, retune coupon.
+   owner's buckle disagrees; keep parameters, retune coupon. Retention is
+   the hot path (~400–1,000 buckle cycles a year). Proving-ride notes fold
+   in here: does the clamp rotate under a cantilevered camera bump, and
+   does the fin wall survive a sideways knock?
 2. **Blank-plate sibling** — same clamp, no receiver (brief non-blocking).
-3. **25.4 / 31.8 presets** — documented `bar_d` pairs, not new designs.
-4. **Tool-free lever variant** — explicit brief out-of-scope for v0.1.
+3. **Slimmer plain half** — bore + flanges only (shorter bolts, less
+   glove-box bulk); re-derives the M5 length rule from `half_y`.
+4. **25.4 / 31.8 presets** — documented `bar_d` pairs, not new designs.
+5. **Tool-free lever variant** — explicit brief out-of-scope for v0.1.
 
 ## Open decisions
 
@@ -69,7 +74,7 @@ geometry-true view.
 1. `assembled` — both halves on a ghost bar, receiver outward (hero).
 2. `receiver` — channel / roof lips / centre guide / latch window close-up.
 3. `split` — both halves split-face-up so print orientation is obvious.
-4. `coupon` — bore section + three buckle strips.
+4. `coupon` — bore section + three open W/H troughs + closed latch strip.
 5. `contact-sheet` — as-printed 4-view.
 
 No AI tiers in v1 — the interface is the product.
