@@ -292,30 +292,19 @@ module tile_part() {
 }
 
 // ---------------------------------------------------------------------------
-// Grip tab — rounded finger pad; attaches to a lattice end only (never spans
-// tab-to-tab as a rail). Light top ridges for finger purchase — no through
-// cuts that would non-manifold the mesh.
+// Coupon — free-sided rib network with grip tabs on the ±X ends only.
+// Built as ONE 2D union (network + overlapping tab pads) then a single
+// extrude — a 3D union of an extruded network with separate tab solids
+// left non-manifold edges under Manifold (CI gate). Tab comfort = rounded
+// finger pads (no separate ridge shells).
 // ---------------------------------------------------------------------------
-module grip_tab_solid(w, d) {
-    ridge_h = 0.8;
-    ridge_w = 1.2;
-    union() {
-        rounded_box([w, d, rib_depth], r = min(2.5, w * 0.28),
-                    bottom_chamfer = bottom_chamfer);
-        // Two shallow raised ridges on the top face for grip comfort —
-        // sunk 0.2 mm into the pad so the union is manifold. Coordinates
-        // are from the tab's corner origin (rounded_box convention).
-        for (yy = [d * 0.30, d * 0.70])
-            translate([w * 0.28, yy - ridge_w / 2, rib_depth - 0.2])
-                cube([w * 0.5, ridge_w, ridge_h + 0.2]);
-    }
+module grip_tab_2d(w, d) {
+    r = min(2.5, w * 0.28);
+    offset(r = r)
+        translate([r, r])
+            square([max(0.1, w - 2 * r), max(0.1, d - 2 * r)]);
 }
 
-// ---------------------------------------------------------------------------
-// Coupon — free-sided rib network with grip tabs on the ±X ends only.
-// Lattice solid is the offset cell-union network (no rectangular rails);
-// tabs bury into the ±X ends so the pull loads cells.
-// ---------------------------------------------------------------------------
 module coupon_part() {
     lattice_guards(reentrant_angle);
     nx = coupon_cells_x;
@@ -324,22 +313,24 @@ module coupon_part() {
     span_y = lattice_span_y(ny, reentrant_angle, true);
     // Tab depth tracks the lattice span so the pad sits on the end ribs.
     tab_d = max(span_y * grip_tab_d_frac, 2 * cell_edge * abs(_c(reentrant_angle)));
-    tab_ov = max(1.2, rib_width);
+    tab_ov = max(2.0, 2 * rib_width);
     total_w = span_x + rib_width + 2 * grip_tab;
 
     origin_x = -((nx - 1) * pitch_x(reentrant_angle)
                  + (ny > 1 ? pitch_x(reentrant_angle) / 2 : 0)) / 2;
     origin_y = -((ny - 1) * row_pitch(reentrant_angle, true)) / 2;
 
-    union() {
-        translate([origin_x, origin_y, 0])
-            lattice_network_3d(nx, ny, reentrant_angle, true);
-        // Left / right grip tabs — bury into the network for a manifold weld
-        translate([-total_w / 2, -tab_d / 2, 0])
-            grip_tab_solid(grip_tab + tab_ov, tab_d);
-        translate([total_w / 2 - grip_tab - tab_ov, -tab_d / 2, 0])
-            grip_tab_solid(grip_tab + tab_ov, tab_d);
-    }
+    linear_extrude(rib_depth, convexity = 8)
+        union() {
+            translate([origin_x, origin_y])
+                lattice_network_2d(nx, ny, reentrant_angle, true);
+            // Left / right pads — overlap the network in 2D so the extrude
+            // is a single body with no shell-kiss at the weld.
+            translate([-total_w / 2, -tab_d / 2])
+                grip_tab_2d(grip_tab + tab_ov, tab_d);
+            translate([total_w / 2 - grip_tab - tab_ov, -tab_d / 2])
+                grip_tab_2d(grip_tab + tab_ov, tab_d);
+        }
 
     echo(str("auxetic-tile coupon: cells=", nx, "x", ny,
              " th=", reentrant_angle, " edge=", cell_edge,
