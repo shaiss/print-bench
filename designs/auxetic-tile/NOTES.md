@@ -103,10 +103,11 @@ All are parametric in `auxetic-tile.scad`.
 
 **Round 1 lattice rework (2026-11-07).** Tessellating half-height brick rows +
 free-sided coupon via `lattice_network_2d` (offset cell-union minus voids —
-no rectangular bypass rails); θ>0 guard; honesty fixes for the neck-cap vs
-45° printability bound. Local `gate.sh --slice`: tile 92/100 (thin-wall WARN
-on emboss text), coupon 100/100; both single-body watertight; readme-gate
-ok. Frozen cameras unchanged (added `render` so CGAL depicts the ribs).
-`shots.conf` product-hero awaits CI `regen` Cycles (no local `bpy`) —
-OpenSCAD iso staged as the README embed meantime, labelled as such.
+no rectangular bypass rails); single 2D-extrude coupon for Manifold
+watertightness; tabs at `grip_tab_d_frac=1.05` so both end corners weld
+(short pads twisted on pull — Drik on `b83089a`); θ>0 guard; honesty fixes
+for the neck-cap vs 45° printability bound. CI printcheck sticky on
+`b83089a`: tile 92/100, coupon 100/100. Frozen cameras unchanged (added
+`render` so CGAL depicts the ribs). `shots.conf` product-hero awaits CI
+Cycles when regen is forced; OpenSCAD iso staged + labelled meantime.
 Design-run from brief #977.

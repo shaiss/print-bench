@@ -44,8 +44,9 @@ coupon_cells_x = 3;
 coupon_cells_y = 2;
 // Solid grip-tab length beyond the lattice (mm), each end
 grip_tab = 16;
-// Grip-tab depth as a fraction of lattice body depth (finger pad, not a rail)
-grip_tab_d_frac = 0.72;
+// Grip-tab depth as a fraction of lattice span_y — ≥1 so both end corners
+// of the lattice weld into the pad (a short pad loads one corner and twists)
+grip_tab_d_frac = 1.05;
 
 /* [Emboss] */
 // Raised text height above the callout strip (mm) — two 0.2 mm layers
