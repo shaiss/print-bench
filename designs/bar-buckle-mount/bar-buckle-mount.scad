@@ -267,8 +267,11 @@ module part_clamp_receiver() {
         }
         bolt_features(nut_side = false);
         // Belt-and-suspenders: carve any residual fin collision with the
-        // continuing bar past the clamp end.
-        continuing_bar(grow = 1.0);
+        // continuing bar PAST the clamp body. Must not start below
+        // clamp_w — a full-height oversize cylinder would widen the tuned
+        // bore past bore_clear and defeat coupon tuning (Jane [saw-it]).
+        translate([0, 0, clamp_w])
+            cylinder(d = bar_d + 1.0, h = recv_h + 40);
     }
 }
 

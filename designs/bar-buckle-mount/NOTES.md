@@ -63,7 +63,8 @@ full clamp print.
 5. **Hardware is purchased M5 + nyloc** — socket counterbore on the
    receiver half (cheek-chamfered outer rim), hex recess on the plain
    half so the nyloc cannot spin. Bolt length rule: `2·half_y + nyloc
-   stack` (defaults land near M5×90).
+   stack` (`bolt_len` in the `.scad`; defaults land at **M5×110** —
+   order-online, not a hardware-store bin).
 6. **Coupon covers both tuned fits** — short bore section for the Ø22.2
    slide-vs-grip, three open troughs at `buckle_fit` 0.0 / 0.2 / 0.4 for
    W/H drag (tight → loose), plus one closed production-geometry strip

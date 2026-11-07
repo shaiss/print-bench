@@ -4,8 +4,10 @@ A split clamp for the standard Ø22.2 mm flat-handlebar grip that presents
 the de-facto action-cam **two-finger quick-release buckle** receiver — so
 the camera, light, or remote that already lives in your drawer clicks on
 and off the bar with no tools beyond the initial clamp install. It is a
-big, proud clamp: ~60 × 50+ mm footprint standing ~29 mm, two socket heads
-proud on the outboard face — workshop-utility bulk, named honestly.
+big, proud clamp: each half prints ~60 × 52 × 29 mm, and bolted around the
+bar the sandwich spans ~103 mm radially (2·`half_y`) × ~60 mm across the
+flanges × 20 mm along the bar, with two socket heads proud on the outboard
+face — workshop-utility bulk, named honestly.
 
 ![Assembled on a ghost bar](previews/assembled.png)
 
@@ -28,18 +30,20 @@ vertical, buckle channel opening upward. No supports.
 
 | Qty | Item | Notes |
 |---|---|---|
-| 2 | M5×0.8 socket-cap screw | length = 2·`half_y` + nyloc stack (~85–90 mm at the default shell; recalculate if you change `shell` / `flange_w` / `buckle_rot`) |
+| 2 | M5×0.8 socket-cap screw | length = 2·`half_y` + nyloc stack ≈ **110 mm** at the default shell (`bolt_len` in the `.scad`); buy M5×110 (order-online — past ~80 mm is not a hardware-store bin). Recalculate if you change `shell` / `flange_w` / `buckle_rot`. |
 | 2 | M5 nylon-insert lock nut | seats in the plain half's hex recess; the nylon collar sits a little proud of the outer face — that proud collar is the push-out lever for disassembly |
 
 Nothing in this design prints a thread into plastic.
 
 ## Print settings
 
-- **Material:** PLA for print #1 (the ~23 mm bridged roof between the finger
-  slots is at the comfort line in PLA and a lottery in PETG). PETG is fine
-  outdoors once you have confirmed the buckle seats under the roof without
-  drag; if it drags, bump `buckle_fit`. Coupon in the **same material** as
-  the clamp.
+- **Material:** PLA for print #1 (fit tuning + creep check). The roof prints
+  as two 3 mm lip shelves — trivial bridges, not a 23 mm span; the gap
+  between them is an opening, not a bridge. PETG is fine outdoors once the
+  coupon clicks clean; if the buckle drags under the lips, bump
+  `buckle_fit`. Coupon in the **same material** as the clamp. Expected
+  printcheck warn on the coupon's closed latch strip — act on the click,
+  not the warn.
 - **Layer height:** 0.2 mm
 - **Perimeters:** ≥ 3 (walls are ≥ 1.2 mm; shell is 5 mm)
 - **Infill:** 30–40 %
