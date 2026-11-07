@@ -1,0 +1,5 @@
+# Printable parts to render and gate in CI. The default render is the
+# lineup preview (not a deliverable). The fit coupon is gated via its
+# wrapper file (bar-buckle-mount-coupon.scad).
+clamp-receiver
+clamp-plain
