@@ -45,21 +45,37 @@ socket_h = socket_head("M5")[1];
 socket_od = socket_head("M5")[0];
 
 /* [Buckle receiver — community-measured, j-h-a/go-pro-mounts 2014] */
+// Channel width (mm) — Abbott N2 table.
 buckle_w = 28.6;
+// Channel height under the roof lips (mm) — Abbott N2 table.
 buckle_h = 4.9;
+// Channel engagement length to the latch seat (mm) — Abbott N2 table.
 buckle_l = 25.6;
+// Roof lip shelf width each side (mm) — retains the buckle fingers.
 roof_overhang = 3.0;
+// Side wall outside the channel (mm) — Abbott N2 upper (3.3–3.95).
 wall_max = 3.95;
+// Height from channel floor to outer roof top (mm) — Abbott N2 table.
 roof_top = 7.3;
+// Centre guide ridge width (mm) — keeps the buckle centred.
 guide_w = 3.5;
+// Centre guide ridge height above the floor (mm).
 guide_h = 2.0;
+// Centre guide max length (mm); truncated short of the latch recess.
 guide_l = 34;
+// Lead-in length (mm) where the roof is fully open for finger entry.
 ease_in = 3.8;
+// Free travel past the latch before the hook bottoms (mm).
 hook_backlash = 1.4;
+// Latch catch recess width across the channel (mm).
 latch_w = 6.0;
+// Latch catch recess length along travel (mm).
 latch_l = 2.5;
+// Latch catch recess depth into the floor (mm) — coupon-tuned on the closed strip.
 latch_depth = 1.0;
+// Channel floor thickness (mm); must out-depth latch_depth.
 floor_t = 1.6;
+// Extra clearance on buckle channel W/H (mm) — open troughs sweep 0.0/0.2/0.4.
 buckle_fit = 0.2;
 // Rotate receiver 90° on the end pad.
 // 0 = slide radially (over the bar); 1 = slide across the bar.
@@ -292,7 +308,9 @@ module part_coupon() {
     ox = recv_outer_w;
     base_t = 1.6;
     bury = 0.3;
-    closed_oy = buckle_l + 2;
+    // Closed strip is a full production buckle_receiver() — base must
+    // cover recv_outer_l, not just buckle_l (Bugbot: coupon undershoot).
+    closed_oy = recv_outer_l + 2;
 
     bore_x = 2 * outer_r;
     bore_y = outer_r + 1;
@@ -450,5 +468,7 @@ else if (part == "fit-insert")
     fit_insert();
 else if (part == "fit-insert-ctrl")
     fit_insert(grow = 8.0);
-else
+else if (part == "preview")
     part_preview();
+else
+    assert(false, str("bar-buckle-mount: unknown part '", part, "'"));

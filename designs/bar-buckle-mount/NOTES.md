@@ -103,8 +103,9 @@ Print `bar-buckle-mount-coupon.scad` before the halves:
 - [x] G1 — `render.sh bar-buckle-mount` + `--previews` complete, no CGAL errors
 - [x] G2 — `gate.sh bar-buckle-mount` exits 0 on the post-relief head
       (local printcheck: clamp-receiver 100/100, clamp-plain 100/100,
-      coupon 92/100 with 2% unbridgeable overhang on the closed latch strip;
-      CI sticky after this push is the source of truth for --slice timings)
+      coupon 92/100 — WARN degenerate faces on the closed latch strip;
+      `ci.plate` packs both halves; CI sticky after this push is the
+      source of truth for --slice timings)
 - [x] G3 — `readme-gate.sh bar-buckle-mount` ok
 - [x] G4 — receiver envelope ~60.5 × 51.4 × 28.7 mm (pedestal extends Y past
       the bar crown); bore still `bar_d + bore_clear`
