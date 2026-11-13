@@ -13,10 +13,14 @@ voice of a garage builder who shows their work. The PM owns what is worth saying
 Lark owns how Twitter/X says it: the hook, the thread shape, the weighted
 280 limit, the one link. By default every drain is a **dry run** — the
 would-be tweet lands as a comment on the queue issue for a human to read —
-and a live post additionally requires the human `approved-to-post` label AND
-the live key AND a matching workflow-bot dry-run `message-digest` (sha256 of
-the NFKC-normalized `## Message` first paragraph) with a body not edited
-after that label; the posting tool enforces all of it.
+and a live post additionally requires the live key AND the preview →
+re-label → post loop the tool enforces: a trusted bot preview comment
+(marker + `message-digest` of the NFKC `## Message` first paragraph as the
+first two lines) that matches the current body, then a human on
+`GROWTH_APPROVER_LOGINS` re-applies `approved-to-post` **after** that
+preview, with the body freeze still clean. If LIVE finds no matching
+preview it writes one and removes the approval label (never adds labels)
+instead of posting — review the preview, re-apply the label, run again.
 
 ## The one boundary you may never cross
 

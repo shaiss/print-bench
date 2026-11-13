@@ -96,19 +96,23 @@ declines design requests). The queue is the contract between the seats:
   text; at most 5 ASCII handles; restore via drafted paragraph or append,
   else refuse untagged; NFKC-normalize the final root and every thread part
   and refuse full-width ``＠``/``﹫`` or more than 5 mention-shaped tokens),
-  refuses a LIVE post when the issue body was edited after the
-  `approved-to-post` labeled event **or** when the latest workflow-bot
-  dry-run's ``message-digest`` (sha256 of the NFKC-normalized ``## Message``
-  first paragraph) does not match the current body (`growth.approval_guard`
-  — timeline/`lastEditedAt`/digest unreadable → fail closed; dry-runs embed
-  the digest and report freeze staleness), enforces one post per queue item
-  ever (`<!-- growth-twitter:posted -->` / `<!-- growth-twitter:dry-run -->`
-  marker comments), caps posts per run, applies no labels, and decides
-  dry-run vs live itself — the model never does. After a live post it closes
-  the drained item (queue semantics); after a dry run it only comments.
+  LIVE posts only after a **preview → human re-label → post** loop:
+  a trusted preview comment (first two lines exactly the dry-run marker and
+  ``message-digest`` sha256 of the NFKC ``## Message`` first paragraph,
+  authored by ``github-actions[bot]`` / ``type=Bot``, never edited) must
+  match the current body; an allowlisted User (`GROWTH_APPROVER_LOGINS`)
+  must re-apply `approved-to-post` **after** that preview; the body freeze
+  must still pass. Missing/mismatched preview on a LIVE run
+  **self-migrates**: writes the preview, **removes** `approved-to-post`
+  only (never adds a label), does not post, does not burn the daycap.
+  Exactly one trusted preview after ``lastEditedAt`` — more is refuse-on-
+  ambiguity. Unreadable timeline/comments/label-removal → fail closed.
+  Enforces one post per queue item ever, caps posts per run, and decides
+  dry-run vs live itself — the model never does. After a live post it
+  closes the drained item; after a dry run / self-migrate it only comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
-  weighted-length rule, root-@tag preservation, post-approval body freeze +
-  dry-run digest binding, the drain policy, a minimal cron matcher, the
+  weighted-length rule, root-@tag preservation, trusted-preview + human
+  approval gates, the drain policy, a minimal cron matcher, the
   per-UTC-day live-post cap (`daycap`), the accelerated-timeline simulator,
   the OAuth 1.0a X poster seam), stdlib-only with its own pytest suite; see
   its README.

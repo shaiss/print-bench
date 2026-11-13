@@ -74,10 +74,13 @@ _MESSAGE_HEADING_RE = re.compile(
 _NEXT_HEADING_RE = re.compile(r"^#{2,3}[ \t]+\S", re.MULTILINE)
 
 # Dry-run / live digest of the NFKC-normalized ## Message first paragraph.
+# A trusted preview's FIRST two lines must be exactly these forms (no
+# leading/trailing spaces on the lines; old marker-only comments and
+# mid-body forgeries are never trusted).
+DRYRUN_MARKER = "<!-- growth-twitter:dry-run -->"
 DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
-DIGEST_RE = re.compile(
-    r"<!--\s*growth-twitter:message-digest:sha256=([0-9a-f]{64})\s*-->",
-    re.IGNORECASE,
+DIGEST_LINE_RE = re.compile(
+    r"^<!-- growth-twitter:message-digest:sha256=([0-9a-f]{64}) -->$"
 )
 
 
@@ -142,11 +145,35 @@ def digest_comment_line(body: str | None) -> str:
 
 
 def parse_message_digest(comment_body: str | None) -> str | None:
-    """Extract the sha256 hex from a dry-run comment, or ``None``."""
+    """sha256 from a preview whose first two lines are marker + digest.
+
+    Line 1 must equal :data:`DRYRUN_MARKER` exactly; line 2 must match
+    :data:`DIGEST_LINE_RE` exactly. Anything else (old format, mid-body
+    markers, extra whitespace on those lines) returns ``None``.
+    """
     if not comment_body:
         return None
-    m = DIGEST_RE.search(comment_body)
-    return m.group(1).lower() if m else None
+    lines = comment_body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if len(lines) < 2:
+        return None
+    if lines[0] != DRYRUN_MARKER:
+        return None
+    m = DIGEST_LINE_RE.match(lines[1])
+    return m.group(1) if m else None
+
+
+def assert_thread_mention_cap(root: str, thread: list[str] | None = None) -> None:
+    """Refuse when root + all thread parts together exceed the mention cap.
+
+    Full-width markers are still refused per-part via :func:`assert_postable_text`.
+    """
+    parts = [root or ""] + list(thread or [])
+    total = sum(count_posted_mentions(p) for p in parts)
+    if total > MAX_REQUIRED_HANDLES:
+        raise RootTagsError(
+            f"thread carries {total} mention(s) across root+replies "
+            f"(cap {MAX_REQUIRED_HANDLES}); refusing"
+        )
 
 
 def _url_spans(text: str) -> list[tuple[int, int]]:

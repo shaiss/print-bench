@@ -13,6 +13,7 @@ from growth.roottags import (
     MAX_REQUIRED_HANDLES,
     RootTagsError,
     assert_postable_text,
+    assert_thread_mention_cap,
     count_posted_mentions,
     ensure_root_tags,
     extract_handles,
@@ -287,6 +288,12 @@ def test_count_posted_mentions_nfkc_folds_fullwidth():
     assert count_posted_mentions("@a @b @c") == 3
 
 
+def test_thread_mention_cap_is_across_root_and_replies():
+    assert_thread_mention_cap("@A @B", ["@C @D"])
+    with pytest.raises(RootTagsError, match="across root\\+replies"):
+        assert_thread_mention_cap("@A @B @C", ["@D @E @F"])
+
+
 def test_count_posted_mentions_skips_url_path_ats():
     """YouTube /@user is not a mention — must not inflate the posted cap."""
     five = " ".join(f"@U{i}" for i in range(5))
@@ -323,10 +330,11 @@ def test_message_digest_is_sha256_of_nfkc_first_paragraph():
 
 
 def test_parse_message_digest_round_trip():
-    from growth.roottags import digest_comment_line
+    from growth.roottags import DRYRUN_MARKER, digest_comment_line
 
     body = "## Message\n\nTagged @Prusa3D\n"
     line = digest_comment_line(body)
-    comment = f"<!-- growth-twitter:dry-run -->\n{line}\nbody"
+    comment = f"{DRYRUN_MARKER}\n{line}\nbody"
     assert parse_message_digest(comment) == message_digest(body)
     assert parse_message_digest("no digest here") is None
+    assert parse_message_digest(f"x\n{DRYRUN_MARKER}\n{line}\n") is None

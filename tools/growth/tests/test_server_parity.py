@@ -15,6 +15,9 @@ import pytest
 from growth.approval_guard import (
     APPROVAL_LABEL,
     ApprovalGuardError,
+    PreviewMigrationNeeded,
+    TRUSTED_PREVIEW_LOGIN,
+    TRUSTED_PREVIEW_TYPE,
     assert_body_fresh_for_live,
     assert_digest_binds,
     body_edited_after_approval,
@@ -22,6 +25,7 @@ from growth.approval_guard import (
     latest_trusted_dryrun_digest,
 )
 from growth.roottags import (
+    DRYRUN_MARKER,
     MAX_REQUIRED_HANDLES,
     RootTagsError,
     assert_postable_text,
@@ -228,16 +232,21 @@ def test_message_digest_parity():
     for body in bodies:
         assert server._message_digest(body) == message_digest(body)
         assert server._digest_comment_line(body) == digest_comment_line(body)
-        line = digest_comment_line(body)
-        assert server._parse_message_digest(line) == parse_message_digest(line)
+        comment = f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\nrest"
+        assert server._parse_message_digest(comment) == parse_message_digest(comment)
+        # Lone digest line (old mid-body search) is never trusted.
+        assert server._parse_message_digest(digest_comment_line(body)) is None
+        assert parse_message_digest(digest_comment_line(body)) is None
 
 
 def test_digest_bind_parity():
     server = _load_server()
     body = "## Message\n\nBound @Prusa3D\n"
     comments = [{
-        "body": f"<!-- growth-twitter:dry-run -->\n{digest_comment_line(body)}\n",
-        "user": {"login": "github-actions[bot]"},
+        "body": f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\n",
+        "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
+        "created_at": "2026-01-01T10:00:00Z",
+        "updated_at": "2026-01-01T10:00:00Z",
     }]
     assert latest_trusted_dryrun_digest(comments) == (
         server._latest_trusted_dryrun_digest(comments)
@@ -245,7 +254,7 @@ def test_digest_bind_parity():
     assert assert_digest_binds(comments, body) == (
         server._assert_digest_binds(comments, body)
     )
-    with pytest.raises(ApprovalGuardError):
+    with pytest.raises(PreviewMigrationNeeded):
         assert_digest_binds([], body)
-    with pytest.raises(server._ApprovalGuardError):
+    with pytest.raises(server._PreviewMigrationNeeded):
         server._assert_digest_binds([], body)

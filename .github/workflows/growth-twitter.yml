@@ -517,6 +517,7 @@ jobs:
           GROWTH_CAP_STATE: ${{ runner.temp }}/growth-posts
           GROWTH_REQUIRE_APPROVAL: ${{ steps.policy.outputs.require_approval }}
           GROWTH_TWITTER_LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
+          GROWTH_APPROVER_LOGINS: ${{ vars.GROWTH_APPROVER_LOGINS || 'shaiss' }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -567,6 +568,7 @@ jobs:
           GROWTH_CAP_STATE: ${{ runner.temp }}/growth-posts
           GROWTH_REQUIRE_APPROVAL: ${{ steps.policy.outputs.require_approval }}
           GROWTH_TWITTER_LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
+          GROWTH_APPROVER_LOGINS: ${{ vars.GROWTH_APPROVER_LOGINS || 'shaiss' }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -599,6 +601,7 @@ jobs:
           GROWTH_CAP_STATE: ${{ runner.temp }}/growth-posts
           GROWTH_REQUIRE_APPROVAL: ${{ steps.policy.outputs.require_approval }}
           GROWTH_TWITTER_LIVE: ${{ vars.GROWTH_TWITTER_LIVE }}
+          GROWTH_APPROVER_LOGINS: ${{ vars.GROWTH_APPROVER_LOGINS || 'shaiss' }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
