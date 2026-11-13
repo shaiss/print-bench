@@ -181,12 +181,23 @@ declines design requests). The queue is the contract between the seats:
    **and** the four X credentials (`X_API_KEY`, `X_API_SECRET`,
    `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`) as repo secrets. The posting
    tool checks both itself; a model cannot reach either.
-3. **This post, now** — per item, the human-applied `approved-to-post`
-   label (while the committed policy says `require_approval: true`). The
-   dry-run comment on the queue issue is exactly what is being approved.
-   The label itself is **auto-ensured by the first armed run** (the drain
-   job creates it idempotently), so it always exists for a human to apply —
-   merging the desk's code never creates repo labels.
+3. **This post, now** — per item, the `approved-to-post` label (while the
+   committed policy says `require_approval: true`). The dry-run comment on
+   the queue issue is exactly what is being approved. The label itself is
+   **auto-ensured by the first armed run** (the drain job creates the label
+   *definition* idempotently; it does not apply the label to issues), so it
+   always exists for an approver to apply — merging the desk's code never
+   creates repo labels.
+
+**approved-to-post rule (Shai, 2026-11-13):**
+`GROWTH_REQUIRE_DIRECT_HUMAN_LABEL=false`, so a label an agent adds counts
+as approval. No agent or workflow adds `approved-to-post` unless Shai asked,
+in his own words, for that specific issue. A relay from another agent does
+not count, and neither do blanket instructions. Each agent add is logged
+with the time, the issue, the agent, and a link to Shai's ask. The approver
+allowlist (`GROWTH_APPROVER_LOGINS`) stays shaiss-only. Caveat: the box's
+`shaiss` `gh` token means a label is not proof that a human applied it.
+(Also in `.claude/skills/growth-twitter/SKILL.md`.)
 
 Turning `require_approval` off (a one-line reviewed PR) is the deliberate
 last step to a fully autonomous channel — never a default, and rungs 1–2
