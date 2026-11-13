@@ -127,7 +127,9 @@ MAX_THREAD_PARTS = 4
 # together on a vector set, so a drift here fails CI.
 
 MAX_WEIGHT = 280
-_URL_RE = re.compile(r"https?://\S+")
+# Case-insensitive so HTTPS:// / HtTp:// cannot bypass the allowlist,
+# URL-@ skip, or the weighted-length URL meter.
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _WEIGHT_ONE_RANGES = (
     (0x0000, 0x10FF),
     (0x2000, 0x200D),
@@ -2348,6 +2350,29 @@ def selftest():
     })
     check("extra URL outside ## Message/## Link is refused",
           err(r_evil) and "not in the approved" in r_evil["content"][0]["text"])
+    # Upper- / mixed-case schemes must not bypass the allowlist.
+    _FAKE_ISSUES[65] = q(65, OK)
+    _FAKE_ISSUES[65]["body"] = (
+        "## Message\n\nLink only @Prusa3D\n\n"
+        "## Link\n\nhttps://github.com/shaiss/print-bench\n"
+    )
+    _FAKE_COMMENTS.pop(65, None)
+    r_https = _post_tweet({
+        "number": 65,
+        "text": "Hi @Prusa3D HTTPS://evil.example/x",
+    })
+    check("HTTPS:// scheme URL outside allowlist is refused",
+          err(r_https) and "not in the approved" in r_https["content"][0]["text"])
+    _FAKE_ISSUES[66] = q(66, OK)
+    _FAKE_ISSUES[66]["body"] = _FAKE_ISSUES[65]["body"]
+    _FAKE_COMMENTS.pop(66, None)
+    r_http_mix = _post_tweet({
+        "number": 66,
+        "text": "Hi @Prusa3D HtTp://evil.example/x",
+    })
+    check("HtTp:// scheme URL outside allowlist is refused",
+          err(r_http_mix)
+          and "not in the approved" in r_http_mix["content"][0]["text"])
     # Link-only re-attach on dry-run succeeds.
     _FAKE_ISSUES[64] = q(64, OK)
     _FAKE_ISSUES[64]["body"] = (

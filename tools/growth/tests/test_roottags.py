@@ -158,6 +158,44 @@ def test_extra_composed_url_refused():
         )
 
 
+def test_uppercase_and_mixed_scheme_urls_are_detected():
+    """HTTPS:// / HtTp:// must not bypass the allowlist or URL-@ skip."""
+    from growth.roottags import extract_urls
+
+    drafted = "Measured margin. @Prusa3D"
+    link = "https://github.com/shaiss/print-bench/tree/main/designs/x"
+    allow = allowed_urls(f"## Message\n\n{drafted}\n\n## Link\n\n{link}\n")
+    for evil in (
+        "HTTPS://evil.example/x",
+        "HtTp://evil.example/x",
+        "hTtPs://evil.example/x",
+    ):
+        assert evil in extract_urls(f"Hi @Prusa3D {evil}")
+        with pytest.raises(RootTagsError, match="not in the approved"):
+            assert_only_allowed_urls(f"Hi @Prusa3D {evil}", allow)
+        with pytest.raises(RootTagsError, match="not in the approved"):
+            ensure_root_tags(
+                f"Agent rewrite with tag. @Prusa3D {link} {evil}",
+                required=["@Prusa3D"],
+                drafted=drafted,
+                link=link,
+            )
+    # Uppercase scheme on an approved Link is still extracted / allowlisted.
+    body_upper = (
+        "## Message\n\nTagged @Prusa3D\n\n"
+        "## Link\n\nHTTPS://github.com/shaiss/print-bench\n"
+    )
+    assert "HTTPS://github.com/shaiss/print-bench" in allowed_urls(body_upper)
+    # URL-path @ under an uppercase scheme is not a mention.
+    five = " ".join(f"@U{i}" for i in range(5))
+    assert (
+        count_posted_mentions(
+            f"{five} HTTPS://www.youtube.com/@CNC_Kitchen"
+        )
+        == 5
+    )
+
+
 def test_drafted_url_overflow_falls_through_to_append():
     """When draft+Link exceeds 280, append handles on the composed root."""
     link = "https://github.com/shaiss/print-bench/tree/main/designs/x"

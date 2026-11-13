@@ -36,6 +36,7 @@ from growth.roottags import (
     digest_comment_line,
     ensure_root_tags,
     extract_handles,
+    extract_urls,
     message_digest,
     message_root_paragraph,
     parse_message_digest,
@@ -147,6 +148,31 @@ def test_roottags_ensure_agrees_on_preserve_append_and_verbatim():
         server._ensure_root_tags(
             evil, ["@Prusa3D"], drafted="Measured. @Prusa3D", link=link
         )
+    # Upper- / mixed-case schemes must not bypass either copy.
+    for scheme_evil in (
+        f"Measured. @Prusa3D {link} HTTPS://evil.example/x",
+        f"Measured. @Prusa3D {link} HtTp://evil.example/x",
+    ):
+        with pytest.raises(RootTagsError, match="not in the approved"):
+            ensure_root_tags(
+                scheme_evil,
+                ["@Prusa3D"],
+                drafted="Measured. @Prusa3D",
+                link=link,
+            )
+        with pytest.raises(server._RootTagsError, match="not in the approved"):
+            server._ensure_root_tags(
+                scheme_evil,
+                ["@Prusa3D"],
+                drafted="Measured. @Prusa3D",
+                link=link,
+            )
+        assert server._extract_urls(scheme_evil) == extract_urls(scheme_evil)
+    # URL-@ skip + weight agree on uppercase schemes.
+    yt = "HTTPS://www.youtube.com/@CNC_Kitchen"
+    assert server._count_posted_mentions(yt) == count_posted_mentions(yt) == 0
+    assert server._tweet_weight(yt) == tweet_weight(yt) == 23
+    assert server._extract_urls(yt) == extract_urls(yt) == [yt]
     # draft+Link overflow → fall through to append (both sides)
     from growth.tweetlen import MAX_WEIGHT
     fat = ("d" * (MAX_WEIGHT - 10)) + " @Prusa3D"

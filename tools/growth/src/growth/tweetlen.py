@@ -27,7 +27,8 @@ MAX_WEIGHT = 280
 TARGET_WEIGHT = 270
 URL_WEIGHT = 23
 
-_URL_RE = re.compile(r"https?://\S+")
+# Case-insensitive: HTTPS:// / HtTp:// still meter as one URL (weight 23).
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 # twitter-text v3: code points inside these inclusive ranges weigh 1; every
 # other code point weighs 2.

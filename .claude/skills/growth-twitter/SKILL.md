@@ -24,14 +24,18 @@ overall must be a human on `GROWTH_APPROVER_LOGINS` (and, when
 `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true, not via a GitHub App —
 **not** a gate against agents on the shared box; see docs/growth.md)
 strictly **after** that preview and after the bot's own most recent
-removal of the label, with the body freeze still clean. Only URLs from
-that paragraph or `## Link` may appear in root/thread. If LIVE finds no
-trusted preview it writes one and removes the approval label (never adds
-labels) instead of posting — that self-migrate does **not** consume the
-run's post slot (capped at 60 previews/run in the tool). On a LIVE run:
-first preview-migrate every approved item that needs one, then post at
-most `GROWTH_MAX_POSTS` among items that pass every gate — never post an
-item preview-migrated earlier in the same run.
+removal of the label, with the body freeze still clean. Only scheme URLs
+(`http(s)://…`, case-insensitive) from that paragraph or `## Link` may
+appear in root/thread — bare domains are out of scope here (#1023);
+draft URLs bare (exact match refuses a trailing `.` or `<url>` wrap). A
+digest mismatch without edit recovers only by editing the issue body
+(new edit → new preview → re-label). If LIVE finds no trusted preview it
+writes one and removes the approval label (never adds labels) instead of
+posting — that self-migrate does **not** consume the run's post slot
+(capped at 60 previews/run in the tool). On a LIVE run: first
+preview-migrate every approved item that needs one, then post at most
+`GROWTH_MAX_POSTS` among items that pass every gate — never post an item
+preview-migrated earlier in the same run.
 
 ## The one boundary you may never cross
 

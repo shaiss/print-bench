@@ -63,8 +63,9 @@ _POSTED_MENTION_RE = re.compile(
     r"(?<![A-Za-z0-9_])[@\uff20\ufe6b][A-Za-z0-9_]+"
 )
 # Same URL shape tweetlen meters — handles inside a URL must not count as
-# mentions (e.g. ``https://www.youtube.com/@CNC_Kitchen``).
-_URL_RE = re.compile(r"https?://\S+")
+# mentions (e.g. ``https://www.youtube.com/@CNC_Kitchen``). Case-insensitive
+# so ``HTTPS://`` / ``HtTp://`` cannot bypass the allowlist or URL-@ skip.
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 # Optional CR so GitHub's CRLF bodies still match the heading.
 # Accept h2 (``##``, MCP / template filings) and h3 (``###``, GitHub
 # issue-form field labels) — both are the same section in practice.

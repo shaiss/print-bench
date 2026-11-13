@@ -101,10 +101,13 @@ declines design requests). The queue is the contract between the seats:
   ``message-digest`` sha256 of NFKC(``## Message`` first paragraph) +
   ``\n`` + NFKC(``## Link``) — the drafted root and the queue Link the
   digest binds; live copy may be recomposed under the length, tag, URL,
-  and approval gates; only URLs from that paragraph or ``## Link`` may
-  appear — authored by ``github-actions[bot]`` / ``type=Bot``, never
-  edited) must match the current body; the **latest** `approved-to-post`
-  labeled event overall must be an allowlisted User
+  and approval gates; only scheme URLs (``http(s)://…``, case-insensitive)
+  from that paragraph or ``## Link`` may appear — bare domains such as
+  ``evil.example/x`` are **not** covered here and are tracked in follow-up
+  issue #1023 (unbound live prose); draft URLs bare (exact match refuses a
+  trailing ``.`` or a ``<url>`` wrap) — authored by ``github-actions[bot]`` /
+  ``type=Bot``, never edited) must match the current body; the **latest**
+  `approved-to-post` labeled event overall must be an allowlisted User
   (`GROWTH_APPROVER_LOGINS`), strictly after that preview **and** after the
   bot's own most recent removal of the label, with no unlabeled after it
   (stale/revoked approvals refuse). When
@@ -123,12 +126,14 @@ declines design requests). The queue is the contract between the seats:
   among items that pass every gate; it never posts an issue it
   preview-migrated earlier in the same run. A digest mismatch on an
   existing trusted preview refuses (`digest mismatch without edit`)
-  rather than writing a second preview. Exactly one trusted preview
-  after ``lastEditedAt`` — more is refuse-on-ambiguity. Unreadable
-  timeline/comments/label-removal → fail closed. Enforces one post per
-  queue item ever, caps posts per run, and decides dry-run vs live
-  itself — the model never does. After a live post it closes the drained
-  item; after a dry run / self-migrate it only comments.
+  rather than writing a second preview — recovery is edit the issue body
+  (which creates a new edit), then a new preview, then a re-label.
+  Exactly one trusted preview after ``lastEditedAt`` — more is
+  refuse-on-ambiguity. Unreadable timeline/comments/label-removal → fail
+  closed. Enforces one post per queue item ever, caps posts per run, and
+  decides dry-run vs live itself — the model never does. After a live post
+  it closes the drained item; after a dry run / self-migrate it only
+  comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
   weighted-length rule, root-@tag preservation, trusted-preview + human
   approval gates, the drain policy, a minimal cron matcher, the
