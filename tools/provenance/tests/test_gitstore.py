@@ -526,6 +526,128 @@ def test_redact_replaces_longest_first():
     assert gitstore.redact("nothing", []) == "nothing"
 
 
+# Pattern fixtures for scrub()/redact_patterns() — public diag artifacts must
+# never carry these shapes even when the value was never in the env.
+_PATTERN_FIXTURES = [
+    ("ghp_" + "A" * 36, "ghp_"),
+    ("gho_" + "B" * 36, "gho_"),
+    ("ghs_" + "C" * 36, "ghs_"),
+    ("ghu_" + "D" * 36, "ghu_"),
+    ("ghr_" + "E" * 36, "ghr_"),
+    ("github_pat_" + "F" * 40, "github_pat_"),
+    ("sk-or-" + "G" * 40, "sk-or-"),
+    ("sk-ant-" + "H" * 40, "sk-ant-"),
+    ("AKIA" + ("I" * 16), "AKIA"),
+    ("ASIA" + ("J" * 16), "ASIA"),
+    ("AKIA" + ("K" * 16) + " secret=" + ("L" * 40), "aws-pair"),
+    ("Authorization: Bearer " + ("m" * 48), "auth-bearer"),
+    ("Bearer " + ("n" * 48), "bare-bearer"),
+    ("https://user:passw0rd@github.com/x", "url-userpass"),
+    ("https://x-access-token:deadbeefDEADBEEFdeadbeefDE@github.com/x.git", "x-access"),
+    ("AUTHORIZATION: basic " + ("YWJj" * 10) + "==", "basic-auth"),
+    (
+        "eyJhbGciOiJIUzI1NiJ9."
+        + "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+        + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+        "jwt",
+    ),
+    ("ghs_server.token-with.dots-and-dashes_ABCDEF", "ghs-dotted"),
+    # Documented Z.AI key shape: 32 hex + '.' + 16 alnum.
+    ("a" * 32 + "." + "B" * 16, "zai-dotted"),
+    ("ANTHROPIC_AUTH_TOKEN=" + "c" * 32 + "." + "D" * 16, "zai-auth-env"),
+    # Trailing '.' must not defeat the match (lookahead omits '.').
+    ("a" * 32 + "." + "B" * 16 + ".", "zai-followed-by-dot"),
+    # Non-hex letter prefix — old [A-Za-z0-9.] lookbehind leaked these.
+    ("z" + "a" * 32 + "." + "B" * 16, "zai-letter-prefix"),
+    # Literal backslash-n sequence (two chars), not a newline.
+    ("\\n" + "a" * 32 + "." + "B" * 16, "zai-backslash-n-prefix"),
+    # Uppercase hex id half.
+    ("A" * 32 + "." + "Bb0Cd1Ef2Gh3Ij45", "zai-uppercase-hex"),
+]
+
+
+
+def test_redact_patterns_keeps_sha256_and_git_sha():
+    """The Z.AI dotted pattern must not swallow hex digests (Bugbot)."""
+    sha256 = "a" * 64
+    git_sha = "b" * 40
+    out = gitstore.redact_patterns(f"pin {sha256} commit {git_sha}")
+    assert sha256 in out and git_sha in out
+
+
+def test_redact_patterns_keeps_bare_64_hex_digest():
+    """A bare SHA-256 hex digest must not match the Z.AI dotted key pattern."""
+    digest = "0123456789abcdef" * 4  # 64 hex, no dot
+    assert len(digest) == 64
+    out = gitstore.redact_patterns(f"checksum {digest} end")
+    assert digest in out
+
+
+@pytest.mark.parametrize("secret,label", _PATTERN_FIXTURES)
+def test_redact_patterns_covers_each_shape(secret, label):
+    text = f"prefix {secret} suffix"
+    out = gitstore.redact_patterns(text)
+    assert secret not in out, f"pattern left {label!r}-shaped secret intact: {out!r}"
+    assert "***" in out
+
+
+def test_scrub_applies_exact_then_patterns():
+    known = "EXACTKNOWNSECRETVALUE999"
+    pat = "ghp_" + "Z" * 36
+    out = gitstore.scrub(f"{known} and {pat}", [known])
+    assert known not in out and pat not in out
+    assert out.count("***") >= 2
+
+
+def test_scrub_exact_runtime_env_shaped_values_before_truncate():
+    """scrub() still accepts an exact-secret list (API surface).
+
+    Capture no longer rematerializes live env values into SECRETS_FILE;
+    pattern scrub covers well-known shapes. Tests use fake values only.
+    """
+    fake_zai = "f" * 32 + "." + "FakeZaiKey000001"
+    fake_anthropic = "sk-ant-fake-test-value-not-real-0001"
+    fake_github = "ghp_FakeGitHubTokenForUnitTest000001"
+    # Opaque runtime values that patterns alone would miss (no well-known prefix).
+    fake_opaque = "opaque-runtime-secret-value-XYZ-999"
+    text = f"zai={fake_zai} ant={fake_anthropic} gh={fake_github} op={fake_opaque} TAIL"
+    # Scrub-then-truncate must replace exact values BEFORE cutting.
+    out = gitstore.scrub_then_truncate(
+        text, limit=len(text), secrets=[fake_zai, fake_anthropic, fake_github, fake_opaque]
+    )
+    assert fake_zai not in out
+    assert fake_anthropic not in out
+    assert fake_github not in out
+    assert fake_opaque not in out
+    # Truncation boundary through an opaque secret: leading half must not leak.
+    half = len(fake_opaque) // 2
+    prefix = "p" * 100
+    straddling = prefix + fake_opaque + "END"
+    cut = len(prefix) + half
+    truncated = gitstore.scrub_then_truncate(
+        straddling, limit=cut, secrets=[fake_opaque]
+    )
+    assert fake_opaque not in truncated
+    assert fake_opaque[:half] not in truncated
+
+
+def test_scrub_then_truncate_redacts_before_cutting():
+    # Secret straddles the truncation boundary: truncate-first would leak the
+    # leading half; scrub-first replaces the whole token then cuts.
+    token = "ghp_" + ("Q" * 36)
+    assert len(token) == 40
+    prefix = "x" * 480
+    text = prefix + token + "TAIL"
+    # Boundary at 500 sits 20 chars into the token.
+    assert text[480:500] == token[:20]
+    right = gitstore.scrub_then_truncate(text, 500)
+    assert token not in right
+    assert "ghp_" not in right
+    assert token[:20] not in right
+    # Document the trap: a naive truncate-first still contains the prefix.
+    assert "ghp_" in text[:500]
+
+
 def test_git_reader_primitives(tmp_path):
     """The GitReader surface H3/H4 consume, over a real repo: rev_parse, show, parents, subject,
     committer e-mail/epoch, first_parent_log (with paths, merges by first parent), changed_paths,

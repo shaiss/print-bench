@@ -20,6 +20,7 @@ def _snapshot():
             {
                 "number": 42,
                 "title": "issue 42",
+                "body": "Touches: docs/example.md\n",
                 "createdAt": "2026-08-01T00:00:00Z",
                 "labels": ["autonomy-ok"],
                 "comments": [],
