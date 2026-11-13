@@ -12,7 +12,15 @@ from pathlib import Path
 
 import pytest
 
+from growth.approval_guard import (
+    APPROVAL_LABEL,
+    ApprovalGuardError,
+    assert_body_fresh_for_live,
+    body_edited_after_approval,
+    latest_labeled_at,
+)
 from growth.roottags import (
+    MAX_REQUIRED_HANDLES,
     RootTagsError,
     ensure_root_tags,
     extract_handles,
@@ -115,3 +123,35 @@ def test_roottags_fail_closed_agrees():
         ensure_root_tags(composed, required, drafted=drafted)
     with pytest.raises(server._RootTagsError):
         server._ensure_root_tags(composed, required, drafted=drafted)
+
+
+def test_roottags_handle_cap_agrees():
+    server = _load_server()
+    assert server.MAX_REQUIRED_HANDLES == MAX_REQUIRED_HANDLES
+    tags = " ".join(f"@User{i}" for i in range(MAX_REQUIRED_HANDLES + 1))
+    body = f"## Message\n\nDrafted root {tags}\n"
+    with pytest.raises(RootTagsError, match="cap"):
+        required_handles(body)
+    with pytest.raises(server._RootTagsError, match="cap"):
+        server._required_handles(body)
+
+
+def test_approval_guard_parity_on_stale_and_fresh():
+    server = _load_server()
+    events = [
+        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-02T12:00:00Z"},
+    ]
+    assert server._latest_labeled_at(events) == latest_labeled_at(events)
+    assert server._body_edited_after_approval(
+        "2026-01-02T12:00:00Z", "2026-01-03T00:00:00Z"
+    ) == body_edited_after_approval(
+        "2026-01-02T12:00:00Z", "2026-01-03T00:00:00Z"
+    )
+    assert server._body_edited_after_approval(
+        "2026-01-02T12:00:00Z", None
+    ) == body_edited_after_approval("2026-01-02T12:00:00Z", None)
+    with pytest.raises(ApprovalGuardError):
+        assert_body_fresh_for_live(None, None)
+    with pytest.raises(server._ApprovalGuardError):
+        server._assert_body_fresh_for_live(None, None)

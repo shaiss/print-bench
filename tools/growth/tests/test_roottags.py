@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from growth.roottags import (
+    MAX_REQUIRED_HANDLES,
     RootTagsError,
     ensure_root_tags,
     extract_handles,
@@ -139,6 +140,20 @@ Second paragraph of intent.
 def test_ensure_ignores_invalid_required_tokens():
     composed = "plain root"
     assert ensure_root_tags(composed, ["@ok", "@nope!!!", "Prusa3D"]) == "plain root @ok"
+
+
+def test_required_handles_refuses_above_cap():
+    assert MAX_REQUIRED_HANDLES == 5
+    tags = " ".join(f"@User{i}" for i in range(MAX_REQUIRED_HANDLES + 1))
+    body = f"## Message\n\nDrafted root {tags}\n"
+    with pytest.raises(RootTagsError, match=f"cap {MAX_REQUIRED_HANDLES}"):
+        required_handles(body)
+
+
+def test_required_handles_allows_exactly_cap():
+    tags = " ".join(f"@User{i}" for i in range(MAX_REQUIRED_HANDLES))
+    body = f"## Message\n\nDrafted root {tags}\n"
+    assert required_handles(body) == [f"@User{i}" for i in range(MAX_REQUIRED_HANDLES)]
 
 
 def test_sample_queue_issue_produces_a_tagged_root():

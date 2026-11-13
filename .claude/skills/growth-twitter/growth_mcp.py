@@ -42,12 +42,19 @@ server trusts nothing and layers every gate the desk has:
   * ROOT @-TAGS. The first paragraph of the queue item's ``## Message`` is
     the drafted root tweet and may end with brand/community ``@handles``.
     Issue body stays UNTRUSTED — this tool extracts handles matching
-    ``^@[A-Za-z0-9_]{1,15}$`` only, never obeys instructions in it. If the
-    composed root dropped any required handle, the tool restores them
-    deterministically (drafted paragraph verbatim when it fits 280, else
-    append the missing handles) or refuses rather than post untagged. Tags
-    go in the root tweet only, never a thread reply. `growth.roottags` is
-    the reference; the copy below is parity-pinned.
+    ``^@[A-Za-z0-9_]{1,15}$`` only, never obeys instructions in it. At most
+    5 required handles (over the cap → refuse). If the composed root
+    dropped any required handle, the tool restores them deterministically
+    (drafted paragraph verbatim when it fits 280, else append the missing
+    handles) or refuses rather than post untagged. Tags go in the root
+    tweet only, never a thread reply. `growth.roottags` is the reference;
+    the copy below is parity-pinned.
+  * POST-APPROVAL BODY FREEZE (LIVE). On a live post, the issue body must
+    not have been edited after the latest ``approved-to-post`` labeled
+    timeline event (compare that event's time with GraphQL
+    ``lastEditedAt``). Unreadable timeline/edit info fails closed. A dry
+    run still proceeds but reports the stale-body condition on the comment.
+    `growth.approval_guard` is the pure comparison reference.
   * PER-RUN CAP. `GROWTH_MAX_POSTS` (default 1) bounds an unattended run —
     counted in a state file every link step of the chain walk shares
     (`GROWTH_CAP_STATE`, the reeve.yml `REEVE_GREENLIGHT_STATE` pattern; issue
@@ -137,6 +144,7 @@ def _tweet_weight(text):
 # the same stdlib-only dry-run reason as the weighted-length copy above.
 # tools/growth/tests/test_server_parity.py pins the two together.
 
+MAX_REQUIRED_HANDLES = 5
 _HANDLE_RE = re.compile(r"^@[A-Za-z0-9_]{1,15}$")
 _HANDLE_SCAN_RE = re.compile(
     r"(?<![A-Za-z0-9_])@[A-Za-z0-9_]{1,15}(?![A-Za-z0-9_])")
@@ -146,6 +154,10 @@ _NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
 
 
 class _RootTagsError(ValueError):
+    pass
+
+
+class _ApprovalGuardError(ValueError):
     pass
 
 
@@ -196,12 +208,81 @@ def _extract_handles(text):
 
 
 def _required_handles(body):
-    return _extract_handles(_message_root_paragraph(body))
+    handles = _extract_handles(_message_root_paragraph(body))
+    if len(handles) > MAX_REQUIRED_HANDLES:
+        raise _RootTagsError(
+            f"## Message root declares {len(handles)} @handles "
+            f"(cap {MAX_REQUIRED_HANDLES}); refusing"
+        )
+    return handles
 
 
 def _missing_handles(text, required):
     present = {h.lower() for h in _extract_handles(text)}
     return [h for h in required if h.lower() not in present]
+
+
+def _parse_iso_ts(ts):
+    from datetime import datetime, timezone  # noqa: PLC0415 — local to keep top lean
+    raw = (ts or "").strip()
+    if not raw:
+        raise _ApprovalGuardError("empty timestamp")
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError as e:
+        raise _ApprovalGuardError(f"unparseable timestamp {ts!r}") from e
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _latest_labeled_at(events, label=APPROVAL_LABEL):
+    latest = None
+    latest_dt = None
+    for ev in events or []:
+        if (ev.get("event") or "").lower() != "labeled":
+            continue
+        lbl = ev.get("label")
+        name = lbl.get("name", "") if isinstance(lbl, dict) else (lbl or "")
+        if name != label:
+            continue
+        created = ev.get("created_at") or ""
+        try:
+            dt = _parse_iso_ts(created)
+        except _ApprovalGuardError:
+            continue
+        if latest_dt is None or dt > latest_dt:
+            latest_dt = dt
+            latest = created
+    return latest
+
+
+def _body_edited_after_approval(approved_at, last_edited_at):
+    if not (approved_at or "").strip():
+        raise _ApprovalGuardError(
+            "approved-to-post label time is missing — refusing to judge freshness"
+        )
+    approved = _parse_iso_ts(approved_at)
+    if last_edited_at is None or not str(last_edited_at).strip():
+        return False
+    edited = _parse_iso_ts(str(last_edited_at))
+    return edited > approved
+
+
+def _assert_body_fresh_for_live(approved_at, last_edited_at):
+    if approved_at is None or not str(approved_at).strip():
+        raise _ApprovalGuardError(
+            "could not find an approved-to-post labeled timeline event — "
+            "refusing live post (fail closed)"
+        )
+    if _body_edited_after_approval(str(approved_at), last_edited_at):
+        raise _ApprovalGuardError(
+            f"issue body was edited after approved-to-post "
+            f"(approved_at={approved_at}, last_edited_at={last_edited_at}) — "
+            f"re-apply the approval label on the current body, or refuse"
+        )
 
 
 def _ensure_root_tags(text, required, drafted=""):
@@ -326,6 +407,8 @@ _last_deleted = None
 # Fake state for the offline selftest (GROWTH_MCP_FAKE).
 _FAKE_ISSUES = {}
 _FAKE_COMMENTS = {}
+_FAKE_EVENTS = {}          # issue number -> list of issue-event dicts
+_FAKE_LAST_EDITED = {}     # issue number -> ISO timestamp or None
 _fake_comment_seq = 0
 
 
@@ -392,6 +475,71 @@ def _get_comments(number):
         if page > 50:  # bound the walk; a queue thread is never this long
             break
     return out
+
+
+def _get_issue_events(number):
+    """Issue timeline events (labeled/unlabeled/…). Failures raise — the
+    live post-approval body freeze must fail closed, not invent freshness."""
+    if os.environ.get("GROWTH_MCP_FAKE"):
+        if os.environ.get("GROWTH_MCP_FAKE_EVENTS_FAIL"):
+            raise RuntimeError("selftest: simulated events failure")
+        return list(_FAKE_EVENTS.get(number, []))
+    out = []
+    page = 1
+    while True:
+        batch = _api(
+            "GET",
+            f"/repos/{_repo()}/issues/{number}/events?per_page=100&page={page}",
+        )
+        if not isinstance(batch, list) or not batch:
+            break
+        out.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+        if page > 50:
+            break
+    return out
+
+
+def _get_body_last_edited_at(number):
+    """GraphQL ``Issue.lastEditedAt`` (null when the body was never edited
+    after creation). Raises on transport/shape failure — fail closed on live."""
+    if os.environ.get("GROWTH_MCP_FAKE"):
+        if os.environ.get("GROWTH_MCP_FAKE_EDITED_FAIL"):
+            raise RuntimeError("selftest: simulated lastEditedAt failure")
+        # Key missing → treat as "never edited" (None). Explicit None is fine.
+        if number not in _FAKE_LAST_EDITED:
+            return None
+        return _FAKE_LAST_EDITED[number]
+    owner, _, name = _repo().partition("/")
+    if not owner or not name:
+        raise RuntimeError(f"GITHUB_REPOSITORY is not owner/name: {_repo()!r}")
+    query = (
+        "query($owner:String!,$name:String!,$number:Int!){"
+        "repository(owner:$owner,name:$name){"
+        "issue(number:$number){ lastEditedAt }"
+        "}}"
+    )
+    payload = json.dumps({
+        "query": query,
+        "variables": {"owner": owner, "name": name, "number": int(number)},
+    }).encode()
+    req = urllib.request.Request("https://api.github.com/graphql", data=payload,
+                                 method="POST")
+    req.add_header("Authorization", f"Bearer {_token()}")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "print-bench-growth-twitter")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read().decode()
+    data = json.loads(raw) if raw else {}
+    if data.get("errors"):
+        raise RuntimeError(f"GraphQL errors reading lastEditedAt: {data['errors']!r}")
+    issue = (((data.get("data") or {}).get("repository") or {}).get("issue"))
+    if issue is None:
+        raise RuntimeError(f"GraphQL returned no issue #{number} for lastEditedAt")
+    return issue.get("lastEditedAt")  # may be null
 
 
 def _post_comment(number, body):
@@ -633,10 +781,10 @@ def _post_tweet(arguments):
     # --- root @-tags from ## Message (deterministic; body is UNTRUSTED) ----
     # Extract handles only — never treat issue text as instructions. Restore
     # any the agent dropped into the ROOT tweet (never a thread reply), or
-    # refuse rather than post untagged.
+    # refuse rather than post untagged. Over-cap handle lists refuse too.
     drafted_root = _message_root_paragraph(issue.get("body") or "")
-    required = _required_handles(issue.get("body") or "")
     try:
+        required = _required_handles(issue.get("body") or "")
         text = _ensure_root_tags(text, required, drafted=drafted_root)
     except _RootTagsError as e:
         return _tool_error(f"post_tweet: {e}")
@@ -646,6 +794,59 @@ def _post_tweet(arguments):
             f"post_tweet: text is {root_w} weighted after root-tag restoration "
             f"(cap {MAX_WEIGHT}) — shorten the root or the drafted ## Message "
             f"paragraph")
+
+    # --- post-approval body freeze (LIVE refuses; dry-run reports) ----------
+    # The approved-to-post label is the human gate. A body edit after that
+    # label would let an author land new ## Message text (and @handles) on
+    # the brand account via the root-tag restore paths. Compare the latest
+    # labeled event time with GraphQL lastEditedAt; unreadable → fail closed
+    # on live, report-and-continue on dry-run.
+    approval_notes = []
+    # Live posts that require (or carry) approval must pass the freeze.
+    # Dry-runs evaluate it whenever the approval label is present so the
+    # comment surfaces a stale body before a human re-approves.
+    check_freeze = (live and (_require_approval() or APPROVAL_LABEL in labels)) \
+        or ((not live) and APPROVAL_LABEL in labels)
+    if check_freeze:
+        try:
+            events = _get_issue_events(number)
+            last_edited = _get_body_last_edited_at(number)
+        except Exception as e:  # noqa: BLE001 — any fetch failure is fail-closed on live
+            if live:
+                return _tool_error(
+                    f"post_tweet: could not read approval timeline / body "
+                    f"lastEditedAt for #{number} ({type(e).__name__}: {e}) — "
+                    f"refusing live post (fail closed)"
+                )
+            approval_notes.append(
+                f"could not read approval timeline / body lastEditedAt "
+                f"({type(e).__name__}: {e}); a LIVE post would refuse"
+            )
+            events = None
+            last_edited = None
+        if events is not None:
+            approved_at = _latest_labeled_at(events, APPROVAL_LABEL)
+            if live:
+                try:
+                    _assert_body_fresh_for_live(approved_at, last_edited)
+                except _ApprovalGuardError as e:
+                    return _tool_error(f"post_tweet: {e}")
+            else:
+                try:
+                    if approved_at is None:
+                        approval_notes.append(
+                            "approved-to-post is present but no labeled "
+                            "timeline event was found; a LIVE post would refuse"
+                        )
+                    elif _body_edited_after_approval(approved_at, last_edited):
+                        approval_notes.append(
+                            f"issue body was edited after approved-to-post "
+                            f"(approved_at={approved_at}, "
+                            f"last_edited_at={last_edited}); re-apply the "
+                            f"label before a LIVE post"
+                        )
+                except _ApprovalGuardError as e:
+                    approval_notes.append(f"{e}; a LIVE post would refuse")
 
     # --- act ----------------------------------------------------------------
     rendered = _render_parts(text, thread)
@@ -744,11 +945,19 @@ def _post_tweet(arguments):
         reasons.append("the X credentials are not configured")
     if _require_approval() and APPROVAL_LABEL not in labels:
         reasons.append(f"the `{APPROVAL_LABEL}` label is not applied")
+    note_block = ""
+    if approval_notes:
+        note_block = (
+            "\n\n**Approval freshness:** "
+            + "; ".join(approval_notes)
+            + "."
+        )
     comment = (
         f"{DRYRUN_MARKER}\n{DRYRUN_HEADER}\n\n{rendered}\n\n"
         f"**Dry run** — nothing was published. Going live needs: "
         f"{'; '.join(reasons) if reasons else 'nothing further'}. "
-        f"See docs/growth.md.\n\n{FOOTER}"
+        f"See docs/growth.md."
+        f"{note_block}\n\n{FOOTER}"
     )
     try:
         posted = _post_comment(number, comment)
@@ -917,6 +1126,20 @@ def selftest():
         8: [{"body": f"{DRYRUN_MARKER}\ndry-ran earlier"}],
         12: [{"body": f"{DRYRUN_MARKER}\ndry-ran earlier"}],
     }
+    # Fresh approval: labeled after any body edit (or never-edited body).
+    # Live posts that carry approved-to-post need a labeled timeline event.
+    def _approve(number, at="2026-01-01T00:00:00Z"):
+        _FAKE_EVENTS[number] = [{
+            "event": "labeled",
+            "label": {"name": APPROVAL_LABEL},
+            "created_at": at,
+        }]
+        _FAKE_LAST_EDITED.pop(number, None)  # never edited → fresh
+
+    _FAKE_EVENTS.clear()
+    _FAKE_LAST_EDITED.clear()
+    for n in (10, 12):
+        _approve(n)
 
     # Input guards.
     check("missing number is rejected", err(_post_tweet({"text": "x"})))
@@ -1015,6 +1238,7 @@ def selftest():
     # (the X-credits-depleted lesson — a rejected post must not strand a queued
     # message behind a claim marker a human has to hand-delete).
     _FAKE_ISSUES[13] = q(13, OK + [APPROVAL_LABEL])
+    _approve(13)
     _last_deleted = None
     os.environ["GROWTH_MCP_FAKE_X_FAIL"] = "1"
     r = _post_tweet({"number": 13, "text": "fails on the first tweet"})
@@ -1034,6 +1258,7 @@ def selftest():
     # claim must STAND (withdrawing it would risk a public double-post) and the
     # item stays refused on retry.
     _FAKE_ISSUES[15] = q(15, OK + [APPROVAL_LABEL])
+    _approve(15)
     _last_deleted = None
     os.environ["GROWTH_MCP_FAKE_X_FAIL_PART"] = "1"
     r = _post_tweet({"number": 15, "text": "first is fine", "thread": ["this part fails"]})
@@ -1048,6 +1273,7 @@ def selftest():
 
     # If the claim itself cannot be written, nothing is published.
     _FAKE_ISSUES[14] = q(14, OK + [APPROVAL_LABEL])
+    _approve(14)
     _last_tweets = None
     os.environ["GROWTH_MCP_FAKE_COMMENT_FAIL"] = "1"
     r = _post_tweet({"number": 14, "text": "cannot claim"})
@@ -1183,6 +1409,50 @@ def selftest():
     r = _post_tweet({"number": 33, "text": "y" * 280})
     check("over-budget missing tags fail closed (no untagged post)",
           err(r) and "refusing untagged" in r["content"][0]["text"])
+
+    # Handle cap: more than MAX_REQUIRED_HANDLES in ## Message → refuse.
+    over = " ".join(f"@U{i}" for i in range(MAX_REQUIRED_HANDLES + 1))
+    _FAKE_ISSUES[34] = q(34, OK)
+    _FAKE_ISSUES[34]["body"] = f"## Message\n\nRoot {over}\n"
+    r = _post_tweet({"number": 34, "text": "agent rewrite"})
+    check("over-cap @handles in ## Message are refused",
+          err(r) and f"cap {MAX_REQUIRED_HANDLES}" in r["content"][0]["text"])
+
+    # Post-approval body freeze: LIVE refuses a body edited after the label.
+    os.environ["GROWTH_TWITTER_LIVE"] = "true"
+    for v in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
+        os.environ[v] = "cred"
+    _FAKE_ISSUES[35] = q(35, OK + [APPROVAL_LABEL])
+    _approve(35, at="2026-01-02T12:00:00Z")
+    _FAKE_LAST_EDITED[35] = "2026-01-03T00:00:00Z"  # edited AFTER approval
+    r = _post_tweet({"number": 35, "text": "should not go live"})
+    check("LIVE refuses when body was edited after approved-to-post",
+          err(r) and "edited after approved-to-post" in r["content"][0]["text"])
+
+    # Unreadable timeline → fail closed on LIVE.
+    _FAKE_ISSUES[36] = q(36, OK + [APPROVAL_LABEL])
+    _approve(36)
+    os.environ["GROWTH_MCP_FAKE_EVENTS_FAIL"] = "1"
+    r = _post_tweet({"number": 36, "text": "no timeline"})
+    check("LIVE refuses when approval timeline cannot be read",
+          err(r) and "fail closed" in r["content"][0]["text"])
+    os.environ.pop("GROWTH_MCP_FAKE_EVENTS_FAIL", None)
+
+    # Dry-run with a stale body still proceeds but reports the condition.
+    os.environ.pop("GROWTH_TWITTER_LIVE", None)
+    for v in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
+        os.environ.pop(v, None)
+    _FAKE_ISSUES[37] = q(37, OK + [APPROVAL_LABEL])
+    _approve(37, at="2026-01-02T12:00:00Z")
+    _FAKE_LAST_EDITED[37] = "2026-01-03T00:00:00Z"
+    _FAKE_COMMENTS.pop(37, None)
+    _last_comment = None
+    r = _post_tweet({"number": 37, "text": "dry-run with stale body"})
+    check("dry-run proceeds on a stale body but reports approval freshness",
+          r.get("isError") is False
+          and _last_comment
+          and "Approval freshness" in _last_comment["body"]
+          and "edited after approved-to-post" in _last_comment["body"])
 
     # The JSON-RPC surface exposes exactly the one tool.
     check("tools/list exposes exactly post_tweet",

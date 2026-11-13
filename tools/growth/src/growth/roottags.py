@@ -20,6 +20,12 @@ Recovery order when the composed root is missing any required handle:
 Tags belong in the root tweet only; callers must never apply this to a
 thread reply. Handles must match ``^@[A-Za-z0-9_]{1,15}$`` (X's screen-name
 shape); anything else in the paragraph is ignored, not trusted as a tag.
+
+A drafted root may declare at most :data:`MAX_REQUIRED_HANDLES` valid
+handles; more than that is refused (an unbounded tag list is an injection
+surface via the append/verbatim paths). Live posting additionally requires
+the issue body not to have been edited after ``approved-to-post`` — see
+:mod:`growth.approval_guard`.
 """
 
 from __future__ import annotations
@@ -27,6 +33,11 @@ from __future__ import annotations
 import re
 
 from .tweetlen import MAX_WEIGHT, tweet_weight
+
+# Hard cap on @handles required from ## Message's first paragraph. Above this
+# the posting tool refuses — never silently truncates (truncation would drop
+# tags the draft declared).
+MAX_REQUIRED_HANDLES = 5
 
 HANDLE_RE = re.compile(r"^@[A-Za-z0-9_]{1,15}$")
 # Token scan: @handle bounded so ``user@host`` emails and longer tokens
@@ -39,7 +50,7 @@ _NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
 
 
 class RootTagsError(ValueError):
-    """The root tweet cannot carry every required @handle within 280 weight."""
+    """Required handles over cap, or cannot fit every @handle within 280 weight."""
 
 
 def message_root_paragraph(body: str | None) -> str:
@@ -100,8 +111,18 @@ def extract_handles(text: str | None) -> list[str]:
 
 
 def required_handles(body: str | None) -> list[str]:
-    """Handles the root tweet must carry, from ``## Message``'s first paragraph."""
-    return extract_handles(message_root_paragraph(body))
+    """Handles the root tweet must carry, from ``## Message``'s first paragraph.
+
+    Raises :class:`RootTagsError` when the draft declares more than
+    :data:`MAX_REQUIRED_HANDLES` valid handles (refuse, never truncate).
+    """
+    handles = extract_handles(message_root_paragraph(body))
+    if len(handles) > MAX_REQUIRED_HANDLES:
+        raise RootTagsError(
+            f"## Message root declares {len(handles)} @handles "
+            f"(cap {MAX_REQUIRED_HANDLES}); refusing"
+        )
+    return handles
 
 
 def _present(text: str, handle: str) -> bool:
