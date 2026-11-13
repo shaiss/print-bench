@@ -199,10 +199,17 @@ def extract_urls(text: str | None) -> list[str]:
 
 
 def count_posted_mentions(text: str | None) -> int:
-    """Mention-shaped tokens after NFKC, counting ``@``/``＠``/``＠`` + any
-    length of ``[A-Za-z0-9_]``. Used for the posted-text cap."""
+    """Mention-shaped tokens after NFKC, counting ``@``/``＠``/``﹫`` + any
+    length of ``[A-Za-z0-9_]``. URL-path ``@`` (e.g. YouTube ``/@user``) is
+    skipped — X does not treat those as mentions. Used for the posted-text
+    cap."""
     nfkc = unicodedata.normalize("NFKC", text or "")
-    return len(_POSTED_MENTION_RE.findall(nfkc))
+    spans = _url_spans(nfkc)
+    return sum(
+        1
+        for m in _POSTED_MENTION_RE.finditer(nfkc)
+        if not _in_spans(m.start(), spans)
+    )
 
 
 def assert_postable_text(text: str | None) -> str:

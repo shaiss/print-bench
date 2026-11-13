@@ -224,7 +224,17 @@ def _parse_message_digest(comment_body):
 
 def _count_posted_mentions(text):
     nfkc = unicodedata.normalize("NFKC", text or "")
-    return len(_POSTED_MENTION_RE.findall(nfkc))
+    url_spans = [(m.start(), m.end()) for m in _URL_RE.finditer(nfkc)]
+
+    def in_url(pos):
+        for lo, hi in url_spans:
+            if lo <= pos < hi:
+                return True
+        return False
+
+    return sum(
+        1 for m in _POSTED_MENTION_RE.finditer(nfkc) if not in_url(m.start())
+    )
 
 
 def _assert_postable_text(text):

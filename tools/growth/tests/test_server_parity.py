@@ -186,6 +186,9 @@ def test_posted_mention_and_fullwidth_gates_agree():
         "plain",
         "@a @b @c",
         "x" * 40,
+        "@a @b https://www.youtube.com/@CNC_Kitchen @c",
+        " ".join(f"@U{i}" for i in range(5))
+        + " https://www.youtube.com/@CNC_Kitchen",
     ):
         assert server._count_posted_mentions(text) == count_posted_mentions(text)
         assert server._assert_postable_text(text) == assert_postable_text(text)

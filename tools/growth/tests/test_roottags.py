@@ -287,6 +287,18 @@ def test_count_posted_mentions_nfkc_folds_fullwidth():
     assert count_posted_mentions("@a @b @c") == 3
 
 
+def test_count_posted_mentions_skips_url_path_ats():
+    """YouTube /@user is not a mention — must not inflate the posted cap."""
+    five = " ".join(f"@U{i}" for i in range(5))
+    text = f"{five} https://www.youtube.com/@CNC_Kitchen"
+    assert count_posted_mentions(text) == 5
+    # Still postable at the cap (URL @ ignored).
+    assert assert_postable_text(text) == text
+    # A sixth real mention still refuses.
+    with pytest.raises(RootTagsError, match=f"cap {MAX_REQUIRED_HANDLES}"):
+        assert_postable_text(f"{text} @Extra")
+
+
 def test_assert_postable_text_refuses_fullwidth_before_count():
     with pytest.raises(RootTagsError, match="U\\+FF20"):
         assert_postable_text("x \uff20Y")
