@@ -8,18 +8,28 @@ network data and acts):
   lines* are exactly the dry-run marker and the ``message-digest`` line,
   authored by ``github-actions[bot]`` with ``type == "Bot"``, never edited
   (``updated_at == created_at``). The old marker-only format is never
-  trusted. Markers mid-body are never trusted.
+  trusted. Markers mid-body are never trusted. The digest binds the
+  NFKC ``## Message`` first paragraph (the drafted root); live copy may
+  be recomposed under the length, tag, and approval gates.
 
 * **Exactly-one rule** — there must be **exactly one** trusted preview
   whose ``created_at`` is **strictly later** than GraphQL ``lastEditedAt``
   (when ``lastEditedAt`` is null, every trusted preview qualifies). Zero
   → missing (caller may self-migrate). More than one → refuse on
-  ambiguity (a human deletes extras before re-approving).
+  ambiguity (a human deletes extras before re-approving). A digest
+  mismatch on that sole preview is refuse (``digest mismatch without
+  edit``) — never a second preview, which would leave the item stuck
+  on ambiguity.
 
-* **Human approval** — a ``labeled`` event for ``approved-to-post`` counts
-  only when ``actor.login`` is on the allowlist, ``actor.type == "User"``,
-  and ``created_at`` is strictly later than the trusted preview's
-  ``created_at``. Empty allowlist → fail closed.
+* **Human approval** — take the **latest** ``labeled`` event for
+  ``approved-to-post`` overall (any actor). That event must be by an
+  allowlisted User (``GROWTH_APPROVER_LOGINS``), strictly after the
+  trusted preview **and** after the bot's own most recent removal of
+  the label, with no ``unlabeled`` event for the label after it. When
+  ``GROWTH_REQUIRE_DIRECT_HUMAN_LABEL`` is true (anything but the
+  literal ``false``), ``performed_via_github_app`` must be null so an
+  app/agent acting as the user does not count. Empty allowlist → fail
+  closed.
 
 * **Body freeze** — ``lastEditedAt`` must not be after that human
   approval timestamp.
@@ -33,7 +43,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, timezone
 
-from .roottags import DRYRUN_MARKER, message_digest, parse_message_digest
+from .roottags import message_digest, parse_message_digest
 
 APPROVAL_LABEL = "approved-to-post"
 # REST GITHUB_TOKEN comments are exactly this login + type. GraphQL's bare
@@ -41,6 +51,7 @@ APPROVAL_LABEL = "approved-to-post"
 # surface); only the Bot account that writes issue comments via REST.
 TRUSTED_PREVIEW_LOGIN = "github-actions[bot]"
 TRUSTED_PREVIEW_TYPE = "Bot"
+DIRECT_HUMAN_LABEL_ENV = "GROWTH_REQUIRE_DIRECT_HUMAN_LABEL"
 
 
 class ApprovalGuardError(ValueError):
@@ -70,11 +81,21 @@ def _parse_iso(ts: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _event_label_name(ev: dict) -> str:
+    lbl = ev.get("label")
+    return lbl.get("name", "") if isinstance(lbl, dict) else (lbl or "")
+
+
 def parse_approver_allowlist(raw: str | None) -> frozenset[str]:
     """Comma-separated logins from ``GROWTH_APPROVER_LOGINS``. Empty → empty set."""
     if raw is None:
         return frozenset()
     return frozenset(p.strip() for p in raw.split(",") if p.strip())
+
+
+def parse_require_direct_human_label(raw: str | None) -> bool:
+    """``GROWTH_REQUIRE_DIRECT_HUMAN_LABEL`` — anything but exact ``false`` → True."""
+    return (raw or "").strip() != "false"
 
 
 def latest_labeled_at(events: list[dict], label: str = APPROVAL_LABEL) -> str | None:
@@ -88,9 +109,7 @@ def latest_labeled_at(events: list[dict], label: str = APPROVAL_LABEL) -> str | 
     for ev in events or []:
         if (ev.get("event") or "").lower() != "labeled":
             continue
-        lbl = ev.get("label")
-        name = lbl.get("name", "") if isinstance(lbl, dict) else (lbl or "")
-        if name != label:
+        if _event_label_name(ev) != label:
             continue
         created = ev.get("created_at") or ""
         try:
@@ -101,6 +120,79 @@ def latest_labeled_at(events: list[dict], label: str = APPROVAL_LABEL) -> str | 
             latest_dt = dt
             latest = created
     return latest
+
+
+def latest_labeled_event(
+    events: list[dict], label: str = APPROVAL_LABEL
+) -> dict | None:
+    """The most recent ``labeled`` event for *label* (any actor), or None."""
+    latest: dict | None = None
+    latest_dt: datetime | None = None
+    for ev in events or []:
+        if (ev.get("event") or "").lower() != "labeled":
+            continue
+        if _event_label_name(ev) != label:
+            continue
+        created = ev.get("created_at") or ""
+        try:
+            dt = _parse_iso(created)
+        except ApprovalGuardError:
+            continue
+        if latest_dt is None or dt > latest_dt:
+            latest_dt = dt
+            latest = ev
+    return latest
+
+
+def latest_bot_removal_at(
+    events: list[dict], label: str = APPROVAL_LABEL
+) -> datetime | None:
+    """``created_at`` of the bot's most recent ``unlabeled`` of *label*.
+
+    Only ``github-actions[bot]`` / ``type=Bot`` removals count — the LIVE
+    self-migrate path's own label removal.
+    """
+    latest_dt: datetime | None = None
+    for ev in events or []:
+        if (ev.get("event") or "").lower() != "unlabeled":
+            continue
+        if _event_label_name(ev) != label:
+            continue
+        actor = ev.get("actor") or {}
+        if not isinstance(actor, dict):
+            continue
+        if actor.get("login") != TRUSTED_PREVIEW_LOGIN:
+            continue
+        if actor.get("type") != TRUSTED_PREVIEW_TYPE:
+            continue
+        created = ev.get("created_at") or ""
+        try:
+            dt = _parse_iso(created)
+        except ApprovalGuardError:
+            continue
+        if latest_dt is None or dt > latest_dt:
+            latest_dt = dt
+    return latest_dt
+
+
+def _has_unlabeled_after(
+    events: list[dict],
+    after: datetime,
+    label: str = APPROVAL_LABEL,
+) -> bool:
+    for ev in events or []:
+        if (ev.get("event") or "").lower() != "unlabeled":
+            continue
+        if _event_label_name(ev) != label:
+            continue
+        created = ev.get("created_at") or ""
+        try:
+            dt = _parse_iso(created)
+        except ApprovalGuardError:
+            continue
+        if dt > after:
+            return True
+    return False
 
 
 def body_edited_after_approval(
@@ -216,11 +308,17 @@ def latest_human_approval_at(
     preview_created_at: str,
     approver_logins: Iterable[str],
     label: str = APPROVAL_LABEL,
+    require_direct_human_label: bool = True,
 ) -> str:
-    """``created_at`` of the latest allowlisted User ``labeled`` event after the preview.
+    """Validate the latest ``labeled`` event overall as a live human approval.
 
-    Empty *approver_logins* fails closed. Bot actors and non-allowlisted
-    logins are ignored. Events at or before the preview are ignored.
+    Takes the **latest** ``approved-to-post`` labeled event (any actor). That
+    event must be an allowlisted User, strictly after the trusted preview
+    and after the bot's most recent removal of the label, with no unlabeled
+    event after it. When *require_direct_human_label*,
+    ``performed_via_github_app`` must be null/absent.
+
+    Empty *approver_logins* fails closed.
     """
     allow = frozenset(a for a in approver_logins if a)
     if not allow:
@@ -228,40 +326,60 @@ def latest_human_approval_at(
             "GROWTH_APPROVER_LOGINS is empty — refusing live post (fail closed)"
         )
     preview_dt = _parse_iso(preview_created_at)
-    latest: str | None = None
-    latest_dt: datetime | None = None
-    for ev in events or []:
-        if (ev.get("event") or "").lower() != "labeled":
-            continue
-        lbl = ev.get("label")
-        name = lbl.get("name", "") if isinstance(lbl, dict) else (lbl or "")
-        if name != label:
-            continue
-        actor = ev.get("actor") or {}
-        if not isinstance(actor, dict):
-            continue
-        if actor.get("type") != "User":
-            continue
-        login = actor.get("login") or ""
-        if login not in allow:
-            continue
-        created = ev.get("created_at") or ""
-        try:
-            dt = _parse_iso(created)
-        except ApprovalGuardError:
-            continue
-        if dt <= preview_dt:
-            continue
-        if latest_dt is None or dt > latest_dt:
-            latest_dt = dt
-            latest = created
+    latest = latest_labeled_event(events, label=label)
     if latest is None:
         raise ApprovalGuardError(
-            "no allowlisted User approved-to-post label event after the "
+            "no approved-to-post labeled timeline event — refusing live post "
+            "(fail closed)"
+        )
+    created = latest.get("created_at") or ""
+    try:
+        labeled_dt = _parse_iso(created)
+    except ApprovalGuardError as e:
+        raise ApprovalGuardError(
+            "latest approved-to-post labeled event has an unreadable "
+            "created_at — refusing live post (fail closed)"
+        ) from e
+
+    actor = latest.get("actor") or {}
+    if not isinstance(actor, dict) or actor.get("type") != "User":
+        raise ApprovalGuardError(
+            "latest approved-to-post label event is not by a User actor — "
+            "refusing live post (fail closed)"
+        )
+    login = actor.get("login") or ""
+    if login not in allow:
+        raise ApprovalGuardError(
+            f"latest approved-to-post label event is by {login!r}, not an "
+            f"allowlisted User — refusing live post (fail closed)"
+        )
+    if labeled_dt <= preview_dt:
+        raise ApprovalGuardError(
+            "latest approved-to-post label event is not strictly after the "
             "trusted preview — a human must re-apply the label after the "
             "preview; refusing live post (fail closed)"
         )
-    return latest
+    bot_removal = latest_bot_removal_at(events, label=label)
+    if bot_removal is not None and labeled_dt <= bot_removal:
+        raise ApprovalGuardError(
+            "latest approved-to-post label event is not strictly after the "
+            "bot's most recent removal of the label — a human must re-apply "
+            "after the preview self-migrate; refusing live post (fail closed)"
+        )
+    if _has_unlabeled_after(events, labeled_dt, label=label):
+        raise ApprovalGuardError(
+            "approved-to-post was unlabeled after the latest labeled event "
+            "(stale or revoked approval) — refusing live post (fail closed)"
+        )
+    if require_direct_human_label:
+        via_app = latest.get("performed_via_github_app")
+        if via_app is not None:
+            raise ApprovalGuardError(
+                "latest approved-to-post label was performed via a GitHub "
+                "App (GROWTH_REQUIRE_DIRECT_HUMAN_LABEL) — refusing live "
+                "post (fail closed)"
+            )
+    return created
 
 
 def assert_digest_binds(
@@ -273,9 +391,10 @@ def assert_digest_binds(
     """Exactly one trusted preview after last edit, digest matches *body*.
 
     Returns ``(digest_hex, preview_comment)``. Raises
-    :class:`PreviewMigrationNeeded` when zero trusted previews (or the one
-    present has a mismatched digest — treated as migration). Raises
-    :class:`ApprovalGuardError` on ambiguity or unreadable timestamps.
+    :class:`PreviewMigrationNeeded` when zero trusted previews. Raises
+    :class:`ApprovalGuardError` on ambiguity, unreadable timestamps, or
+    digest mismatch (``digest mismatch without edit`` — do not write a
+    second preview).
     """
     try:
         preview = exactly_one_trusted_preview(comments, last_edited_at)
@@ -290,10 +409,11 @@ def assert_digest_binds(
         )
     expected = message_digest(body)
     if digest != expected:
-        raise PreviewMigrationNeeded(
-            f"trusted preview message-digest {digest} does not match current "
-            f"## Message first paragraph ({expected}) — write a fresh preview "
-            f"and remove approved-to-post (self-migrate)"
+        raise ApprovalGuardError(
+            f"digest mismatch without edit: trusted preview message-digest "
+            f"{digest} does not match current ## Message first paragraph "
+            f"({expected}) — refusing (fail closed); do not create a second "
+            f"preview"
         )
     return digest, preview
 
@@ -304,6 +424,8 @@ def assert_live_gates(
     events: list[dict],
     last_edited_at: str | None,
     approver_logins: Iterable[str],
+    *,
+    require_direct_human_label: bool = True,
 ) -> tuple[str, str, dict]:
     """Full LIVE gate: preview bind + human approval after preview + freeze.
 
@@ -322,6 +444,7 @@ def assert_live_gates(
         events,
         preview_created_at=preview_created,
         approver_logins=approver_logins,
+        require_direct_human_label=require_direct_human_label,
     )
     assert_body_fresh_for_live(approved_at, last_edited_at)
     return digest, approved_at, preview

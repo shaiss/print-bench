@@ -16,11 +16,18 @@ would-be tweet lands as a comment on the queue issue for a human to read —
 and a live post additionally requires the live key AND the preview →
 re-label → post loop the tool enforces: a trusted bot preview comment
 (marker + `message-digest` of the NFKC `## Message` first paragraph as the
-first two lines) that matches the current body, then a human on
-`GROWTH_APPROVER_LOGINS` re-applies `approved-to-post` **after** that
-preview, with the body freeze still clean. If LIVE finds no matching
-preview it writes one and removes the approval label (never adds labels)
-instead of posting — review the preview, re-apply the label, run again.
+first two lines — that paragraph is what the digest binds; live copy may
+be recomposed under the length, tag, and approval gates) that matches the
+current body, then the **latest** `approved-to-post` labeled event overall
+must be a human on `GROWTH_APPROVER_LOGINS` (and, when
+`GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true, not via a GitHub App)
+strictly **after** that preview and after the bot's own most recent
+removal of the label, with the body freeze still clean. If LIVE finds no
+trusted preview it writes one and removes the approval label (never adds
+labels) instead of posting — that self-migrate does **not** consume the
+run's post slot. On a LIVE run: first preview-migrate every approved item
+that needs one (up to 60), then post at most `GROWTH_MAX_POSTS` among
+items that pass every gate.
 
 ## The one boundary you may never cross
 
@@ -193,15 +200,19 @@ The scheduled workflow hands you the queue issue numbers it selected (its
 trusted Select step, bound into the posting tool's candidate set), oldest
 first with `priority:high` items ahead — that order is policy
 (tools/growth's drain rule), keep it. Post at most as many items as the
-run's cap (`GROWTH_MAX_POSTS`, normally 1). For each item, in order:
+run's cap (`GROWTH_MAX_POSTS`, normally 1). On a **LIVE** run, first
+preview-migrate every approved item that needs a trusted preview (the
+tool writes the preview and removes `approved-to-post`; that does not
+consume the post slot), then post at most the cap among items that
+already pass every gate. For each item, in order:
 
 1. **Read the queue item** from `.growth-context/<n>/issue.md`. Skip it if
    it is not a twitter item, is parked `needs-decision`, or already carries a
    **posted** marker comment (the tool refuses all of those anyway). A
    **dry-run** marker is different: in dry-run mode it means this item is
    done for now (the tool refuses a second dry-run), but on a LIVE run an
-   old dry-run comment plus the `approved-to-post` label is exactly the item
-   you are here to post — the dry-run comment is what the human approved.
+   old dry-run / preview comment plus the `approved-to-post` label is
+   exactly the item you are here to post — when the digest matches.
 2. **Verify the facts you will use.** Each claim in your copy must trace to
    the item's Facts & sources or a committed file you opened this run. A
    fact you could not verify does not go in the tweet — compose from what
@@ -210,14 +221,20 @@ run's cap (`GROWTH_MAX_POSTS`, normally 1). For each item, in order:
    from the first paragraph of `## Message` in the **root** tweet, the
    item's Link, thread only if the message needs it. Prefer keeping the
    drafted root paragraph's tags in place; the tool will restore or refuse
-   if they go missing, but the dry-run should already show a tagged root.
+   if they go missing. The preview shows the recomposed copy under the
+   gates; the digest binds the drafted `## Message` first paragraph, not
+   an exact published string.
 4. **Post it**: `post_tweet({ number: <n>, text, thread? })`. Dry-run mode
    (the default until a human arms live) leaves the would-be tweet as a
    comment on the queue issue — that comment IS your deliverable; tell the
-   human it is there. A refusal (unapproved for live, duplicate, over
-   weight, missing root tags that cannot fit, out of set) is final for this
-   run — fix what it names or move on; never retry the same call unchanged.
-5. **Report** one line per item: posted live / dry-ran / skipped and why.
+   human it is there. LIVE without a trusted preview self-migrates
+   (preview + remove label) without burning the post slot — continue to
+   the next item. A refusal (unapproved for live, duplicate, over weight,
+   missing root tags that cannot fit, out of set, digest mismatch without
+   edit) is final for this run — fix what it names or move on; never retry
+   the same call unchanged.
+5. **Report** one line per item: posted live / dry-ran / preview-migrated /
+   skipped and why.
 
 Attended (`/growth-twitter [issue-numbers]`), the same procedure applies —
 without the workflow's candidate binding the tool still re-reads and

@@ -20,9 +20,12 @@ from growth.approval_guard import (
     TRUSTED_PREVIEW_TYPE,
     assert_body_fresh_for_live,
     assert_digest_binds,
+    assert_live_gates,
     body_edited_after_approval,
+    latest_human_approval_at,
     latest_labeled_at,
     latest_trusted_dryrun_digest,
+    parse_require_direct_human_label,
 )
 from growth.roottags import (
     DRYRUN_MARKER,
@@ -258,3 +261,81 @@ def test_digest_bind_parity():
         assert_digest_binds([], body)
     with pytest.raises(server._PreviewMigrationNeeded):
         server._assert_digest_binds([], body)
+    # Digest mismatch on an existing trusted preview → refuse, both sides.
+    stale = [{
+        "body": f"{DRYRUN_MARKER}\n{digest_comment_line('## Message\\n\\nOld\\n')}\n",
+        "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
+        "created_at": "2026-01-01T10:00:00Z",
+        "updated_at": "2026-01-01T10:00:00Z",
+    }]
+    with pytest.raises(ApprovalGuardError, match="digest mismatch without edit"):
+        assert_digest_binds(stale, body)
+    with pytest.raises(server._ApprovalGuardError, match="digest mismatch without edit"):
+        server._assert_digest_binds(stale, body)
+
+
+def test_approval_latest_event_and_direct_human_parity():
+    server = _load_server()
+    preview_at = "2026-01-01T10:00:00Z"
+    # Gap approval + bot removal + non-allowlisted re-add.
+    events = [
+        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T11:00:00Z",
+         "actor": {"login": "shaiss", "type": "User"}},
+        {"event": "unlabeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T12:00:00Z",
+         "actor": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE}},
+        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T13:00:00Z",
+         "actor": {"login": "other", "type": "User"}},
+    ]
+    with pytest.raises(ApprovalGuardError, match="not an allowlisted User"):
+        latest_human_approval_at(
+            events, preview_created_at=preview_at, approver_logins=["shaiss"]
+        )
+    with pytest.raises(server._ApprovalGuardError, match="not an allowlisted User"):
+        server._latest_human_approval_at(events, preview_at, ["shaiss"])
+    # Direct-human flag parity.
+    assert parse_require_direct_human_label("false") == (
+        server._parse_require_direct_human_label("false")
+    )
+    assert parse_require_direct_human_label("true") == (
+        server._parse_require_direct_human_label("true")
+    )
+    via = [{"event": "labeled", "label": {"name": APPROVAL_LABEL},
+            "created_at": "2026-01-01T12:00:00Z",
+            "actor": {"login": "shaiss", "type": "User"},
+            "performed_via_github_app": {"id": 1, "slug": "x"}}]
+    with pytest.raises(ApprovalGuardError, match="GitHub App"):
+        latest_human_approval_at(
+            via, preview_created_at=preview_at, approver_logins=["shaiss"],
+            require_direct_human_label=True,
+        )
+    with pytest.raises(server._ApprovalGuardError, match="GitHub App"):
+        server._latest_human_approval_at(
+            via, preview_at, ["shaiss"], require_direct_human_label=True
+        )
+    assert latest_human_approval_at(
+        via, preview_created_at=preview_at, approver_logins=["shaiss"],
+        require_direct_human_label=False,
+    ) == server._latest_human_approval_at(
+        via, preview_at, ["shaiss"], require_direct_human_label=False
+    )
+    # Happy-path live gates agree.
+    body = "## Message\n\nBound @Prusa3D\n"
+    comments = [{
+        "body": f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\n",
+        "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
+        "created_at": preview_at,
+        "updated_at": preview_at,
+    }]
+    ok_events = [{
+        "event": "labeled", "label": {"name": APPROVAL_LABEL},
+        "created_at": "2026-01-01T12:00:00Z",
+        "actor": {"login": "shaiss", "type": "User"},
+    }]
+    assert assert_live_gates(
+        comments, body, ok_events, None, ["shaiss"]
+    ) == server._assert_live_gates(
+        comments, body, ok_events, None, ["shaiss"]
+    )

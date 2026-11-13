@@ -104,6 +104,12 @@ DIGEST_LINE_RE = re.compile(
 TRUSTED_PREVIEW_LOGIN = "github-actions[bot]"
 TRUSTED_PREVIEW_TYPE = "Bot"
 APPROVER_LOGINS_ENV = "GROWTH_APPROVER_LOGINS"
+DIRECT_HUMAN_LABEL_ENV = "GROWTH_REQUIRE_DIRECT_HUMAN_LABEL"
+# Cap-state outcomes that do NOT consume the run's post slot.
+_CAP_NON_CONSUMING_OUTCOMES = frozenset({"preview-migrate"})
+# LIVE self-migrate may preview many approved items per run; posts still
+# honor GROWTH_MAX_POSTS / max_posts_per_run.
+MAX_PREVIEWS_PER_RUN = 60
 DRYRUN_HEADER = "## \U0001F426 Growth dry run — what Lark would have posted"
 PREVIEW_HEADER = "## \U0001F426 Growth preview — re-apply approved-to-post to post"
 POSTED_HEADER = "## \U0001F426 Posted to Twitter/X"
@@ -225,7 +231,7 @@ def _parse_message_digest(comment_body):
         return None
     if lines[0] != DRYRUN_MARKER:
         return None
-    m = DIGEST_LINE_RE.match(lines[1])
+    m = DIGEST_LINE_RE.fullmatch(lines[1])
     return m.group(1) if m else None
 
 
@@ -340,8 +346,23 @@ def _parse_approver_allowlist(raw):
     return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
+def _parse_require_direct_human_label(raw):
+    return (raw or "").strip() != "false"
+
+
 def _approver_logins():
     return _parse_approver_allowlist(os.environ.get(APPROVER_LOGINS_ENV))
+
+
+def _require_direct_human_label():
+    return _parse_require_direct_human_label(
+        os.environ.get(DIRECT_HUMAN_LABEL_ENV)
+    )
+
+
+def _event_label_name(ev):
+    lbl = ev.get("label")
+    return lbl.get("name", "") if isinstance(lbl, dict) else (lbl or "")
 
 
 def _comment_user(comment):
@@ -396,47 +417,126 @@ def _exactly_one_trusted_preview(comments, last_edited_at):
     return found[0]
 
 
-def _latest_human_approval_at(events, preview_created_at, approver_logins):
-    allow = frozenset(a for a in approver_logins if a)
-    if not allow:
-        raise _ApprovalGuardError(
-            "GROWTH_APPROVER_LOGINS is empty — refusing live post (fail closed)"
-        )
-    preview_dt = _parse_iso_ts(preview_created_at)
+def _latest_labeled_event(events, label=APPROVAL_LABEL):
     latest = None
     latest_dt = None
     for ev in events or []:
         if (ev.get("event") or "").lower() != "labeled":
             continue
-        lbl = ev.get("label")
-        name = lbl.get("name", "") if isinstance(lbl, dict) else (lbl or "")
-        if name != APPROVAL_LABEL:
-            continue
-        actor = ev.get("actor") or {}
-        if not isinstance(actor, dict):
-            continue
-        if actor.get("type") != "User":
-            continue
-        login = actor.get("login") or ""
-        if login not in allow:
+        if _event_label_name(ev) != label:
             continue
         created = ev.get("created_at") or ""
         try:
             dt = _parse_iso_ts(created)
         except _ApprovalGuardError:
             continue
-        if dt <= preview_dt:
+        if latest_dt is None or dt > latest_dt:
+            latest_dt = dt
+            latest = ev
+    return latest
+
+
+def _latest_bot_removal_at(events, label=APPROVAL_LABEL):
+    latest_dt = None
+    for ev in events or []:
+        if (ev.get("event") or "").lower() != "unlabeled":
+            continue
+        if _event_label_name(ev) != label:
+            continue
+        actor = ev.get("actor") or {}
+        if not isinstance(actor, dict):
+            continue
+        if actor.get("login") != TRUSTED_PREVIEW_LOGIN:
+            continue
+        if actor.get("type") != TRUSTED_PREVIEW_TYPE:
+            continue
+        created = ev.get("created_at") or ""
+        try:
+            dt = _parse_iso_ts(created)
+        except _ApprovalGuardError:
             continue
         if latest_dt is None or dt > latest_dt:
             latest_dt = dt
-            latest = created
+    return latest_dt
+
+
+def _has_unlabeled_after(events, after, label=APPROVAL_LABEL):
+    for ev in events or []:
+        if (ev.get("event") or "").lower() != "unlabeled":
+            continue
+        if _event_label_name(ev) != label:
+            continue
+        created = ev.get("created_at") or ""
+        try:
+            dt = _parse_iso_ts(created)
+        except _ApprovalGuardError:
+            continue
+        if dt > after:
+            return True
+    return False
+
+
+def _latest_human_approval_at(events, preview_created_at, approver_logins,
+                              require_direct_human_label=True):
+    allow = frozenset(a for a in approver_logins if a)
+    if not allow:
+        raise _ApprovalGuardError(
+            "GROWTH_APPROVER_LOGINS is empty — refusing live post (fail closed)"
+        )
+    preview_dt = _parse_iso_ts(preview_created_at)
+    latest = _latest_labeled_event(events, APPROVAL_LABEL)
     if latest is None:
         raise _ApprovalGuardError(
-            "no allowlisted User approved-to-post label event after the "
+            "no approved-to-post labeled timeline event — refusing live post "
+            "(fail closed)"
+        )
+    created = latest.get("created_at") or ""
+    try:
+        labeled_dt = _parse_iso_ts(created)
+    except _ApprovalGuardError as e:
+        raise _ApprovalGuardError(
+            "latest approved-to-post labeled event has an unreadable "
+            "created_at — refusing live post (fail closed)"
+        ) from e
+    actor = latest.get("actor") or {}
+    if not isinstance(actor, dict) or actor.get("type") != "User":
+        raise _ApprovalGuardError(
+            "latest approved-to-post label event is not by a User actor — "
+            "refusing live post (fail closed)"
+        )
+    login = actor.get("login") or ""
+    if login not in allow:
+        raise _ApprovalGuardError(
+            f"latest approved-to-post label event is by {login!r}, not an "
+            f"allowlisted User — refusing live post (fail closed)"
+        )
+    if labeled_dt <= preview_dt:
+        raise _ApprovalGuardError(
+            "latest approved-to-post label event is not strictly after the "
             "trusted preview — a human must re-apply the label after the "
             "preview; refusing live post (fail closed)"
         )
-    return latest
+    bot_removal = _latest_bot_removal_at(events, APPROVAL_LABEL)
+    if bot_removal is not None and labeled_dt <= bot_removal:
+        raise _ApprovalGuardError(
+            "latest approved-to-post label event is not strictly after the "
+            "bot's most recent removal of the label — a human must re-apply "
+            "after the preview self-migrate; refusing live post (fail closed)"
+        )
+    if _has_unlabeled_after(events, labeled_dt, APPROVAL_LABEL):
+        raise _ApprovalGuardError(
+            "approved-to-post was unlabeled after the latest labeled event "
+            "(stale or revoked approval) — refusing live post (fail closed)"
+        )
+    if require_direct_human_label:
+        via_app = latest.get("performed_via_github_app")
+        if via_app is not None:
+            raise _ApprovalGuardError(
+                "latest approved-to-post label was performed via a GitHub "
+                "App (GROWTH_REQUIRE_DIRECT_HUMAN_LABEL) — refusing live "
+                "post (fail closed)"
+            )
+    return created
 
 
 def _assert_digest_binds(comments, body, last_edited_at=None):
@@ -449,15 +549,17 @@ def _assert_digest_binds(comments, body, last_edited_at=None):
         )
     expected = _message_digest(body)
     if digest != expected:
-        raise _PreviewMigrationNeeded(
-            f"trusted preview message-digest {digest} does not match current "
-            f"## Message first paragraph ({expected}) — write a fresh preview "
-            f"and remove approved-to-post (self-migrate)"
+        raise _ApprovalGuardError(
+            f"digest mismatch without edit: trusted preview message-digest "
+            f"{digest} does not match current ## Message first paragraph "
+            f"({expected}) — refusing (fail closed); do not create a second "
+            f"preview"
         )
     return digest, preview
 
 
-def _assert_live_gates(comments, body, events, last_edited_at, approver_logins):
+def _assert_live_gates(comments, body, events, last_edited_at, approver_logins,
+                       require_direct_human_label=True):
     digest, preview = _assert_digest_binds(
         comments, body, last_edited_at=last_edited_at
     )
@@ -467,7 +569,8 @@ def _assert_live_gates(comments, body, events, last_edited_at, approver_logins):
             "trusted preview is missing created_at — refusing (fail closed)"
         )
     approved_at = _latest_human_approval_at(
-        events, preview_created, approver_logins
+        events, preview_created, approver_logins,
+        require_direct_human_label=require_direct_human_label,
     )
     _assert_body_fresh_for_live(approved_at, last_edited_at)
     return digest, approved_at, preview
@@ -631,16 +734,32 @@ def _cap_state_path():
 
 
 def _cap_state_count(path):
-    """How many posts this run has already consumed, per the shared state file.
+    """How many post slots this run has already consumed.
 
-    One JSON record per consumed slot, so the count is the number of
-    non-empty lines; an absent file is a run that has posted nothing yet (the
-    first record creates it). Any other read failure raises — an unreadable
-    state must refuse, never count as zero.
+    Counts JSON records whose ``outcome`` is a consuming one (live post,
+    live attempt, dry-run). ``preview-migrate`` is audit-only and does
+    **not** consume a slot — LIVE may preview-migrate many items, then
+    still post up to ``GROWTH_MAX_POSTS``. An absent file is zero; any
+    other read failure raises (fail closed).
     """
     try:
         with open(path, encoding="utf-8") as fh:
-            return sum(1 for line in fh if line.strip())
+            n = 0
+            for line in fh:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                except json.JSONDecodeError:
+                    # Unparseable line still counts — fail closed on drift.
+                    n += 1
+                    continue
+                outcome = (rec.get("outcome") or "") if isinstance(rec, dict) else ""
+                if outcome in _CAP_NON_CONSUMING_OUTCOMES:
+                    continue
+                n += 1
+            return n
     except FileNotFoundError:
         return 0
     except OSError as e:
@@ -1016,35 +1135,18 @@ def _post_tweet(arguments):
         return _tool_error(
             f"issue #{number} is not in this run's candidate set {sorted(selected)}; refusing")
 
-    # --- per-run cap, spanning the chain walk (unattended only) ------------
-    # Enforced only inside an Actions run (the unattended case the cap exists
-    # to bound); attended, a human is the trust boundary. The count is read
-    # from the shared state file so it spans the whole chain walk, not this
-    # one server process (#570) — and an unattended run without the path
-    # fails closed, because posting on would silently fall back to the exact
-    # per-link reset the state file replaces.
+    # Cap-state path is resolved early so self-migrate can audit without
+    # consuming a slot; the consuming check itself runs AFTER live gates
+    # (so preview-migrate never hits the post cap).
     state = _cap_state_path()
-    if state is not None:
-        if not state:
-            return _tool_error(
-                f"post_tweet: {CAP_STATE_ENV} is not set but this is an "
-                "unattended run (GITHUB_RUN_ID is set) — the workflow must "
-                "give every link step the same state-file path (the reeve.yml "
-                "REEVE_GREENLIGHT_STATE pattern) or the post cap cannot span "
-                "the chain walk; refusing to post"
-            )
-        try:
-            cap = int(os.environ.get("GROWTH_MAX_POSTS", "1"))
-        except ValueError:
-            cap = 1
-        try:
-            posted = _cap_state_count(state)
-        except RuntimeError as e:
-            return _tool_error(f"post_tweet: {e}")
-        if posted >= cap:
-            return _tool_error(
-                f"per-run post cap reached ({posted}/{cap} posted across the "
-                "chain walk so far); refusing to post more")
+    if state is not None and not state:
+        return _tool_error(
+            f"post_tweet: {CAP_STATE_ENV} is not set but this is an "
+            "unattended run (GITHUB_RUN_ID is set) — the workflow must "
+            "give every link step the same state-file path (the reeve.yml "
+            "REEVE_GREENLIGHT_STATE pattern) or the post cap cannot span "
+            "the chain walk; refusing to post"
+        )
 
     # --- re-read the target and enforce state at WRITE time ----------------
     try:
@@ -1114,10 +1216,14 @@ def _post_tweet(arguments):
 
     # --- LIVE gates / self-migrate / dry-run freeze notes -------------------
     # LIVE posts only when: exactly one trusted preview after lastEditedAt,
-    # digest matches, allowlisted User re-applied approved-to-post AFTER that
-    # preview, and the body freeze passes. Missing/mismatched preview →
-    # write preview + REMOVE approved-to-post (never add labels) + do not
-    # post; counts as the run action, does not burn the daycap.
+    # digest matches, the latest approved-to-post labeled event overall is
+    # an allowlisted User (optionally direct, not via GitHub App) strictly
+    # after that preview AND after the bot's most recent label removal,
+    # with no unlabeled after it, and the body freeze passes. Missing
+    # preview → write preview (drafted ## Message digest + recomposed copy
+    # under the gates) + REMOVE approved-to-post only + do not post; does
+    # not consume the run's post slot or the daycap. Digest mismatch on an
+    # existing trusted preview → refuse (do not write a second preview).
     approval_notes = []
     events = None
     last_edited = None
@@ -1168,17 +1274,22 @@ def _post_tweet(arguments):
                 events or [],
                 last_edited,
                 _approver_logins(),
+                require_direct_human_label=_require_direct_human_label(),
             )
         except _PreviewMigrationNeeded as e:
-            # Self-migrate: write preview (marker + digest + exact copy),
-            # REMOVE approved-to-post only, do not post, no daycap burn.
+            # Self-migrate: write preview (marker + digest of ## Message
+            # first paragraph + the recomposed copy under the gates),
+            # REMOVE approved-to-post only, do not post, no post-slot /
+            # daycap burn.
             digest_line = _digest_comment_line(issue.get("body") or "")
             preview = (
                 f"{DRYRUN_MARKER}\n{digest_line}\n{PREVIEW_HEADER}\n\n"
                 f"{rendered}\n\n"
                 f"**Preview (self-migrate)** — nothing was published. "
-                f"Re-apply `{APPROVAL_LABEL}` on this body after reviewing "
-                f"the copy above; a later LIVE run will post. ({e})\n\n"
+                f"The digest binds the `## Message` first paragraph; live "
+                f"copy may be recomposed under the length, tag, and "
+                f"approval gates. Re-apply `{APPROVAL_LABEL}` after "
+                f"reviewing; a later LIVE run will post. ({e})\n\n"
                 f"{FOOTER}"
             )
             try:
@@ -1207,6 +1318,23 @@ def _post_tweet(arguments):
             )
         except _ApprovalGuardError as e:
             return _tool_error(f"post_tweet: {e}")
+
+    # --- per-run post cap (after gates; preview-migrate never reaches here) -
+    # Enforced only inside an Actions run; attended, a human is the trust
+    # boundary. The count spans the chain walk via GROWTH_CAP_STATE.
+    if state is not None:
+        try:
+            cap = int(os.environ.get("GROWTH_MAX_POSTS", "1"))
+        except ValueError:
+            cap = 1
+        try:
+            posted = _cap_state_count(state)
+        except RuntimeError as e:
+            return _tool_error(f"post_tweet: {e}")
+        if posted >= cap:
+            return _tool_error(
+                f"per-run post cap reached ({posted}/{cap} posted across the "
+                "chain walk so far); refusing to post more")
 
     # --- act ----------------------------------------------------------------
     if live:
@@ -1448,7 +1576,7 @@ def selftest():
     # selftest runs inside CI) must not leak into the attended cases.
     for var in ("GROWTH_SELECTED_ISSUES", "GITHUB_RUN_ID", "GROWTH_TWITTER_LIVE",
                 "GROWTH_REQUIRE_APPROVAL", "GROWTH_MAX_POSTS", CAP_STATE_ENV,
-                APPROVER_LOGINS_ENV,
+                APPROVER_LOGINS_ENV, DIRECT_HUMAN_LABEL_ENV,
                 "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
         os.environ.pop(var, None)
     os.environ[APPROVER_LOGINS_ENV] = "shaiss"
@@ -1487,13 +1615,20 @@ def selftest():
             "updated_at": updated_at,
         }]
 
-    def _approve(number, at=APPROVE_AT, login="shaiss", utype="User"):
-        _FAKE_EVENTS[number] = [{
-            "event": "labeled",
-            "label": {"name": APPROVAL_LABEL},
-            "created_at": at,
-            "actor": {"login": login, "type": utype},
-        }]
+    def _approve(number, at=APPROVE_AT, login="shaiss", utype="User",
+                 via_app=None, events=None):
+        if events is not None:
+            _FAKE_EVENTS[number] = list(events)
+        else:
+            ev = {
+                "event": "labeled",
+                "label": {"name": APPROVAL_LABEL},
+                "created_at": at,
+                "actor": {"login": login, "type": utype},
+            }
+            if via_app is not None:
+                ev["performed_via_github_app"] = via_app
+            _FAKE_EVENTS[number] = [ev]
         _FAKE_LAST_EDITED.pop(number, None)
 
     def _ready_live(number, body=""):
@@ -1943,17 +2078,17 @@ def selftest():
           r.get("isError") is False
           and "PREVIEW self-migrated" in r["content"][0]["text"])
 
-    # Digest mismatch → self-migrate.
+    # Digest mismatch on an existing trusted preview → refuse (no 2nd preview).
     _FAKE_ISSUES[45] = q(45, OK + [APPROVAL_LABEL])
     _FAKE_ISSUES[45]["body"] = "## Message\n\nCurrent body @Prusa3D\n"
     _approve(45)
     _seed_trusted_preview(45, body="## Message\n\nOld draft @Prusa3D\n")
     _last_tweets = None
+    _last_comment = None
     r = _post_tweet({"number": 45, "text": "Current body @Prusa3D"})
-    check("LIVE self-migrates when preview digest does not match body",
-          r.get("isError") is False
-          and "PREVIEW self-migrated" in r["content"][0]["text"]
-          and not _last_tweets)
+    check("LIVE refuses digest mismatch without edit (no second preview)",
+          err(r) and "digest mismatch without edit" in r["content"][0]["text"]
+          and not _last_tweets and _last_comment is None)
 
     # Two trusted previews after last edit → refuse (ambiguity, no migrate).
     _FAKE_ISSUES[51] = q(51, OK + [APPROVAL_LABEL])
@@ -1972,21 +2107,21 @@ def selftest():
     check("LIVE refuses when two trusted previews exist after last edit",
           err(r) and "ambiguous" in r["content"][0]["text"])
 
-    # Bot-actor label → refuse (not a User approval).
+    # Bot-actor label as the LATEST labeled → refuse (not a User approval).
     _FAKE_ISSUES[52] = q(52, OK + [APPROVAL_LABEL])
     _seed_trusted_preview(52)
     _approve(52, login="github-actions[bot]", utype="Bot")
     r = _post_tweet({"number": 52, "text": "bot labeled"})
     check("LIVE refuses a Bot-actor approved-to-post label",
-          err(r) and "allowlisted User" in r["content"][0]["text"])
+          err(r) and "not by a User" in r["content"][0]["text"])
 
-    # Non-allowlisted User label → refuse.
+    # Non-allowlisted User label as the LATEST → refuse.
     _FAKE_ISSUES[53] = q(53, OK + [APPROVAL_LABEL])
     _seed_trusted_preview(53)
     _approve(53, login="random-user", utype="User")
     r = _post_tweet({"number": 53, "text": "not allowlisted"})
     check("LIVE refuses a non-allowlisted approver",
-          err(r) and "allowlisted User" in r["content"][0]["text"])
+          err(r) and "not an allowlisted User" in r["content"][0]["text"])
 
     # Label before preview → refuse.
     _FAKE_ISSUES[54] = q(54, OK + [APPROVAL_LABEL])
@@ -2007,6 +2142,95 @@ def selftest():
           err(r) and "removing" in r["content"][0]["text"]
           and not _last_tweets)
     os.environ.pop("GROWTH_MCP_FAKE_LABEL_REMOVE_FAIL", None)
+
+    # Shai labels, unlabels, someone else re-adds → refuse (latest = other).
+    _FAKE_ISSUES[56] = q(56, OK + [APPROVAL_LABEL])
+    _seed_trusted_preview(56)
+    _approve(56, events=[
+        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T11:00:00Z",
+         "actor": {"login": "shaiss", "type": "User"}},
+        {"event": "unlabeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T12:00:00Z",
+         "actor": {"login": "shaiss", "type": "User"}},
+        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T13:00:00Z",
+         "actor": {"login": "other", "type": "User"}},
+    ])
+    r = _post_tweet({"number": 56, "text": "revoked then other"})
+    check("LIVE refuses when Shai unlabels and someone else re-adds",
+          err(r) and "not an allowlisted User" in r["content"][0]["text"])
+
+    # Shai labels in the gap before bot removal; bot removes; other re-adds.
+    _FAKE_ISSUES[57] = q(57, OK + [APPROVAL_LABEL])
+    _seed_trusted_preview(57)
+    _approve(57, events=[
+        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T11:00:00Z",
+         "actor": {"login": "shaiss", "type": "User"}},
+        {"event": "unlabeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T12:00:00Z",
+         "actor": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE}},
+        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
+         "created_at": "2026-01-01T13:00:00Z",
+         "actor": {"login": "other", "type": "User"}},
+    ])
+    r = _post_tweet({"number": 57, "text": "gap then other"})
+    check("LIVE refuses gap-approval then bot removal then non-allowlisted re-add",
+          err(r) and "not an allowlisted User" in r["content"][0]["text"])
+
+    # App-performed label refused when GROWTH_REQUIRE_DIRECT_HUMAN_LABEL=true.
+    os.environ[DIRECT_HUMAN_LABEL_ENV] = "true"
+    _FAKE_ISSUES[58] = q(58, OK + [APPROVAL_LABEL])
+    _seed_trusted_preview(58)
+    _approve(58, via_app={"id": 1, "slug": "cursor"})
+    r = _post_tweet({"number": 58, "text": "via app"})
+    check("LIVE refuses app-performed label when direct-human required",
+          err(r) and "performed via a GitHub App" in r["content"][0]["text"])
+    # Same label allowed when the env is exactly 'false'.
+    os.environ[DIRECT_HUMAN_LABEL_ENV] = "false"
+    _last_tweets, _last_close = None, None
+    r = _post_tweet({"number": 58, "text": "via app allowed"})
+    check("LIVE allows app-performed label when direct-human is false",
+          r.get("isError") is False and "POSTED live" in r["content"][0]["text"])
+    os.environ.pop(DIRECT_HUMAN_LABEL_ENV, None)
+
+    # Preview-migrate does not consume the run's post slot.
+    os.environ["GITHUB_RUN_ID"] = "selftest-preview-cap"
+    os.environ["GROWTH_MAX_POSTS"] = "1"
+    preview_cap_dir = tempfile.mkdtemp(prefix="growth-preview-cap-")
+    preview_cap_state = os.path.join(preview_cap_dir, "growth-posts")
+    os.environ[CAP_STATE_ENV] = preview_cap_state
+    for n, body in ((59, ""), (60, "")):
+        _FAKE_ISSUES[n] = q(n, OK + [APPROVAL_LABEL])
+        _approve(n)
+        _FAKE_COMMENTS.pop(n, None)
+    r1 = _post_tweet({"number": 59, "text": "preview one"})
+    r2 = _post_tweet({"number": 60, "text": "preview two"})
+    check("LIVE preview-migrates two items under a post cap of 1",
+          r1.get("isError") is False
+          and r2.get("isError") is False
+          and "PREVIEW self-migrated" in r1["content"][0]["text"]
+          and "PREVIEW self-migrated" in r2["content"][0]["text"]
+          and _cap_state_count(preview_cap_state) == 0)
+    # A ready item can still post after those previews.
+    _FAKE_ISSUES[61] = q(61, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[61]["body"] = "## Message\n\nAfter previews @Prusa3D\n"
+    _ready_live(61, body=_FAKE_ISSUES[61]["body"])
+    _last_tweets = None
+    r3 = _post_tweet({"number": 61, "text": "After previews @Prusa3D"})
+    check("LIVE still posts one item after non-consuming preview-migrates",
+          r3.get("isError") is False
+          and "POSTED live" in r3["content"][0]["text"]
+          and _cap_state_count(preview_cap_state) == 1)
+    os.environ.pop("GITHUB_RUN_ID", None)
+    os.environ.pop("GROWTH_MAX_POSTS", None)
+    os.environ.pop(CAP_STATE_ENV, None)
+    try:
+        import shutil
+        shutil.rmtree(preview_cap_dir, ignore_errors=True)
+    except OSError:
+        pass
 
     # Happy path: matching digest + human approval after preview + freeze.
     _FAKE_ISSUES[46] = q(46, OK + [APPROVAL_LABEL])

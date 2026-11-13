@@ -158,7 +158,7 @@ def parse_message_digest(comment_body: str | None) -> str | None:
         return None
     if lines[0] != DRYRUN_MARKER:
         return None
-    m = DIGEST_LINE_RE.match(lines[1])
+    m = DIGEST_LINE_RE.fullmatch(lines[1])
     return m.group(1) if m else None
 
 

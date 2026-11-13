@@ -16,9 +16,12 @@ from growth.approval_guard import (
     body_edited_after_approval,
     exactly_one_trusted_preview,
     is_trusted_preview_comment,
+    latest_bot_removal_at,
     latest_human_approval_at,
     latest_labeled_at,
+    latest_labeled_event,
     parse_approver_allowlist,
+    parse_require_direct_human_label,
 )
 from growth.roottags import DRYRUN_MARKER, digest_comment_line, message_digest, parse_message_digest
 
@@ -35,6 +38,7 @@ def test_latest_labeled_at_picks_most_recent_approval():
          "created_at": "2026-01-04T08:00:00Z"},
     ]
     assert latest_labeled_at(events) == "2026-01-04T08:00:00Z"
+    assert latest_labeled_event(events)["created_at"] == "2026-01-04T08:00:00Z"
 
 
 def test_body_edited_after_approval_is_stale():
@@ -71,6 +75,27 @@ def _preview(body: str, *, created="2026-01-01T10:00:00Z", updated=None,
         "user": {"login": login, "type": utype},
         "created_at": created,
         "updated_at": updated,
+    }
+
+
+def _labeled(at, login="shaiss", utype="User", via_app=None):
+    ev = {
+        "event": "labeled",
+        "label": {"name": APPROVAL_LABEL},
+        "created_at": at,
+        "actor": {"login": login, "type": utype},
+    }
+    if via_app is not None:
+        ev["performed_via_github_app"] = via_app
+    return ev
+
+
+def _unlabeled(at, login=TRUSTED_PREVIEW_LOGIN, utype=TRUSTED_PREVIEW_TYPE):
+    return {
+        "event": "unlabeled",
+        "label": {"name": APPROVAL_LABEL},
+        "created_at": at,
+        "actor": {"login": login, "type": utype},
     }
 
 
@@ -127,13 +152,14 @@ def test_exactly_one_trusted_preview_after_edit():
     ) is b
 
 
-def test_assert_digest_binds_match_and_mismatch():
+def test_assert_digest_binds_match_and_mismatch_without_edit():
     body = "## Message\n\nBound @Prusa3D\n"
     comments = [_preview(body)]
     dig, preview = assert_digest_binds(comments, body)
     assert dig == message_digest(body)
     assert preview is comments[0]
-    with pytest.raises(PreviewMigrationNeeded, match="does not match"):
+    # Digest mismatch on an existing trusted preview → refuse, do NOT migrate.
+    with pytest.raises(ApprovalGuardError, match="digest mismatch without edit"):
         assert_digest_binds(
             [_preview("## Message\n\nStale\n")], body
         )
@@ -141,11 +167,7 @@ def test_assert_digest_binds_match_and_mismatch():
 
 def test_latest_human_approval_allowlist_and_actor_type():
     preview_at = "2026-01-01T10:00:00Z"
-    events = [
-        {"event": "labeled", "label": {"name": APPROVAL_LABEL},
-         "created_at": "2026-01-01T12:00:00Z",
-         "actor": {"login": "shaiss", "type": "User"}},
-    ]
+    events = [_labeled("2026-01-01T12:00:00Z")]
     assert latest_human_approval_at(
         events, preview_created_at=preview_at, approver_logins=["shaiss"]
     ) == "2026-01-01T12:00:00Z"
@@ -154,43 +176,122 @@ def test_latest_human_approval_allowlist_and_actor_type():
         latest_human_approval_at(
             events, preview_created_at=preview_at, approver_logins=[]
         )
-    # Bot actor ignored.
-    with pytest.raises(ApprovalGuardError, match="allowlisted User"):
+    # Bot actor as the LATEST labeled → refuse.
+    with pytest.raises(ApprovalGuardError, match="not by a User"):
         latest_human_approval_at(
-            [{"event": "labeled", "label": {"name": APPROVAL_LABEL},
-              "created_at": "2026-01-01T12:00:00Z",
-              "actor": {"login": "github-actions[bot]", "type": "Bot"}}],
+            [_labeled("2026-01-01T12:00:00Z",
+                      login="github-actions[bot]", utype="Bot")],
             preview_created_at=preview_at,
             approver_logins=["shaiss", "github-actions[bot]"],
         )
-    # Non-allowlisted User ignored.
-    with pytest.raises(ApprovalGuardError, match="allowlisted User"):
+    # Non-allowlisted User as the LATEST labeled → refuse.
+    with pytest.raises(ApprovalGuardError, match="not an allowlisted User"):
         latest_human_approval_at(
-            [{"event": "labeled", "label": {"name": APPROVAL_LABEL},
-              "created_at": "2026-01-01T12:00:00Z",
-              "actor": {"login": "other", "type": "User"}}],
+            [_labeled("2026-01-01T12:00:00Z", login="other", utype="User")],
             preview_created_at=preview_at,
             approver_logins=["shaiss"],
         )
-    # Label before preview ignored.
+    # Label before preview → refuse.
     with pytest.raises(ApprovalGuardError, match="after the trusted preview"):
         latest_human_approval_at(
-            [{"event": "labeled", "label": {"name": APPROVAL_LABEL},
-              "created_at": "2026-01-01T09:00:00Z",
-              "actor": {"login": "shaiss", "type": "User"}}],
+            [_labeled("2026-01-01T09:00:00Z")],
             preview_created_at=preview_at,
             approver_logins=["shaiss"],
         )
+
+
+def test_stale_revoked_approval_shaiss_unlabels_then_other_relabels():
+    """Shai labels, then unlabels, then someone else re-adds → refuse.
+
+    The latest labeled event overall is the non-allowlisted re-add.
+    """
+    preview_at = "2026-01-01T10:00:00Z"
+    events = [
+        _labeled("2026-01-01T11:00:00Z", login="shaiss"),
+        _unlabeled("2026-01-01T12:00:00Z", login="shaiss", utype="User"),
+        _labeled("2026-01-01T13:00:00Z", login="other", utype="User"),
+    ]
+    with pytest.raises(ApprovalGuardError, match="not an allowlisted User"):
+        latest_human_approval_at(
+            events, preview_created_at=preview_at, approver_logins=["shaiss"]
+        )
+
+
+def test_stale_approval_in_gap_before_bot_removal_then_other_relabels():
+    """Shai labels between preview and bot removal; bot removes; other re-adds.
+
+    Latest labeled is the non-allowlisted re-add → refuse. Even an allowlisted
+    label that sits in the gap before the bot removal would also refuse.
+    """
+    preview_at = "2026-01-01T10:00:00Z"
+    events = [
+        _labeled("2026-01-01T11:00:00Z", login="shaiss"),  # in the gap
+        _unlabeled("2026-01-01T12:00:00Z"),  # bot self-migrate removal
+        _labeled("2026-01-01T13:00:00Z", login="other", utype="User"),
+    ]
+    assert latest_bot_removal_at(events).isoformat().startswith("2026-01-01T12:00:00")
+    with pytest.raises(ApprovalGuardError, match="not an allowlisted User"):
+        latest_human_approval_at(
+            events, preview_created_at=preview_at, approver_logins=["shaiss"]
+        )
+    # Same gap label, no later re-add: latest labeled is before bot removal.
+    with pytest.raises(ApprovalGuardError, match="after the bot's most recent removal"):
+        latest_human_approval_at(
+            events[:2], preview_created_at=preview_at, approver_logins=["shaiss"]
+        )
+    # Allowlisted re-apply AFTER bot removal succeeds.
+    ok = events[:2] + [_labeled("2026-01-01T13:00:00Z", login="shaiss")]
+    assert latest_human_approval_at(
+        ok, preview_created_at=preview_at, approver_logins=["shaiss"]
+    ) == "2026-01-01T13:00:00Z"
+
+
+def test_unlabeled_after_latest_labeled_refuses():
+    preview_at = "2026-01-01T10:00:00Z"
+    events = [
+        _labeled("2026-01-01T12:00:00Z", login="shaiss"),
+        _unlabeled("2026-01-01T13:00:00Z", login="shaiss", utype="User"),
+    ]
+    with pytest.raises(ApprovalGuardError, match="unlabeled after"):
+        latest_human_approval_at(
+            events, preview_created_at=preview_at, approver_logins=["shaiss"]
+        )
+
+
+def test_require_direct_human_label_true_and_false():
+    preview_at = "2026-01-01T10:00:00Z"
+    via = {"id": 1, "slug": "some-app"}
+    events = [_labeled("2026-01-01T12:00:00Z", via_app=via)]
+    assert parse_require_direct_human_label(None) is True
+    assert parse_require_direct_human_label("true") is True
+    assert parse_require_direct_human_label("TRUE") is True  # not exactly false
+    assert parse_require_direct_human_label("false") is False
+    with pytest.raises(ApprovalGuardError, match="performed via a GitHub App"):
+        latest_human_approval_at(
+            events,
+            preview_created_at=preview_at,
+            approver_logins=["shaiss"],
+            require_direct_human_label=True,
+        )
+    assert latest_human_approval_at(
+        events,
+        preview_created_at=preview_at,
+        approver_logins=["shaiss"],
+        require_direct_human_label=False,
+    ) == "2026-01-01T12:00:00Z"
+    # Explicit null / absent still ok when require=True.
+    assert latest_human_approval_at(
+        [_labeled("2026-01-01T12:00:00Z", via_app=None)],
+        preview_created_at=preview_at,
+        approver_logins=["shaiss"],
+        require_direct_human_label=True,
+    ) == "2026-01-01T12:00:00Z"
 
 
 def test_assert_live_gates_happy_path():
     body = "## Message\n\nBound @Prusa3D\n"
     preview = _preview(body, created="2026-01-01T10:00:00Z")
-    events = [{
-        "event": "labeled", "label": {"name": APPROVAL_LABEL},
-        "created_at": "2026-01-01T12:00:00Z",
-        "actor": {"login": "shaiss", "type": "User"},
-    }]
+    events = [_labeled("2026-01-01T12:00:00Z")]
     dig, approved, _ = assert_live_gates(
         [preview], body, events, None, ["shaiss"]
     )
