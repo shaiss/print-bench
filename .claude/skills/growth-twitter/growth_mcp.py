@@ -148,8 +148,9 @@ MAX_REQUIRED_HANDLES = 5
 _HANDLE_RE = re.compile(r"^@[A-Za-z0-9_]{1,15}$")
 _HANDLE_SCAN_RE = re.compile(
     r"(?<![A-Za-z0-9_])@[A-Za-z0-9_]{1,15}(?![A-Za-z0-9_])")
+# Optional CR so GitHub CRLF bodies still match the heading.
 _MESSAGE_HEADING_RE = re.compile(
-    r"^##[ \t]+Message[ \t]*$", re.IGNORECASE | re.MULTILINE)
+    r"^##[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE)
 _NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
 
 
@@ -193,9 +194,19 @@ def _message_root_paragraph(body):
 def _extract_handles(text):
     if not text:
         return []
+    url_spans = [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
+
+    def in_url(pos):
+        for lo, hi in url_spans:
+            if lo <= pos < hi:
+                return True
+        return False
+
     out = []
     seen = set()
     for m in _HANDLE_SCAN_RE.finditer(text):
+        if in_url(m.start()):
+            continue
         tok = m.group(0)
         if not _HANDLE_RE.match(tok):
             continue
@@ -204,6 +215,20 @@ def _extract_handles(text):
             continue
         seen.add(key)
         out.append(tok)
+    return out
+
+
+def _extract_urls(text):
+    if not text:
+        return []
+    out = []
+    seen = set()
+    for m in _URL_RE.finditer(text):
+        u = m.group(0)
+        if u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
     return out
 
 
@@ -296,7 +321,25 @@ def _ensure_root_tags(text, required, drafted=""):
     drafted = (drafted or "").strip()
     if drafted and _tweet_weight(drafted) <= MAX_WEIGHT:
         if not _missing_handles(drafted, required):
-            return drafted
+            composed_urls = _extract_urls(text)
+            draft_urls = set(_extract_urls(drafted))
+            missing_urls = [u for u in composed_urls if u not in draft_urls]
+            candidate = drafted
+            if missing_urls:
+                url_suffix = " ".join(missing_urls)
+                if candidate and not candidate[-1].isspace():
+                    with_urls = f"{candidate.rstrip()} {url_suffix}"
+                else:
+                    with_urls = f"{candidate}{url_suffix}"
+                if _tweet_weight(with_urls) <= MAX_WEIGHT:
+                    candidate = with_urls
+                else:
+                    raise _RootTagsError(
+                        f"drafted ## Message fits the required handles but "
+                        f"cannot also carry the composed root's URL(s) within "
+                        f"{MAX_WEIGHT} weighted characters — refusing"
+                    )
+            return candidate
     missing = _missing_handles(text, required)
     if not missing:
         return text

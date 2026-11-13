@@ -68,6 +68,17 @@ def test_extract_handles_validates_strict_pattern_and_dedupes():
     assert extract_handles(None) == []
 
 
+def test_extract_handles_ignores_handles_inside_urls():
+    text = "See https://www.youtube.com/@CNC_Kitchen and also @Prusa3D"
+    assert extract_handles(text) == ["@Prusa3D"]
+
+
+def test_message_root_paragraph_accepts_crlf_bodies():
+    body = "## Message\r\n\r\nDrafted root with @Prusa3D\r\n\r\nMore intent.\r\n"
+    assert message_root_paragraph(body) == "Drafted root with @Prusa3D"
+    assert required_handles(body) == ["@Prusa3D"]
+
+
 def test_required_handles_come_only_from_message_first_paragraph():
     body = SAMPLE_BODY + "\n\n## Extra\n\nAlso @BambuLab elsewhere\n"
     assert required_handles(body) == ["@Prusa3D", "@prusament"]
@@ -97,6 +108,16 @@ def test_missing_tags_restored_via_drafted_verbatim_when_it_fits():
     out = ensure_root_tags(composed, required, drafted=drafted)
     assert out == drafted
     assert missing_handles(out, required) == []
+
+
+def test_drafted_fallback_preserves_composed_url():
+    drafted = "Measured margin. @Prusa3D"
+    required = ["@Prusa3D"]
+    link = "https://github.com/shaiss/print-bench/tree/main/designs/x"
+    composed = f"Agent rewrite without the tag. {link}"
+    out = ensure_root_tags(composed, required, drafted=drafted)
+    assert out == f"{drafted} {link}"
+    assert tweet_weight(out) <= MAX_WEIGHT
 
 
 def test_missing_tags_appended_when_drafted_does_not_fit_but_append_does():

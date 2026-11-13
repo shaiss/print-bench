@@ -43,8 +43,12 @@ HANDLE_RE = re.compile(r"^@[A-Za-z0-9_]{1,15}$")
 # Token scan: @handle bounded so ``user@host`` emails and longer tokens
 # never become required tags. Length is re-checked by HANDLE_RE.
 _HANDLE_SCAN_RE = re.compile(r"(?<![A-Za-z0-9_])@[A-Za-z0-9_]{1,15}(?![A-Za-z0-9_])")
+# Same URL shape tweetlen meters — handles inside a URL must not count as
+# mentions (e.g. ``https://www.youtube.com/@CNC_Kitchen``).
+_URL_RE = re.compile(r"https?://\S+")
+# Optional CR so GitHub's CRLF bodies still match the heading.
 _MESSAGE_HEADING_RE = re.compile(
-    r"^##[ \t]+Message[ \t]*$", re.IGNORECASE | re.MULTILINE
+    r"^##[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE
 )
 _NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
 
@@ -91,14 +95,30 @@ def message_root_paragraph(body: str | None) -> str:
     return ""
 
 
+def _url_spans(text: str) -> list[tuple[int, int]]:
+    return [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
+
+
+def _in_spans(pos: int, spans: list[tuple[int, int]]) -> bool:
+    for lo, hi in spans:
+        if lo <= pos < hi:
+            return True
+    return False
+
+
 def extract_handles(text: str | None) -> list[str]:
     """Valid ``@handles`` in *text*, draft order, first-seen casing, deduped
-    case-insensitively. Invalid tokens are dropped — never promoted."""
+    case-insensitively. Invalid tokens are dropped — never promoted. Handles
+    that fall inside a URL span are ignored (a YouTube ``/@user`` path is not
+    an @-mention)."""
     if not text:
         return []
+    spans = _url_spans(text)
     out: list[str] = []
     seen: set[str] = set()
     for m in _HANDLE_SCAN_RE.finditer(text):
+        if _in_spans(m.start(), spans):
+            continue
         tok = m.group(0)
         if not HANDLE_RE.match(tok):
             continue
@@ -107,6 +127,21 @@ def extract_handles(text: str | None) -> list[str]:
             continue
         seen.add(key)
         out.append(tok)
+    return out
+
+
+def extract_urls(text: str | None) -> list[str]:
+    """``http(s)://…`` tokens in *text*, first-seen order, deduped."""
+    if not text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _URL_RE.finditer(text):
+        u = m.group(0)
+        if u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
     return out
 
 
@@ -166,7 +201,27 @@ def ensure_root_tags(
     drafted = (drafted or "").strip()
     if drafted and tweet_weight(drafted) <= MAX_WEIGHT:
         if not missing_handles(drafted, required):
-            return drafted
+            # Drafted path: re-attach any URL the composed root had that the
+            # draft lacks (the queue Link), or refuse rather than drop it.
+            composed_urls = extract_urls(text)
+            draft_urls = set(extract_urls(drafted))
+            missing_urls = [u for u in composed_urls if u not in draft_urls]
+            candidate = drafted
+            if missing_urls:
+                url_suffix = " ".join(missing_urls)
+                if candidate and not candidate[-1].isspace():
+                    with_urls = f"{candidate.rstrip()} {url_suffix}"
+                else:
+                    with_urls = f"{candidate}{url_suffix}"
+                if tweet_weight(with_urls) <= MAX_WEIGHT:
+                    candidate = with_urls
+                else:
+                    raise RootTagsError(
+                        f"drafted ## Message fits the required handles but "
+                        f"cannot also carry the composed root's URL(s) within "
+                        f"{MAX_WEIGHT} weighted characters — refusing"
+                    )
+            return candidate
 
     missing = missing_handles(text, required)
     if not missing:

@@ -52,6 +52,8 @@ ROOTTAG_BODIES = [
     "## Message\n\nRoot with @Prusa3D and @CNC_Kitchen.\n\nMore intent.\n",
     "## message\n\nCase-insensitive heading @prusament\n\n## Link\n\nhttps://x\n",
     "## Message\n\nuser@host.com and @ok and @this_handle_is_way_too_long_for_x\n",
+    "## Message\r\n\r\nCRLF draft @Prusa3D\r\n",
+    "## Message\n\nURL path https://www.youtube.com/@CNC_Kitchen and @Prusa3D\n",
 ]
 
 
@@ -112,6 +114,12 @@ def test_roottags_ensure_agrees_on_preserve_append_and_verbatim():
     assert server._ensure_root_tags(bare, required, drafted=drafted) == (
         ensure_root_tags(bare, required, drafted=drafted)
     )
+    # drafted + preserve composed URL
+    link = "https://github.com/shaiss/print-bench"
+    with_link = f"Agent rewrite. {link}"
+    assert server._ensure_root_tags(
+        with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D"
+    ) == ensure_root_tags(with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D")
 
 
 def test_roottags_fail_closed_agrees():
