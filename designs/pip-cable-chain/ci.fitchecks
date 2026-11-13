@@ -7,11 +7,18 @@
 # the end stops at BOTH sweep limits: 1° short of the ±45° stop must clear
 # (EMPTY) — the joint really articulates through its range — and 2° past must
 # interfere (NON-EMPTY) — the printed plate stops are what block it, at the
-# angle the derivation claims. All six are rendered straight from the
-# production link(); none is posed by hand.
+# angle the derivation claims. `tab-wall` / `tab-wall-neg` gate the last
+# link's front M4 mounting tab: the 0.8 mm annulus around the Ø4.5 clearance
+# hole minus the printed tab must be EMPTY (≥0.8 mm of plastic all around —
+# the #717 defect left only 0.23 mm outboard and no gate saw it), and the
+# same probe at 3 mm MUST leave leftover (the check can still fail). All
+# eight are rendered straight from the production link(); none is posed by
+# hand.
 fitcheck      empty
 fitcheck_neg  interferes
 pose_up44     empty
 pose_dn44     empty
 stop_up47     interferes
 stop_dn47     interferes
+tab-wall      empty
+tab-wall-neg  interferes
