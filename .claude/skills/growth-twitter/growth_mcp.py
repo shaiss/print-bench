@@ -110,6 +110,12 @@ _CAP_NON_CONSUMING_OUTCOMES = frozenset({"preview-migrate"})
 # LIVE self-migrate may preview many approved items per run; posts still
 # honor GROWTH_MAX_POSTS / max_posts_per_run.
 MAX_PREVIEWS_PER_RUN = 60
+# Hard bound on REST list walks (comments, events). Matching tools/growth's
+# ``_MAX_PAGES``: hit the cap → RAISE (fail closed), never return a truncated
+# prefix — GitHub events are oldest-first, so a silent prefix drops the
+# newest label/unlabel and can miss a revocation.
+MAX_LIST_PAGES = 50
+LIST_PER_PAGE = 100
 DRYRUN_HEADER = "## \U0001F426 Growth dry run — what Lark would have posted"
 PREVIEW_HEADER = "## \U0001F426 Growth preview — re-apply approved-to-post to post"
 POSTED_HEADER = "## \U0001F426 Posted to Twitter/X"
@@ -907,52 +913,80 @@ def _get_issue(number):
     return _api("GET", f"/repos/{_repo()}/issues/{number}")
 
 
-def _get_comments(number):
-    if os.environ.get("GROWTH_MCP_FAKE"):
-        return list(_FAKE_COMMENTS.get(number, []))
-    # Walk EVERY page — the marker guard must see an early comment on a long
-    # thread, or a duplicate slips through (the assessor's lesson).
+def _paginate_rest_pages(fetch_page, *, what):
+    """Walk ``fetch_page(page) -> list`` until a short page.
+
+    Raises (fail closed) when a full page would require walking past
+    :data:`MAX_LIST_PAGES`, or when a page body is not a list — never return
+    a silently truncated prefix. Same contract as ``growth.github._paged``.
+    """
     out = []
     page = 1
     while True:
-        batch = _api(
-            "GET",
-            f"/repos/{_repo()}/issues/{number}/comments?per_page=100&page={page}",
-        )
-        if not isinstance(batch, list) or not batch:
+        batch = fetch_page(page)
+        if not isinstance(batch, list):
+            raise RuntimeError(
+                f"unexpected non-list response paging {what} "
+                f"(got {type(batch).__name__}) — refusing truncated {what}"
+            )
+        if not batch:
             break
         out.extend(batch)
-        if len(batch) < 100:
+        if len(batch) < LIST_PER_PAGE:
             break
         page += 1
-        if page > 50:  # bound the walk; a queue thread is never this long
-            break
+        if page > MAX_LIST_PAGES:
+            raise RuntimeError(
+                f"more than {MAX_LIST_PAGES} pages of {what} — refusing "
+                f"truncated {what} (fail closed)"
+            )
     return out
+
+
+def _get_comments(number):
+    if os.environ.get("GROWTH_MCP_FAKE"):
+        if os.environ.get("GROWTH_MCP_FAKE_COMMENTS_PAGE_CAP"):
+            # Exercise the real pager: endless full pages → raise.
+            return _paginate_rest_pages(
+                lambda _p: [{"id": i} for i in range(LIST_PER_PAGE)],
+                what="issue comments",
+            )
+        return list(_FAKE_COMMENTS.get(number, []))
+    # Walk EVERY page — the marker guard must see an early comment on a long
+    # thread, or a duplicate slips through (the assessor's lesson). Cap hit
+    # raises (fail closed); never return a truncated prefix.
+    return _paginate_rest_pages(
+        lambda page: _api(
+            "GET",
+            f"/repos/{_repo()}/issues/{number}/comments"
+            f"?per_page={LIST_PER_PAGE}&page={page}",
+        ),
+        what="issue comments",
+    )
 
 
 def _get_issue_events(number):
     """Issue timeline events (labeled/unlabeled/…). Failures raise — the
-    live post-approval body freeze must fail closed, not invent freshness."""
+    live post-approval body freeze must fail closed, not invent freshness.
+    Page-cap / non-list responses raise rather than returning a truncated
+    oldest-first prefix (newest revocations live in the dropped tail)."""
     if os.environ.get("GROWTH_MCP_FAKE"):
         if os.environ.get("GROWTH_MCP_FAKE_EVENTS_FAIL"):
             raise RuntimeError("selftest: simulated events failure")
+        if os.environ.get("GROWTH_MCP_FAKE_EVENTS_PAGE_CAP"):
+            return _paginate_rest_pages(
+                lambda _p: [{"id": i} for i in range(LIST_PER_PAGE)],
+                what="issue events",
+            )
         return list(_FAKE_EVENTS.get(number, []))
-    out = []
-    page = 1
-    while True:
-        batch = _api(
+    return _paginate_rest_pages(
+        lambda page: _api(
             "GET",
-            f"/repos/{_repo()}/issues/{number}/events?per_page=100&page={page}",
-        )
-        if not isinstance(batch, list) or not batch:
-            break
-        out.extend(batch)
-        if len(batch) < 100:
-            break
-        page += 1
-        if page > 50:
-            break
-    return out
+            f"/repos/{_repo()}/issues/{number}/events"
+            f"?per_page={LIST_PER_PAGE}&page={page}",
+        ),
+        what="issue events",
+    )
 
 
 def _get_body_last_edited_at(number):
@@ -2085,6 +2119,32 @@ def selftest():
     check("LIVE refuses when approval timeline cannot be read",
           err(r) and "fail closed" in r["content"][0]["text"])
     os.environ.pop("GROWTH_MCP_FAKE_EVENTS_FAIL", None)
+
+    # Events page-cap → raise inside the pager → LIVE refuses (fail closed).
+    # Must not return a truncated oldest-first prefix and still post.
+    _FAKE_ISSUES[67] = q(67, OK + [APPROVAL_LABEL])
+    _ready_live(67)
+    _last_tweets = None
+    os.environ["GROWTH_MCP_FAKE_EVENTS_PAGE_CAP"] = "1"
+    r = _post_tweet({"number": 67, "text": "page cap must refuse"})
+    check("LIVE refuses when issue-events page cap is hit",
+          err(r)
+          and "fail closed" in r["content"][0]["text"]
+          and "pages of issue events" in r["content"][0]["text"]
+          and not _last_tweets)
+    os.environ.pop("GROWTH_MCP_FAKE_EVENTS_PAGE_CAP", None)
+
+    # Comments page-cap → refuse before LIVE gates (marker walk fail closed).
+    _FAKE_ISSUES[68] = q(68, OK + [APPROVAL_LABEL])
+    _ready_live(68)
+    _last_tweets = None
+    os.environ["GROWTH_MCP_FAKE_COMMENTS_PAGE_CAP"] = "1"
+    r = _post_tweet({"number": 68, "text": "comments page cap"})
+    check("LIVE refuses when issue-comments page cap is hit",
+          err(r)
+          and "pages of issue comments" in r["content"][0]["text"]
+          and not _last_tweets)
+    os.environ.pop("GROWTH_MCP_FAKE_COMMENTS_PAGE_CAP", None)
 
     # Missing preview → self-migrate (write preview, remove label, no post).
     _FAKE_ISSUES[43] = q(43, OK + [APPROVAL_LABEL])

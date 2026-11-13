@@ -385,3 +385,40 @@ def test_approval_latest_event_and_direct_human_parity():
     ) == server._assert_live_gates(
         comments, body, ok_events, None, ["shaiss"]
     )
+
+
+def test_list_page_cap_fail_closed_parity(monkeypatch):
+    """Both copies refuse a truncated REST list — never return a prefix."""
+    from growth import github as growth_github
+
+    server = _load_server()
+    assert server.MAX_LIST_PAGES == growth_github._MAX_PAGES == 50
+    assert server.LIST_PER_PAGE == 100
+
+    # Server pager: endless full pages → raise (comments and events share it).
+    full = [{"id": i} for i in range(server.LIST_PER_PAGE)]
+    with pytest.raises(RuntimeError, match="pages of issue events"):
+        server._paginate_rest_pages(lambda _p: full, what="issue events")
+    with pytest.raises(RuntimeError, match="pages of issue comments"):
+        server._paginate_rest_pages(lambda _p: full, what="issue comments")
+    with pytest.raises(RuntimeError, match="non-list"):
+        server._paginate_rest_pages(lambda _p: {"message": "nope"}, what="x")
+
+    # Short final page under the cap succeeds.
+    pages = {1: full, 2: [{"id": "last"}]}
+    assert server._paginate_rest_pages(
+        lambda p: pages[p], what="issue events"
+    ) == full + [{"id": "last"}]
+
+    # tools/growth._paged: Link-rel next past the cap raises the same way.
+    monkeypatch.setattr(growth_github, "_MAX_PAGES", 2)
+    monkeypatch.setattr(
+        growth_github,
+        "_get",
+        lambda url, token: (
+            [{"n": 1}],
+            '<https://api.github.com/again>; rel="next"',
+        ),
+    )
+    with pytest.raises(RuntimeError, match="silently-truncated"):
+        growth_github._paged("https://api.github.com/start", "")

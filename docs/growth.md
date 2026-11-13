@@ -130,10 +130,13 @@ declines design requests). The queue is the contract between the seats:
   (which creates a new edit), then a new preview, then a re-label.
   Exactly one trusted preview after ``lastEditedAt`` — more is
   refuse-on-ambiguity. Unreadable timeline/comments/label-removal → fail
-  closed. Enforces one post per queue item ever, caps posts per run, and
-  decides dry-run vs live itself — the model never does. After a live post
-  it closes the drained item; after a dry run / self-migrate it only
-  comments.
+  closed. Paginated REST walks (issue comments, issue events) share a hard
+  page cap with ``tools/growth``: hitting the cap raises rather than
+  returning a truncated oldest-first prefix (a silent prefix can drop the
+  newest revocation). Enforces one post per queue item ever, caps posts per
+  run, and decides dry-run vs live itself — the model never does. After a
+  live post it closes the drained item; after a dry run / self-migrate it
+  only comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
   weighted-length rule, root-@tag preservation, trusted-preview + human
   approval gates, the drain policy, a minimal cron matcher, the
@@ -335,7 +338,7 @@ cadence parity is `cadence-sync-check.sh`-covered.
 |---|---|
 | A prompt-injected queue item steers the agent | The item is DATA (the context banner); the agent's only write is `post_tweet`; the tool re-reads state, binds to the trusted candidate set, hardcodes markers, applies no labels — at worst the item's own copy is bad, which a human reads before it can go live |
 | The agent invents a fact, number, or link | The skill's fact-budget rule; the dry-run comment surfaces the copy for review before approval; the Link is the queue item's, verbatim |
-| A post goes out twice | The claim-first marker: the `posted` marker is written on the issue BEFORE the first tweet, so a *mid-thread* or bookkeeping failure keeps it and loses at most one post a human retries deliberately — never a channel duplicate; all comment pages are walked |
+| A post goes out twice | The claim-first marker: the `posted` marker is written on the issue BEFORE the first tweet, so a *mid-thread* or bookkeeping failure keeps it and loses at most one post a human retries deliberately — never a channel duplicate; all comment pages are walked (page-cap hit fails closed, never truncates) |
 | A rejected post strands the item behind a false claim | The complement of claim-first: a **first-tweet** rejection published nothing, so the tool **withdraws** the claim and records the reason — the `⚠️ Growth post failed` comment carries X's actual error body (`poster.py` reads it instead of swallowing the HTTP status), and the item stays retryable rather than frozen until a human hand-deletes a marker (the credits-depleted 402 lesson) |
 | Over-long copy burns an approval at the API | The weighted-length guard refuses at compose review time (tool + simulator), parity-pinned against the reference rule |
 | The poster refills its own queue | Its backstop denies `mcp__growth_queue` (pinned by `growth-perms-check.sh` with a negative control); the reverse — the queuer reaching the channel — is closed the same way: `reeve-growth`, the one scheduled routine that *owns* the queue server, denies the poster `mcp__growth_twitter`, pinned by `reeve-growth-perms-check.sh` with its own negative control. Every *other* sibling backstop denies **both** growth servers |
