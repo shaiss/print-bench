@@ -162,9 +162,10 @@ _HANDLE_SCAN_RE = re.compile(
 _POSTED_MENTION_RE = re.compile(
     r"(?<![A-Za-z0-9_])[@\uff20\ufe6b][A-Za-z0-9_]+")
 # Optional CR so GitHub CRLF bodies still match the heading.
+# h2 (##, MCP/template) and h3 (###, GitHub issue-form field labels).
 _MESSAGE_HEADING_RE = re.compile(
-    r"^##[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE)
-_NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
+    r"^#{2,3}[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^#{2,3}[ \t]+\S", re.MULTILINE)
 
 
 class _RootTagsError(ValueError):
@@ -423,6 +424,7 @@ def _ensure_root_tags(text, required, drafted=""):
             draft_urls = set(_extract_urls(drafted))
             missing_urls = [u for u in composed_urls if u not in draft_urls]
             candidate = drafted
+            use_drafted = True
             if missing_urls:
                 url_suffix = " ".join(missing_urls)
                 if candidate and not candidate[-1].isspace():
@@ -432,12 +434,11 @@ def _ensure_root_tags(text, required, drafted=""):
                 if _tweet_weight(with_urls) <= MAX_WEIGHT:
                     candidate = with_urls
                 else:
-                    raise _RootTagsError(
-                        f"drafted ## Message fits the required handles but "
-                        f"cannot also carry the composed root's URL(s) within "
-                        f"{MAX_WEIGHT} weighted characters — refusing"
-                    )
-            return _assert_postable_text(candidate)
+                    # Fall through to append-on-composed rather than refuse
+                    # while append may still fit.
+                    use_drafted = False
+            if use_drafted:
+                return _assert_postable_text(candidate)
     missing = _missing_handles(text, required)
     if not missing:
         return _assert_postable_text(text)

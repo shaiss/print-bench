@@ -61,6 +61,7 @@ ROOTTAG_BODIES = [
     "## Message\n\nuser@host.com and @ok and @this_handle_is_way_too_long_for_x\n",
     "## Message\r\n\r\nCRLF draft @Prusa3D\r\n",
     "## Message\n\nURL path https://www.youtube.com/@CNC_Kitchen and @Prusa3D\n",
+    "### Message\n\nForm-filed root @Prusa3D\n\n### Link\n\nhttps://x\n",
 ]
 
 
@@ -127,6 +128,13 @@ def test_roottags_ensure_agrees_on_preserve_append_and_verbatim():
     assert server._ensure_root_tags(
         with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D"
     ) == ensure_root_tags(with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D")
+    # draft+URL overflow → fall through to append (both sides)
+    from growth.tweetlen import MAX_WEIGHT
+    fat = ("d" * (MAX_WEIGHT - 10)) + " @Prusa3D"
+    composed = f"Short. {link}"
+    assert server._ensure_root_tags(
+        composed, ["@Prusa3D"], drafted=fat
+    ) == ensure_root_tags(composed, ["@Prusa3D"], drafted=fat)
 
 
 def test_roottags_fail_closed_agrees():

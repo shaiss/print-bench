@@ -66,10 +66,12 @@ _POSTED_MENTION_RE = re.compile(
 # mentions (e.g. ``https://www.youtube.com/@CNC_Kitchen``).
 _URL_RE = re.compile(r"https?://\S+")
 # Optional CR so GitHub's CRLF bodies still match the heading.
+# Accept h2 (``##``, MCP / template filings) and h3 (``###``, GitHub
+# issue-form field labels) — both are the same section in practice.
 _MESSAGE_HEADING_RE = re.compile(
-    r"^##[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE
+    r"^#{2,3}[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE
 )
-_NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^#{2,3}[ \t]+\S", re.MULTILINE)
 
 # Dry-run / live digest of the NFKC-normalized ## Message first paragraph.
 DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
@@ -288,11 +290,14 @@ def ensure_root_tags(
         assert_postable_text(drafted)
         if not missing_handles(drafted, required):
             # Drafted path: re-attach any URL the composed root had that the
-            # draft lacks (the queue Link), or refuse rather than drop it.
+            # draft lacks (the queue Link). If that overflows 280, fall through
+            # to append-on-composed — append may still fit (contract: raise
+            # only when NEITHER path works).
             composed_urls = extract_urls(text)
             draft_urls = set(extract_urls(drafted))
             missing_urls = [u for u in composed_urls if u not in draft_urls]
             candidate = drafted
+            use_drafted = True
             if missing_urls:
                 url_suffix = " ".join(missing_urls)
                 if candidate and not candidate[-1].isspace():
@@ -302,12 +307,9 @@ def ensure_root_tags(
                 if tweet_weight(with_urls) <= MAX_WEIGHT:
                     candidate = with_urls
                 else:
-                    raise RootTagsError(
-                        f"drafted ## Message fits the required handles but "
-                        f"cannot also carry the composed root's URL(s) within "
-                        f"{MAX_WEIGHT} weighted characters — refusing"
-                    )
-            return assert_postable_text(candidate)
+                    use_drafted = False
+            if use_drafted:
+                return assert_postable_text(candidate)
 
     missing = missing_handles(text, required)
     if not missing:

@@ -83,6 +83,19 @@ def test_message_root_paragraph_accepts_crlf_bodies():
     assert required_handles(body) == ["@Prusa3D"]
 
 
+def test_message_root_paragraph_accepts_h3_form_headings():
+    """GitHub issue forms render field labels as ``### Message``."""
+    body = (
+        "### Channel\n\ntwitter\n\n"
+        "### Message\n\nDrafted root with @Prusa3D\n\nMore intent.\n\n"
+        "### Link\n\nhttps://example.com/x\n"
+    )
+    assert message_root_paragraph(body) == "Drafted root with @Prusa3D"
+    assert required_handles(body) == ["@Prusa3D"]
+    # Stop at the next h3, not at a later ## elsewhere.
+    assert "https://example.com" not in message_root_paragraph(body)
+
+
 def test_required_handles_come_only_from_message_first_paragraph():
     body = SAMPLE_BODY + "\n\n## Extra\n\nAlso @BambuLab elsewhere\n"
     assert required_handles(body) == ["@Prusa3D", "@prusament"]
@@ -122,6 +135,21 @@ def test_drafted_fallback_preserves_composed_url():
     out = ensure_root_tags(composed, required, drafted=drafted)
     assert out == f"{drafted} {link}"
     assert tweet_weight(out) <= MAX_WEIGHT
+
+
+def test_drafted_url_overflow_falls_through_to_append():
+    """When draft+URL exceeds 280, append handles on the composed root."""
+    link = "https://github.com/shaiss/print-bench/tree/main/designs/x"
+    # Draft fits alone with the tag, but draft + URL (weight 23) overflows.
+    drafted = ("d" * (MAX_WEIGHT - 10)) + " @Prusa3D"
+    assert tweet_weight(drafted) <= MAX_WEIGHT
+    assert tweet_weight(f"{drafted} {link}") > MAX_WEIGHT
+    required = ["@Prusa3D"]
+    composed = f"Short rewrite. {link}"
+    out = ensure_root_tags(composed, required, drafted=drafted)
+    assert out == f"Short rewrite. {link} @Prusa3D"
+    assert tweet_weight(out) <= MAX_WEIGHT
+    assert missing_handles(out, required) == []
 
 
 def test_missing_tags_appended_when_drafted_does_not_fit_but_append_does():
