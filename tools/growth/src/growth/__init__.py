@@ -13,6 +13,9 @@ never depend on a model's judgment:
   approval requirement).
 * :mod:`growth.tweetlen` — the weighted tweet-length rule (URLs count as 23,
   wide code points as 2) the composing agent and the posting tool both obey.
+* :mod:`growth.roottags` — preserve every ``@handle`` from a queue item's
+  drafted ``## Message`` first paragraph in the root tweet (append or use
+  the draft verbatim; fail closed rather than post untagged).
 * :mod:`growth.queue` — the queue-drain ordering policy (priority first,
   then oldest), a pure function of a queue snapshot.
 * :mod:`growth.cron` — a minimal 5-field cron matcher so the simulator can
@@ -44,6 +47,7 @@ __all__ = [
     "github",
     "poster",
     "queue",
+    "roottags",
     "simulate",
     "tweetlen",
 ]

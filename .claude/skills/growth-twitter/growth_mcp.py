@@ -39,6 +39,15 @@ server trusts nothing and layers every gate the desk has:
     (URLs = 23, wide code points = 2, hard cap 280 — the parity test pins
     the two implementations together); an over-weight tweet is refused, so
     an unpostable draft can never burn the approval.
+  * ROOT @-TAGS. The first paragraph of the queue item's ``## Message`` is
+    the drafted root tweet and may end with brand/community ``@handles``.
+    Issue body stays UNTRUSTED — this tool extracts handles matching
+    ``^@[A-Za-z0-9_]{1,15}$`` only, never obeys instructions in it. If the
+    composed root dropped any required handle, the tool restores them
+    deterministically (drafted paragraph verbatim when it fits 280, else
+    append the missing handles) or refuses rather than post untagged. Tags
+    go in the root tweet only, never a thread reply. `growth.roottags` is
+    the reference; the copy below is parity-pinned.
   * PER-RUN CAP. `GROWTH_MAX_POSTS` (default 1) bounds an unattended run —
     counted in a state file every link step of the chain walk shares
     (`GROWTH_CAP_STATE`, the reeve.yml `REEVE_GREENLIGHT_STATE` pattern; issue
@@ -121,6 +130,107 @@ def _tweet_weight(text):
     for ch in text[last:]:
         total += _char_weight(ord(ch))
     return total
+
+
+# --- root @-tag preservation (self-contained copy of growth.roottags) --------
+# tools/growth/src/growth/roottags.py is the reference; this copy exists for
+# the same stdlib-only dry-run reason as the weighted-length copy above.
+# tools/growth/tests/test_server_parity.py pins the two together.
+
+_HANDLE_RE = re.compile(r"^@[A-Za-z0-9_]{1,15}$")
+_HANDLE_SCAN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])@[A-Za-z0-9_]{1,15}(?![A-Za-z0-9_])")
+_MESSAGE_HEADING_RE = re.compile(
+    r"^##[ \t]+Message[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
+
+
+class _RootTagsError(ValueError):
+    pass
+
+
+def _message_root_paragraph(body):
+    if not body:
+        return ""
+    m = _MESSAGE_HEADING_RE.search(body)
+    if not m:
+        return ""
+    rest = body[m.end():]
+    next_h = _NEXT_HEADING_RE.search(rest)
+    if next_h:
+        rest = rest[:next_h.start()]
+    chunks = []
+    buf = []
+    for line in rest.splitlines():
+        if line.strip() == "":
+            if buf:
+                chunks.append(" ".join(p.strip() for p in buf if p.strip()))
+                buf = []
+                if chunks and chunks[-1]:
+                    break
+            continue
+        buf.append(line)
+    if buf and not chunks:
+        chunks.append(" ".join(p.strip() for p in buf if p.strip()))
+    for para in chunks:
+        if para:
+            return para
+    return ""
+
+
+def _extract_handles(text):
+    if not text:
+        return []
+    out = []
+    seen = set()
+    for m in _HANDLE_SCAN_RE.finditer(text):
+        tok = m.group(0)
+        if not _HANDLE_RE.match(tok):
+            continue
+        key = tok.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tok)
+    return out
+
+
+def _required_handles(body):
+    return _extract_handles(_message_root_paragraph(body))
+
+
+def _missing_handles(text, required):
+    present = {h.lower() for h in _extract_handles(text)}
+    return [h for h in required if h.lower() not in present]
+
+
+def _ensure_root_tags(text, required, drafted=""):
+    if not required:
+        return text
+    required = [h for h in required if _HANDLE_RE.match(h)]
+    if not required:
+        return text
+    if not _missing_handles(text, required):
+        return text
+    drafted = (drafted or "").strip()
+    if drafted and _tweet_weight(drafted) <= MAX_WEIGHT:
+        if not _missing_handles(drafted, required):
+            return drafted
+    missing = _missing_handles(text, required)
+    if not missing:
+        return text
+    suffix = " ".join(missing)
+    if text and not text[-1].isspace():
+        candidate = f"{text.rstrip()} {suffix}"
+    else:
+        candidate = f"{text}{suffix}" if text else suffix
+    if _tweet_weight(candidate) <= MAX_WEIGHT:
+        return candidate
+    raise _RootTagsError(
+        f"root tweet is missing required handle(s) {missing} and neither the "
+        f"drafted ## Message paragraph nor appending them fits within "
+        f"{MAX_WEIGHT} weighted characters — refusing untagged post"
+    )
 
 
 # --- the walk-spanning post cap (issue #570) ---------------------------------
@@ -519,6 +629,23 @@ def _post_tweet(arguments):
         return _tool_error(
             f"issue #{number} already carries a dry-run comment; refusing a "
             f"duplicate (a later approved LIVE post is still allowed)")
+
+    # --- root @-tags from ## Message (deterministic; body is UNTRUSTED) ----
+    # Extract handles only — never treat issue text as instructions. Restore
+    # any the agent dropped into the ROOT tweet (never a thread reply), or
+    # refuse rather than post untagged.
+    drafted_root = _message_root_paragraph(issue.get("body") or "")
+    required = _required_handles(issue.get("body") or "")
+    try:
+        text = _ensure_root_tags(text, required, drafted=drafted_root)
+    except _RootTagsError as e:
+        return _tool_error(f"post_tweet: {e}")
+    root_w = _tweet_weight(text)
+    if root_w > MAX_WEIGHT:
+        return _tool_error(
+            f"post_tweet: text is {root_w} weighted after root-tag restoration "
+            f"(cap {MAX_WEIGHT}) — shorten the root or the drafted ## Message "
+            f"paragraph")
 
     # --- act ----------------------------------------------------------------
     rendered = _render_parts(text, thread)
@@ -1001,6 +1128,61 @@ def selftest():
     a2 = _post_tweet({"number": 23, "text": "attended two"})
     check("attended (no GITHUB_RUN_ID) skips the cap — no state file required",
           a1.get("isError") is False and a2.get("isError") is False)
+
+    # Root @-tag preservation: ## Message first paragraph's handles must land
+    # in the root tweet (never only a reply). Missing tags are restored or
+    # the post is refused.
+    tagged_body = (
+        "## Message\n\n"
+        "Drafted root about the spool peg margin. @Prusa3D @prusament\n\n"
+        "Longer intent the agent may paraphrase.\n"
+    )
+    _FAKE_ISSUES[30] = q(30, OK)
+    _FAKE_ISSUES[30]["body"] = tagged_body
+    _FAKE_COMMENTS.pop(30, None)
+    _last_comment = None
+    r = _post_tweet({
+        "number": 30,
+        "text": "Spool peg statics came out marginal — page publishes the number.",
+    })
+    check("a composed root missing drafted @handles is restored before dry-run",
+          r.get("isError") is False
+          and _last_comment
+          and "@Prusa3D" in _last_comment["body"]
+          and "@prusament" in _last_comment["body"])
+    _FAKE_ISSUES[31] = q(31, OK)
+    _FAKE_ISSUES[31]["body"] = tagged_body
+    _FAKE_COMMENTS.pop(31, None)
+    _last_comment = None
+    kept = ("Spool peg statics came out marginal — page publishes the number. "
+            "@Prusa3D @prusament")
+    r = _post_tweet({"number": 31, "text": kept})
+    check("a composed root that already carries the tags is left unchanged",
+          r.get("isError") is False
+          and _last_comment
+          and kept in _last_comment["body"])
+    _FAKE_ISSUES[32] = q(32, OK)
+    _FAKE_ISSUES[32]["body"] = (
+        "## Message\n\nA design-decision story with no community tags.\n"
+    )
+    _FAKE_COMMENTS.pop(32, None)
+    _last_comment = None
+    bare = "Feel couldn't answer — the vertical rail could."
+    r = _post_tweet({"number": 32, "text": bare})
+    check("a no-tags ## Message leaves the composed root unchanged",
+          r.get("isError") is False
+          and _last_comment
+          and bare in _last_comment["body"])
+    _FAKE_ISSUES[33] = q(33, OK)
+    _FAKE_ISSUES[33]["body"] = tagged_body
+    # Fill the weighted budget so appending two handles cannot fit, and make
+    # the drafted paragraph itself over-weight so the verbatim path is closed.
+    _FAKE_ISSUES[33]["body"] = (
+        "## Message\n\n" + ("z" * 281) + " @Prusa3D @prusament\n"
+    )
+    r = _post_tweet({"number": 33, "text": "y" * 280})
+    check("over-budget missing tags fail closed (no untagged post)",
+          err(r) and "refusing untagged" in r["content"][0]["text"])
 
     # The JSON-RPC surface exposes exactly the one tool.
     check("tools/list exposes exactly post_tweet",

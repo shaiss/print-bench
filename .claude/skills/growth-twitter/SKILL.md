@@ -110,6 +110,14 @@ uploaded, no install.
   "threads at 45° so both halves print supportless", "pulled it off the bed
   as one welded lump"). The queue item's fact budget tells you which one is
   on offer today.
+- **Keep the drafted root tags.** The first paragraph of `## Message` is the
+  drafted root tweet — often ending with brand/community `@handles` (e.g.
+  `@Prusa3D @CNC_Kitchen`). Keep every valid `@handle` from that paragraph
+  in your **root** `text` (never only in a thread reply). You may rewrite
+  the prose around them; you must not drop the tags. The posting tool
+  enforces this deterministically (`growth.roottags`): missing tags are
+  restored from the draft or appended, or the post is refused — so compose
+  with them in the root rather than relying on the backstop.
 - **One idea per tweet.** If the message genuinely needs more, a short
   thread (2–3 parts, 4 max) beats a dense single post: hook first, mechanism
   second, link last.
@@ -192,14 +200,17 @@ run's cap (`GROWTH_MAX_POSTS`, normally 1). For each item, in order:
    the item's Facts & sources or a committed file you opened this run. A
    fact you could not verify does not go in the tweet — compose from what
    survives, or skip the item and say why in your report.
-3. **Compose** per Channel craft: hook, ≤ 270 weighted, the item's Link,
-   thread only if the message needs it.
+3. **Compose** per Channel craft: hook, ≤ 270 weighted, every `@handle`
+   from the first paragraph of `## Message` in the **root** tweet, the
+   item's Link, thread only if the message needs it. Prefer keeping the
+   drafted root paragraph's tags in place; the tool will restore or refuse
+   if they go missing, but the dry-run should already show a tagged root.
 4. **Post it**: `post_tweet({ number: <n>, text, thread? })`. Dry-run mode
    (the default until a human arms live) leaves the would-be tweet as a
    comment on the queue issue — that comment IS your deliverable; tell the
    human it is there. A refusal (unapproved for live, duplicate, over
-   weight, out of set) is final for this run — fix what it names or move on;
-   never retry the same call unchanged.
+   weight, missing root tags that cannot fit, out of set) is final for this
+   run — fix what it names or move on; never retry the same call unchanged.
 5. **Report** one line per item: posted live / dry-ran / skipped and why.
 
 Attended (`/growth-twitter [issue-numbers]`), the same procedure applies —
