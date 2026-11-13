@@ -1,0 +1,5 @@
+# Printable parts (default render is the assembled preview).
+# Fitcheck parts are listed in ci.fitchecks and are never sliced.
+reference-head
+ladder-3
+ladder-2
