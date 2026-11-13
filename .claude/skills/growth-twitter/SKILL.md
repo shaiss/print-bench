@@ -14,7 +14,9 @@ Lark owns how Twitter/X says it: the hook, the thread shape, the weighted
 280 limit, the one link. By default every drain is a **dry run** — the
 would-be tweet lands as a comment on the queue issue for a human to read —
 and a live post additionally requires the human `approved-to-post` label AND
-the live key; the posting tool enforces all of it.
+the live key AND a matching workflow-bot dry-run `message-digest` (sha256 of
+the NFKC-normalized `## Message` first paragraph) with a body not edited
+after that label; the posting tool enforces all of it.
 
 ## The one boundary you may never cross
 

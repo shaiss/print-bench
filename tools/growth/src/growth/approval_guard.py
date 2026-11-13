@@ -1,27 +1,46 @@
-"""Post-approval body-edit guard for live growth-twitter posts.
+"""Post-approval body-edit + dry-run digest guards for live growth posts.
 
 The ``approved-to-post`` label is the human gate on a queue item. An author
 (or anyone with write access) can edit the issue body *after* that label is
 applied — and with root-@tag restoration, a post-approval edit of
 ``## Message`` becomes deterministic brand-account copy. This module is the
-pure half of the fix: given the latest approval timestamp and the body's
-``lastEditedAt``, decide whether the body is stale.
+pure half of the fix:
+
+* given the latest approval timestamp and the body's ``lastEditedAt``,
+  decide whether the body is stale;
+* given the issue's comments and the current body, decide whether a
+  trusted dry-run comment's ``message-digest`` still matches the
+  NFKC-normalized ``## Message`` first paragraph (approved-text binding).
 
 Fetch mechanics (issue events / GraphQL ``lastEditedAt``) live in the
 posting tool; this module never touches the network. Fail-closed for
-unreadable timestamps is the caller's job — this only compares what it is
-handed.
+unreadable timestamps / missing digests is the caller's job — this only
+compares what it is handed.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
+from .roottags import message_digest, parse_message_digest
+
 APPROVAL_LABEL = "approved-to-post"
+# The workflow posts dry-run comments with GITHUB_TOKEN → REST
+# ``github-actions[bot]`` / GraphQL ``github-actions``. Same normalization
+# as growth.daycap.
+TRUSTED_DRYRUN_AUTHORS = ("github-actions[bot]", "github-actions")
+DRYRUN_MARKER = "<!-- growth-twitter:dry-run -->"
 
 
 class ApprovalGuardError(ValueError):
-    """Timeline/edit info missing or the body was edited after approval."""
+    """Timeline/edit info missing, body edited after approval, or digest
+    binding failed."""
+
+
+def _norm_login(login: str) -> str:
+    login = (login or "").strip()
+    return login[:-5] if login.endswith("[bot]") else login
 
 
 def _parse_iso(ts: str) -> datetime:
@@ -113,3 +132,68 @@ def assert_body_fresh_for_live(
             f"(approved_at={approved_at}, last_edited_at={last_edited_at}) — "
             f"re-apply the approval label on the current body, or refuse"
         )
+
+
+def _comment_login(comment: dict) -> str:
+    user = comment.get("user") or comment.get("author") or {}
+    if isinstance(user, dict):
+        return user.get("login") or ""
+    return str(user or "")
+
+
+def latest_trusted_dryrun_digest(
+    comments: list[dict],
+    *,
+    trusted_authors: Iterable[str] = TRUSTED_DRYRUN_AUTHORS,
+    dryrun_marker: str = DRYRUN_MARKER,
+) -> str | None:
+    """sha256 from the latest dry-run comment authored by a trusted bot.
+
+    Looks only at comments that carry *dryrun_marker* AND a parseable
+    ``message-digest`` line, whose author normalizes to one of
+    *trusted_authors* (``[bot]``-suffix collapsed). Look-alike human
+    logins cannot match the reserved ``github-actions`` name. Returns
+    ``None`` when no such comment exists.
+    """
+    trusted = {_norm_login(a) for a in trusted_authors if a}
+    latest: str | None = None
+    for comment in comments or []:
+        body = comment.get("body") or ""
+        if dryrun_marker not in body:
+            continue
+        if _norm_login(_comment_login(comment)) not in trusted:
+            continue
+        digest = parse_message_digest(body)
+        if digest:
+            latest = digest
+    return latest
+
+
+def assert_digest_binds(
+    comments: list[dict],
+    body: str | None,
+    *,
+    trusted_authors: Iterable[str] = TRUSTED_DRYRUN_AUTHORS,
+    dryrun_marker: str = DRYRUN_MARKER,
+) -> str:
+    """Raise if no trusted dry-run digest matches the current Message paragraph.
+
+    Returns the matching digest hex on success.
+    """
+    recorded = latest_trusted_dryrun_digest(
+        comments, trusted_authors=trusted_authors, dryrun_marker=dryrun_marker
+    )
+    if recorded is None:
+        raise ApprovalGuardError(
+            "no trusted dry-run comment with a message-digest was found — "
+            "re-run a dry-run from the growth-twitter workflow, then approve; "
+            "refusing live post (fail closed)"
+        )
+    expected = message_digest(body)
+    if recorded != expected:
+        raise ApprovalGuardError(
+            f"dry-run message-digest {recorded} does not match current "
+            f"## Message first paragraph ({expected}) — body changed since "
+            f"the dry-run; re-dry-run and re-approve; refusing live post"
+        )
+    return expected

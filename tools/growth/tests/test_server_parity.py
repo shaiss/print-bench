@@ -16,15 +16,22 @@ from growth.approval_guard import (
     APPROVAL_LABEL,
     ApprovalGuardError,
     assert_body_fresh_for_live,
+    assert_digest_binds,
     body_edited_after_approval,
     latest_labeled_at,
+    latest_trusted_dryrun_digest,
 )
 from growth.roottags import (
     MAX_REQUIRED_HANDLES,
     RootTagsError,
+    assert_postable_text,
+    count_posted_mentions,
+    digest_comment_line,
     ensure_root_tags,
     extract_handles,
+    message_digest,
     message_root_paragraph,
+    parse_message_digest,
     required_handles,
 )
 from growth.tweetlen import tweet_weight
@@ -163,3 +170,71 @@ def test_approval_guard_parity_on_stale_and_fresh():
         assert_body_fresh_for_live(None, None)
     with pytest.raises(server._ApprovalGuardError):
         server._assert_body_fresh_for_live(None, None)
+
+
+def test_posted_mention_and_fullwidth_gates_agree():
+    server = _load_server()
+    for text in (
+        "plain",
+        "@a @b @c",
+        "x" * 40,
+    ):
+        assert server._count_posted_mentions(text) == count_posted_mentions(text)
+        assert server._assert_postable_text(text) == assert_postable_text(text)
+    for fw in ("\uff20", "\ufe6b"):
+        with pytest.raises(RootTagsError, match="full-width"):
+            assert_postable_text(f"hi {fw}X")
+        with pytest.raises(server._RootTagsError, match="full-width"):
+            server._assert_postable_text(f"hi {fw}X")
+    six = " ".join(f"@U{i}" for i in range(6))
+    with pytest.raises(RootTagsError, match="cap"):
+        ensure_root_tags(six, [])
+    with pytest.raises(server._RootTagsError, match="cap"):
+        server._ensure_root_tags(six, [])
+    # Drafted / append paths refuse full-width identically.
+    for fw in ("\uff20", "\ufe6b"):
+        drafted = f"Draft {fw}Prusa3D"
+        with pytest.raises(RootTagsError):
+            ensure_root_tags("rewrite", ["@Prusa3D"], drafted=drafted)
+        with pytest.raises(server._RootTagsError):
+            server._ensure_root_tags("rewrite", ["@Prusa3D"], drafted=drafted)
+        composed = f"short {fw}Sneaky"
+        fat_draft = "z" * 281 + " @Prusa3D"
+        with pytest.raises(RootTagsError):
+            ensure_root_tags(composed, ["@Prusa3D"], drafted=fat_draft)
+        with pytest.raises(server._RootTagsError):
+            server._ensure_root_tags(composed, ["@Prusa3D"], drafted=fat_draft)
+
+
+def test_message_digest_parity():
+    server = _load_server()
+    bodies = [
+        "",
+        "## Message\n\nHello @Prusa3D\n\nMore.\n",
+        "## Message\n\nNFKC \uff20fold @x\n",
+        "## Message\r\n\r\nCRLF @y\r\n",
+    ]
+    for body in bodies:
+        assert server._message_digest(body) == message_digest(body)
+        assert server._digest_comment_line(body) == digest_comment_line(body)
+        line = digest_comment_line(body)
+        assert server._parse_message_digest(line) == parse_message_digest(line)
+
+
+def test_digest_bind_parity():
+    server = _load_server()
+    body = "## Message\n\nBound @Prusa3D\n"
+    comments = [{
+        "body": f"<!-- growth-twitter:dry-run -->\n{digest_comment_line(body)}\n",
+        "user": {"login": "github-actions[bot]"},
+    }]
+    assert latest_trusted_dryrun_digest(comments) == (
+        server._latest_trusted_dryrun_digest(comments)
+    )
+    assert assert_digest_binds(comments, body) == (
+        server._assert_digest_binds(comments, body)
+    )
+    with pytest.raises(ApprovalGuardError):
+        assert_digest_binds([], body)
+    with pytest.raises(server._ApprovalGuardError):
+        server._assert_digest_binds([], body)

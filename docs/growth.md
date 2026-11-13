@@ -93,20 +93,25 @@ declines design requests). The queue is the contract between the seats:
   and `tools/growth/tests/test_server_parity.py` pins the server's copy to
   it),   preserves every `@handle` from the first paragraph of `## Message` in
   the **root** tweet (`growth.roottags` — extract-only from untrusted issue
-  text; at most 5 handles; restore via drafted paragraph or append, else
-  refuse untagged), refuses a LIVE post when the issue body was edited
-  after the `approved-to-post` labeled event (`growth.approval_guard` —
-  timeline/`lastEditedAt` unreadable → fail closed; dry-runs report and
-  continue), enforces one post per queue item ever (`<!-- growth-twitter:posted
-  -->` / `<!-- growth-twitter:dry-run -->` marker comments), caps posts per
-  run, applies no labels, and decides dry-run vs live itself — the model
-  never does. After a live post it closes the drained item (queue
-  semantics); after a dry run it only comments.
+  text; at most 5 ASCII handles; restore via drafted paragraph or append,
+  else refuse untagged; NFKC-normalize the final root and every thread part
+  and refuse full-width ``＠``/``﹫`` or more than 5 mention-shaped tokens),
+  refuses a LIVE post when the issue body was edited after the
+  `approved-to-post` labeled event **or** when the latest workflow-bot
+  dry-run's ``message-digest`` (sha256 of the NFKC-normalized ``## Message``
+  first paragraph) does not match the current body (`growth.approval_guard`
+  — timeline/`lastEditedAt`/digest unreadable → fail closed; dry-runs embed
+  the digest and report freeze staleness), enforces one post per queue item
+  ever (`<!-- growth-twitter:posted -->` / `<!-- growth-twitter:dry-run -->`
+  marker comments), caps posts per run, applies no labels, and decides
+  dry-run vs live itself — the model never does. After a live post it closes
+  the drained item (queue semantics); after a dry run it only comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
-  weighted-length rule, root-@tag preservation, post-approval body freeze,
-  the drain policy, a minimal cron matcher, the per-UTC-day live-post cap
-  (`daycap`), the accelerated-timeline simulator, the OAuth 1.0a X poster
-  seam), stdlib-only with its own pytest suite; see its README.
+  weighted-length rule, root-@tag preservation, post-approval body freeze +
+  dry-run digest binding, the drain policy, a minimal cron matcher, the
+  per-UTC-day live-post cap (`daycap`), the accelerated-timeline simulator,
+  the OAuth 1.0a X poster seam), stdlib-only with its own pytest suite; see
+  its README.
 * **The routine** — `.github/workflows/growth-twitter.yml` +
   `.github/growth-twitter.conf` (enabled / provider / cadence /
   `max_posts_per_run` / `max_posts_per_day` / `require_approval`, parsed by tools/growth's own

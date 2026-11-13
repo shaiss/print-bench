@@ -18,31 +18,50 @@ Recovery order when the composed root is missing any required handle:
    untagged.
 
 Tags belong in the root tweet only; callers must never apply this to a
-thread reply. Handles must match ``^@[A-Za-z0-9_]{1,15}$`` (X's screen-name
-shape); anything else in the paragraph is ignored, not trusted as a tag.
+thread reply. Handles extracted as *required* must match
+``^@[A-Za-z0-9_]{1,15}$`` (ASCII only — never emit full-width markers).
+
+Posted-text gates (every return path, and every thread part the caller
+posts):
+
+* refuse any text containing full-width at-signs ``＠`` (U+FF20) or ``﹫``
+  (U+FE6B) — X treats them as mentions, and we never emit them;
+* NFKC-normalize, then count every mention-shaped token
+  (``@`` / ``＠`` / ``﹫`` + handle chars of any length); refuse above
+  :data:`MAX_REQUIRED_HANDLES`.
 
 A drafted root may declare at most :data:`MAX_REQUIRED_HANDLES` valid
-handles; more than that is refused (an unbounded tag list is an injection
-surface via the append/verbatim paths). Live posting additionally requires
-the issue body not to have been edited after ``approved-to-post`` — see
-:mod:`growth.approval_guard`.
+ASCII handles; more than that is refused. Live posting additionally
+requires the issue body not to have been edited after ``approved-to-post``
+and a trusted dry-run digest binding — see :mod:`growth.approval_guard`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 
 from .tweetlen import MAX_WEIGHT, tweet_weight
 
-# Hard cap on @handles required from ## Message's first paragraph. Above this
-# the posting tool refuses — never silently truncates (truncation would drop
-# tags the draft declared).
+# Hard cap on @handles required from ## Message's first paragraph AND on
+# mentions actually posted (root + each thread part). Above this the posting
+# tool refuses — never silently truncates.
 MAX_REQUIRED_HANDLES = 5
 
+# Full-width at-signs X also treats as mention markers. Never emit these;
+# count them (via NFKC → `@`) toward the posted-mention cap.
+FULLWIDTH_AT = ("\uff20", "\ufe6b")  # ＠  ﹫
+
 HANDLE_RE = re.compile(r"^@[A-Za-z0-9_]{1,15}$")
-# Token scan: @handle bounded so ``user@host`` emails and longer tokens
-# never become required tags. Length is re-checked by HANDLE_RE.
+# Token scan for *required* ASCII handles (URL-excluded). Full-width markers
+# are NOT promoted into required handles — they only feed the posted cap /
+# refuse gates.
 _HANDLE_SCAN_RE = re.compile(r"(?<![A-Za-z0-9_])@[A-Za-z0-9_]{1,15}(?![A-Za-z0-9_])")
+# Posted-mention count: any of the three markers + handle chars of ANY length.
+_POSTED_MENTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[@\uff20\ufe6b][A-Za-z0-9_]+"
+)
 # Same URL shape tweetlen meters — handles inside a URL must not count as
 # mentions (e.g. ``https://www.youtube.com/@CNC_Kitchen``).
 _URL_RE = re.compile(r"https?://\S+")
@@ -52,9 +71,17 @@ _MESSAGE_HEADING_RE = re.compile(
 )
 _NEXT_HEADING_RE = re.compile(r"^##[ \t]+\S", re.MULTILINE)
 
+# Dry-run / live digest of the NFKC-normalized ## Message first paragraph.
+DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
+DIGEST_RE = re.compile(
+    r"<!--\s*growth-twitter:message-digest:sha256=([0-9a-f]{64})\s*-->",
+    re.IGNORECASE,
+)
+
 
 class RootTagsError(ValueError):
-    """Required handles over cap, or cannot fit every @handle within 280 weight."""
+    """Required handles over cap, unsafe full-width markers, or cannot fit
+    every @handle within 280 weight."""
 
 
 def message_root_paragraph(body: str | None) -> str:
@@ -95,6 +122,31 @@ def message_root_paragraph(body: str | None) -> str:
     return ""
 
 
+def message_digest(body: str | None) -> str:
+    """sha256 hex of the NFKC-normalized ``## Message`` first paragraph.
+
+    This is what dry-run comments record and live posts re-check — binding
+    approval to the drafted root text (not the whole issue body), because
+    that paragraph is what the verbatim restore path can publish.
+    """
+    para = message_root_paragraph(body)
+    nfkc = unicodedata.normalize("NFKC", para)
+    return hashlib.sha256(nfkc.encode("utf-8")).hexdigest()
+
+
+def digest_comment_line(body: str | None) -> str:
+    """The HTML comment line to embed in a dry-run outcome comment."""
+    return f"{DIGEST_PREFIX}{message_digest(body)} -->"
+
+
+def parse_message_digest(comment_body: str | None) -> str | None:
+    """Extract the sha256 hex from a dry-run comment, or ``None``."""
+    if not comment_body:
+        return None
+    m = DIGEST_RE.search(comment_body)
+    return m.group(1).lower() if m else None
+
+
 def _url_spans(text: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
 
@@ -107,10 +159,9 @@ def _in_spans(pos: int, spans: list[tuple[int, int]]) -> bool:
 
 
 def extract_handles(text: str | None) -> list[str]:
-    """Valid ``@handles`` in *text*, draft order, first-seen casing, deduped
-    case-insensitively. Invalid tokens are dropped — never promoted. Handles
-    that fall inside a URL span are ignored (a YouTube ``/@user`` path is not
-    an @-mention)."""
+    """Valid ASCII ``@handles`` in *text*, draft order, first-seen casing,
+    deduped case-insensitively. Invalid tokens and URL-path ``@`` are
+    dropped — never promoted. Full-width markers are never returned."""
     if not text:
         return []
     spans = _url_spans(text)
@@ -145,13 +196,45 @@ def extract_urls(text: str | None) -> list[str]:
     return out
 
 
+def count_posted_mentions(text: str | None) -> int:
+    """Mention-shaped tokens after NFKC, counting ``@``/``＠``/``＠`` + any
+    length of ``[A-Za-z0-9_]``. Used for the posted-text cap."""
+    nfkc = unicodedata.normalize("NFKC", text or "")
+    return len(_POSTED_MENTION_RE.findall(nfkc))
+
+
+def assert_postable_text(text: str | None) -> str:
+    """Refuse full-width at-signs and over-cap mention counts on text that
+    would be posted (root or thread part). Returns *text* unchanged on
+    success (never rewrites markers into ASCII for emission)."""
+    raw = text if text is not None else ""
+    for ch in FULLWIDTH_AT:
+        if ch in raw:
+            raise RootTagsError(
+                f"full-width at-sign (U+{ord(ch):04X}) in postable text — "
+                f"refusing (never emit full-width mentions)"
+            )
+    n = count_posted_mentions(raw)
+    if n > MAX_REQUIRED_HANDLES:
+        raise RootTagsError(
+            f"postable text carries {n} mention(s) "
+            f"(cap {MAX_REQUIRED_HANDLES}); refusing"
+        )
+    return raw
+
+
 def required_handles(body: str | None) -> list[str]:
     """Handles the root tweet must carry, from ``## Message``'s first paragraph.
 
     Raises :class:`RootTagsError` when the draft declares more than
-    :data:`MAX_REQUIRED_HANDLES` valid handles (refuse, never truncate).
+    :data:`MAX_REQUIRED_HANDLES` valid ASCII handles (refuse, never truncate),
+    or when the paragraph itself fails :func:`assert_postable_text` (e.g.
+    full-width markers or NFKC mention count over the cap).
     """
-    handles = extract_handles(message_root_paragraph(body))
+    para = message_root_paragraph(body)
+    # Posted-cap on the draft itself — catches ``@A1 ＠B1 …`` before restore.
+    assert_postable_text(para)
+    handles = extract_handles(para)
     if len(handles) > MAX_REQUIRED_HANDLES:
         raise RootTagsError(
             f"## Message root declares {len(handles)} @handles "
@@ -183,23 +266,26 @@ def ensure_root_tags(
 
     *text* is the agent's composed root. *drafted* is ``## Message``'s first
     paragraph (may be empty). Raises :class:`RootTagsError` when neither the
-    drafted paragraph nor an append can fit every tag under :data:`MAX_WEIGHT`.
+    drafted paragraph nor an append can fit every tag under :data:`MAX_WEIGHT`,
+    or when the chosen root fails :func:`assert_postable_text`.
 
-    When *required* is empty the composed *text* is returned unchanged.
+    When *required* is empty the composed *text* is still run through the
+    posted-mention gates (full-width refuse + NFKC count cap).
     """
-    if not required:
-        return text
+    # Filter to the strict ASCII pattern only — never emit full-width handles.
+    required = [h for h in required if HANDLE_RE.match(h)] if required else []
 
-    # Filter to the strict pattern only — a caller must not widen the set.
-    required = [h for h in required if HANDLE_RE.match(h)]
     if not required:
-        return text
+        return assert_postable_text(text)
 
     if not missing_handles(text, required):
-        return text
+        return assert_postable_text(text)
 
     drafted = (drafted or "").strip()
     if drafted and tweet_weight(drafted) <= MAX_WEIGHT:
+        # Refuse drafted path when it carries full-width markers or too many
+        # mentions — never publish it verbatim in that case.
+        assert_postable_text(drafted)
         if not missing_handles(drafted, required):
             # Drafted path: re-attach any URL the composed root had that the
             # draft lacks (the queue Link), or refuse rather than drop it.
@@ -221,18 +307,18 @@ def ensure_root_tags(
                         f"cannot also carry the composed root's URL(s) within "
                         f"{MAX_WEIGHT} weighted characters — refusing"
                     )
-            return candidate
+            return assert_postable_text(candidate)
 
     missing = missing_handles(text, required)
     if not missing:
-        return text
+        return assert_postable_text(text)
     suffix = " ".join(missing)
     if text and not text[-1].isspace():
         candidate = f"{text.rstrip()} {suffix}"
     else:
         candidate = f"{text}{suffix}" if text else suffix
     if tweet_weight(candidate) <= MAX_WEIGHT:
-        return candidate
+        return assert_postable_text(candidate)
 
     raise RootTagsError(
         f"root tweet is missing required handle(s) {missing} and neither the "

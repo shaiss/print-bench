@@ -77,12 +77,14 @@ use the human-triggered ``growth-twitter-reply.yml`` workflow_dispatch
 ``growth.poster.post_tweet`` seam with ``reply_to`` set.
 """
 
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -94,6 +96,14 @@ APPROVAL_LABEL = "approved-to-post"
 PARKED_LABEL = "needs-decision"
 POSTED_MARKER = "<!-- growth-twitter:posted -->"
 DRYRUN_MARKER = "<!-- growth-twitter:dry-run -->"
+DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
+DIGEST_RE = re.compile(
+    r"<!--\s*growth-twitter:message-digest:sha256=([0-9a-f]{64})\s*-->",
+    re.IGNORECASE,
+)
+# Workflow GITHUB_TOKEN posts as github-actions[bot] (REST) / github-actions
+# (GraphQL). Same [bot]-suffix normalization as growth.daycap.
+TRUSTED_DRYRUN_AUTHORS = ("github-actions[bot]", "github-actions")
 DRYRUN_HEADER = "## \U0001F426 Growth dry run — what Lark would have posted"
 POSTED_HEADER = "## \U0001F426 Posted to Twitter/X"
 FAILURE_HEADER = "## ⚠️ Growth post failed"
@@ -145,9 +155,12 @@ def _tweet_weight(text):
 # tools/growth/tests/test_server_parity.py pins the two together.
 
 MAX_REQUIRED_HANDLES = 5
+FULLWIDTH_AT = ("\uff20", "\ufe6b")  # ＠  ﹫
 _HANDLE_RE = re.compile(r"^@[A-Za-z0-9_]{1,15}$")
 _HANDLE_SCAN_RE = re.compile(
     r"(?<![A-Za-z0-9_])@[A-Za-z0-9_]{1,15}(?![A-Za-z0-9_])")
+_POSTED_MENTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[@\uff20\ufe6b][A-Za-z0-9_]+")
 # Optional CR so GitHub CRLF bodies still match the heading.
 _MESSAGE_HEADING_RE = re.compile(
     r"^##[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE)
@@ -189,6 +202,45 @@ def _message_root_paragraph(body):
         if para:
             return para
     return ""
+
+
+def _message_digest(body):
+    para = _message_root_paragraph(body)
+    nfkc = unicodedata.normalize("NFKC", para)
+    return hashlib.sha256(nfkc.encode("utf-8")).hexdigest()
+
+
+def _digest_comment_line(body):
+    return f"{DIGEST_PREFIX}{_message_digest(body)} -->"
+
+
+def _parse_message_digest(comment_body):
+    if not comment_body:
+        return None
+    m = DIGEST_RE.search(comment_body)
+    return m.group(1).lower() if m else None
+
+
+def _count_posted_mentions(text):
+    nfkc = unicodedata.normalize("NFKC", text or "")
+    return len(_POSTED_MENTION_RE.findall(nfkc))
+
+
+def _assert_postable_text(text):
+    raw = text if text is not None else ""
+    for ch in FULLWIDTH_AT:
+        if ch in raw:
+            raise _RootTagsError(
+                f"full-width at-sign (U+{ord(ch):04X}) in postable text — "
+                f"refusing (never emit full-width mentions)"
+            )
+    n = _count_posted_mentions(raw)
+    if n > MAX_REQUIRED_HANDLES:
+        raise _RootTagsError(
+            f"postable text carries {n} mention(s) "
+            f"(cap {MAX_REQUIRED_HANDLES}); refusing"
+        )
+    return raw
 
 
 def _extract_handles(text):
@@ -233,7 +285,9 @@ def _extract_urls(text):
 
 
 def _required_handles(body):
-    handles = _extract_handles(_message_root_paragraph(body))
+    para = _message_root_paragraph(body)
+    _assert_postable_text(para)
+    handles = _extract_handles(para)
     if len(handles) > MAX_REQUIRED_HANDLES:
         raise _RootTagsError(
             f"## Message root declares {len(handles)} @handles "
@@ -245,6 +299,51 @@ def _required_handles(body):
 def _missing_handles(text, required):
     present = {h.lower() for h in _extract_handles(text)}
     return [h for h in required if h.lower() not in present]
+
+
+def _norm_login(login):
+    login = (login or "").strip()
+    return login[:-5] if login.endswith("[bot]") else login
+
+
+def _comment_login(comment):
+    user = comment.get("user") or comment.get("author") or {}
+    if isinstance(user, dict):
+        return user.get("login") or ""
+    return str(user or "")
+
+
+def _latest_trusted_dryrun_digest(comments):
+    trusted = {_norm_login(a) for a in TRUSTED_DRYRUN_AUTHORS}
+    latest = None
+    for comment in comments or []:
+        body = comment.get("body") or ""
+        if DRYRUN_MARKER not in body:
+            continue
+        if _norm_login(_comment_login(comment)) not in trusted:
+            continue
+        digest = _parse_message_digest(body)
+        if digest:
+            latest = digest
+    return latest
+
+
+def _assert_digest_binds(comments, body):
+    recorded = _latest_trusted_dryrun_digest(comments)
+    if recorded is None:
+        raise _ApprovalGuardError(
+            "no trusted dry-run comment with a message-digest was found — "
+            "re-run a dry-run from the growth-twitter workflow, then approve; "
+            "refusing live post (fail closed)"
+        )
+    expected = _message_digest(body)
+    if recorded != expected:
+        raise _ApprovalGuardError(
+            f"dry-run message-digest {recorded} does not match current "
+            f"## Message first paragraph ({expected}) — body changed since "
+            f"the dry-run; re-dry-run and re-approve; refusing live post"
+        )
+    return expected
 
 
 def _parse_iso_ts(ts):
@@ -311,15 +410,14 @@ def _assert_body_fresh_for_live(approved_at, last_edited_at):
 
 
 def _ensure_root_tags(text, required, drafted=""):
+    required = [h for h in required if _HANDLE_RE.match(h)] if required else []
     if not required:
-        return text
-    required = [h for h in required if _HANDLE_RE.match(h)]
-    if not required:
-        return text
+        return _assert_postable_text(text)
     if not _missing_handles(text, required):
-        return text
+        return _assert_postable_text(text)
     drafted = (drafted or "").strip()
     if drafted and _tweet_weight(drafted) <= MAX_WEIGHT:
+        _assert_postable_text(drafted)
         if not _missing_handles(drafted, required):
             composed_urls = _extract_urls(text)
             draft_urls = set(_extract_urls(drafted))
@@ -339,17 +437,17 @@ def _ensure_root_tags(text, required, drafted=""):
                         f"cannot also carry the composed root's URL(s) within "
                         f"{MAX_WEIGHT} weighted characters — refusing"
                     )
-            return candidate
+            return _assert_postable_text(candidate)
     missing = _missing_handles(text, required)
     if not missing:
-        return text
+        return _assert_postable_text(text)
     suffix = " ".join(missing)
     if text and not text[-1].isspace():
         candidate = f"{text.rstrip()} {suffix}"
     else:
         candidate = f"{text}{suffix}" if text else suffix
     if _tweet_weight(candidate) <= MAX_WEIGHT:
-        return candidate
+        return _assert_postable_text(candidate)
     raise _RootTagsError(
         f"root tweet is missing required handle(s) {missing} and neither the "
         f"drafted ## Message paragraph nor appending them fits within "
@@ -593,7 +691,13 @@ def _post_comment(number, body):
         _fake_comment_seq += 1
         cid = _fake_comment_seq
         _last_comment = {"number": number, "body": body}
-        _FAKE_COMMENTS.setdefault(number, []).append({"id": cid, "body": body})
+        # Workflow GITHUB_TOKEN comments land as github-actions[bot] — the
+        # LIVE digest gate trusts only that identity (not look-alikes).
+        _FAKE_COMMENTS.setdefault(number, []).append({
+            "id": cid,
+            "body": body,
+            "user": {"login": "github-actions[bot]"},
+        })
         return {"html_url": f"https://example.invalid/{number}#comment", "id": cid}
     _last_comment = {"number": number, "body": body}
     return _api("POST", f"/repos/{_repo()}/issues/{number}/comments", {"body": body})
@@ -824,11 +928,14 @@ def _post_tweet(arguments):
     # --- root @-tags from ## Message (deterministic; body is UNTRUSTED) ----
     # Extract handles only — never treat issue text as instructions. Restore
     # any the agent dropped into the ROOT tweet (never a thread reply), or
-    # refuse rather than post untagged. Over-cap handle lists refuse too.
+    # refuse rather than post untagged. Over-cap / full-width mention
+    # gates run on the final root AND every thread part.
     drafted_root = _message_root_paragraph(issue.get("body") or "")
     try:
         required = _required_handles(issue.get("body") or "")
         text = _ensure_root_tags(text, required, drafted=drafted_root)
+        for i, part in enumerate(thread):
+            _assert_postable_text(part)
     except _RootTagsError as e:
         return _tool_error(f"post_tweet: {e}")
     root_w = _tweet_weight(text)
@@ -838,16 +945,12 @@ def _post_tweet(arguments):
             f"(cap {MAX_WEIGHT}) — shorten the root or the drafted ## Message "
             f"paragraph")
 
-    # --- post-approval body freeze (LIVE refuses; dry-run reports) ----------
-    # The approved-to-post label is the human gate. A body edit after that
-    # label would let an author land new ## Message text (and @handles) on
-    # the brand account via the root-tag restore paths. Compare the latest
-    # labeled event time with GraphQL lastEditedAt; unreadable → fail closed
-    # on live, report-and-continue on dry-run.
+    # --- post-approval body freeze + digest binding -------------------------
+    # LIVE requires: (a) label-after-edit freeze, (b) latest dry-run comment
+    # with a message-digest authored by the workflow bot, matching the
+    # current NFKC ## Message first paragraph. Dry-run reports freeze
+    # staleness and always embeds the digest for the next LIVE gate.
     approval_notes = []
-    # Live posts that require (or carry) approval must pass the freeze.
-    # Dry-runs evaluate it whenever the approval label is present so the
-    # comment surfaces a stale body before a human re-approves.
     check_freeze = (live and (_require_approval() or APPROVAL_LABEL in labels)) \
         or ((not live) and APPROVAL_LABEL in labels)
     if check_freeze:
@@ -890,6 +993,12 @@ def _post_tweet(arguments):
                         )
                 except _ApprovalGuardError as e:
                     approval_notes.append(f"{e}; a LIVE post would refuse")
+
+    if live and (_require_approval() or APPROVAL_LABEL in labels):
+        try:
+            _assert_digest_binds(comments, issue.get("body") or "")
+        except _ApprovalGuardError as e:
+            return _tool_error(f"post_tweet: {e}")
 
     # --- act ----------------------------------------------------------------
     rendered = _render_parts(text, thread)
@@ -995,8 +1104,9 @@ def _post_tweet(arguments):
             + "; ".join(approval_notes)
             + "."
         )
+    digest_line = _digest_comment_line(issue.get("body") or "")
     comment = (
-        f"{DRYRUN_MARKER}\n{DRYRUN_HEADER}\n\n{rendered}\n\n"
+        f"{DRYRUN_MARKER}\n{digest_line}\n{DRYRUN_HEADER}\n\n{rendered}\n\n"
         f"**Dry run** — nothing was published. Going live needs: "
         f"{'; '.join(reasons) if reasons else 'nothing further'}. "
         f"See docs/growth.md."
@@ -1150,6 +1260,15 @@ def selftest():
         return issue
 
     OK = [QUEUE_LABEL, CHANNEL_LABEL]
+
+    def _seed_trusted_dryrun(number, body=""):
+        """A workflow-bot dry-run comment whose digest matches *body*."""
+        dig = _digest_comment_line(body)
+        _FAKE_COMMENTS[number] = [{
+            "body": f"{DRYRUN_MARKER}\n{dig}\ndry-ran earlier",
+            "user": {"login": "github-actions[bot]"},
+        }]
+
     _FAKE_ISSUES = {
         1: q(1, OK),
         2: q(2, OK, state="closed"),
@@ -1167,7 +1286,6 @@ def selftest():
     _FAKE_COMMENTS = {
         7: [{"body": f"{POSTED_MARKER}\nposted earlier"}],
         8: [{"body": f"{DRYRUN_MARKER}\ndry-ran earlier"}],
-        12: [{"body": f"{DRYRUN_MARKER}\ndry-ran earlier"}],
     }
     # Fresh approval: labeled after any body edit (or never-edited body).
     # Live posts that carry approved-to-post need a labeled timeline event.
@@ -1183,6 +1301,8 @@ def selftest():
     _FAKE_LAST_EDITED.clear()
     for n in (10, 12):
         _approve(n)
+    # LIVE on #12 needs a trusted digest matching its (empty) body.
+    _seed_trusted_dryrun(12)
 
     # Input guards.
     check("missing number is rejected", err(_post_tweet({"text": "x"})))
@@ -1218,6 +1338,9 @@ def selftest():
           and "DRY-RUN" in r["content"][0]["text"])
     check("the dry-run comment carries the marker",
           _last_comment and _last_comment["body"].startswith(DRYRUN_MARKER))
+    check("the dry-run comment carries a message-digest of ## Message",
+          _last_comment and _parse_message_digest(_last_comment["body"])
+          == _message_digest(""))
     check("the dry-run comment carries the attribution footer",
           _last_comment and _last_comment["body"].endswith(FOOTER))
     check("the dry-run comment renders the thread part",
@@ -1282,6 +1405,7 @@ def selftest():
     # message behind a claim marker a human has to hand-delete).
     _FAKE_ISSUES[13] = q(13, OK + [APPROVAL_LABEL])
     _approve(13)
+    _seed_trusted_dryrun(13)
     _last_deleted = None
     os.environ["GROWTH_MCP_FAKE_X_FAIL"] = "1"
     r = _post_tweet({"number": 13, "text": "fails on the first tweet"})
@@ -1302,6 +1426,7 @@ def selftest():
     # item stays refused on retry.
     _FAKE_ISSUES[15] = q(15, OK + [APPROVAL_LABEL])
     _approve(15)
+    _seed_trusted_dryrun(15)
     _last_deleted = None
     os.environ["GROWTH_MCP_FAKE_X_FAIL_PART"] = "1"
     r = _post_tweet({"number": 15, "text": "first is fine", "thread": ["this part fails"]})
@@ -1317,6 +1442,7 @@ def selftest():
     # If the claim itself cannot be written, nothing is published.
     _FAKE_ISSUES[14] = q(14, OK + [APPROVAL_LABEL])
     _approve(14)
+    _seed_trusted_dryrun(14)
     _last_tweets = None
     os.environ["GROWTH_MCP_FAKE_COMMENT_FAIL"] = "1"
     r = _post_tweet({"number": 14, "text": "cannot claim"})
@@ -1461,12 +1587,39 @@ def selftest():
     check("over-cap @handles in ## Message are refused",
           err(r) and f"cap {MAX_REQUIRED_HANDLES}" in r["content"][0]["text"])
 
+    # Full-width at-signs (＠ U+FF20 / ﹫ U+FE6B) refuse on every path.
+    _FAKE_ISSUES[38] = q(38, OK)
+    _FAKE_ISSUES[38]["body"] = "## Message\n\nDrafted with ＠Prusa3D\n"
+    r = _post_tweet({"number": 38, "text": "agent rewrite"})
+    check("full-width ＠ in ## Message is refused",
+          err(r) and "full-width at-sign" in r["content"][0]["text"])
+    _FAKE_ISSUES[39] = q(39, OK)
+    _FAKE_ISSUES[39]["body"] = "## Message\n\nNo tags.\n"
+    _FAKE_COMMENTS.pop(39, None)
+    r = _post_tweet({"number": 39, "text": "composed with ＠Sneaky"})
+    check("full-width ＠ in composed root is refused",
+          err(r) and "full-width at-sign" in r["content"][0]["text"])
+    _FAKE_ISSUES[41] = q(41, OK)
+    _FAKE_ISSUES[41]["body"] = "## Message\n\nNo tags.\n"
+    _FAKE_COMMENTS.pop(41, None)
+    r = _post_tweet({"number": 41, "text": "root ok", "thread": ["reply ﹫Sneaky"]})
+    check("full-width ﹫ in a thread part is refused",
+          err(r) and "full-width at-sign" in r["content"][0]["text"])
+    six = " ".join(f"@U{i}" for i in range(6))
+    _FAKE_ISSUES[42] = q(42, OK)
+    _FAKE_ISSUES[42]["body"] = "## Message\n\nNo tags.\n"
+    _FAKE_COMMENTS.pop(42, None)
+    r = _post_tweet({"number": 42, "text": f"composed {six}"})
+    check("composed root with >5 mention tokens is refused",
+          err(r) and f"cap {MAX_REQUIRED_HANDLES}" in r["content"][0]["text"])
+
     # Post-approval body freeze: LIVE refuses a body edited after the label.
     os.environ["GROWTH_TWITTER_LIVE"] = "true"
     for v in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
         os.environ[v] = "cred"
     _FAKE_ISSUES[35] = q(35, OK + [APPROVAL_LABEL])
     _approve(35, at="2026-01-02T12:00:00Z")
+    _seed_trusted_dryrun(35)
     _FAKE_LAST_EDITED[35] = "2026-01-03T00:00:00Z"  # edited AFTER approval
     r = _post_tweet({"number": 35, "text": "should not go live"})
     check("LIVE refuses when body was edited after approved-to-post",
@@ -1475,11 +1628,49 @@ def selftest():
     # Unreadable timeline → fail closed on LIVE.
     _FAKE_ISSUES[36] = q(36, OK + [APPROVAL_LABEL])
     _approve(36)
+    _seed_trusted_dryrun(36)
     os.environ["GROWTH_MCP_FAKE_EVENTS_FAIL"] = "1"
     r = _post_tweet({"number": 36, "text": "no timeline"})
     check("LIVE refuses when approval timeline cannot be read",
           err(r) and "fail closed" in r["content"][0]["text"])
     os.environ.pop("GROWTH_MCP_FAKE_EVENTS_FAIL", None)
+
+    # Digest binding: missing / look-alike / mismatch refuse LIVE.
+    _FAKE_ISSUES[43] = q(43, OK + [APPROVAL_LABEL])
+    _approve(43)
+    _FAKE_COMMENTS.pop(43, None)  # no dry-run digest at all
+    r = _post_tweet({"number": 43, "text": "no digest"})
+    check("LIVE refuses without a trusted dry-run digest",
+          err(r) and "message-digest" in r["content"][0]["text"])
+    _FAKE_ISSUES[44] = q(44, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[44]["body"] = "## Message\n\nTagged root @Prusa3D\n"
+    _approve(44)
+    _FAKE_COMMENTS[44] = [{
+        "body": (f"{DRYRUN_MARKER}\n{_digest_comment_line(_FAKE_ISSUES[44]['body'])}\n"
+                 f"spoofed"),
+        "user": {"login": "github-actions-imposter"},  # look-alike, not trusted
+    }]
+    r = _post_tweet({"number": 44, "text": "lookalike author"})
+    check("LIVE ignores dry-run digests from look-alike authors",
+          err(r) and "message-digest" in r["content"][0]["text"])
+    _FAKE_ISSUES[45] = q(45, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[45]["body"] = "## Message\n\nCurrent body @Prusa3D\n"
+    _approve(45)
+    # Digest was taken against a DIFFERENT ## Message paragraph.
+    stale_body = "## Message\n\nOld draft @Prusa3D\n"
+    _seed_trusted_dryrun(45, body=stale_body)
+    r = _post_tweet({"number": 45, "text": "digest mismatch"})
+    check("LIVE refuses when dry-run digest does not match current ## Message",
+          err(r) and "does not match" in r["content"][0]["text"])
+    # Matching digest + fresh body → LIVE proceeds.
+    _FAKE_ISSUES[46] = q(46, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[46]["body"] = "## Message\n\nBound draft @Prusa3D\n"
+    _approve(46)
+    _seed_trusted_dryrun(46, body=_FAKE_ISSUES[46]["body"])
+    _last_tweets, _last_close = None, None
+    r = _post_tweet({"number": 46, "text": "Bound draft @Prusa3D"})
+    check("LIVE proceeds when trusted digest matches and freeze is fresh",
+          r.get("isError") is False and "POSTED live" in r["content"][0]["text"])
 
     # Dry-run with a stale body still proceeds but reports the condition.
     os.environ.pop("GROWTH_TWITTER_LIVE", None)
@@ -1496,6 +1687,9 @@ def selftest():
           and _last_comment
           and "Approval freshness" in _last_comment["body"]
           and "edited after approved-to-post" in _last_comment["body"])
+    check("dry-run on a stale body still records a message-digest",
+          _last_comment and _parse_message_digest(_last_comment["body"])
+          == _message_digest(""))
 
     # The JSON-RPC surface exposes exactly the one tool.
     check("tools/list exposes exactly post_tweet",

@@ -12,10 +12,14 @@ import pytest
 from growth.roottags import (
     MAX_REQUIRED_HANDLES,
     RootTagsError,
+    assert_postable_text,
+    count_posted_mentions,
     ensure_root_tags,
     extract_handles,
+    message_digest,
     message_root_paragraph,
     missing_handles,
+    parse_message_digest,
     required_handles,
 )
 from growth.tweetlen import MAX_WEIGHT, tweet_weight
@@ -189,3 +193,100 @@ def test_sample_queue_issue_produces_a_tagged_root():
     restored = ensure_root_tags(agent_text, required, drafted=drafted)
     assert "@Prusa3D" in restored and "@prusament" in restored
     assert tweet_weight(restored) <= MAX_WEIGHT
+
+
+def test_fullwidth_ff20_refused_on_composed_drafted_and_append():
+    """＠ (U+FF20) refuses on every ensure_root_tags return path."""
+    fw = "\uff20"  # ＠
+    with pytest.raises(RootTagsError, match="full-width"):
+        ensure_root_tags(f"composed {fw}Prusa3D", [])
+    # Drafted verbatim path
+    with pytest.raises(RootTagsError, match="full-width"):
+        ensure_root_tags(
+            "agent rewrite",
+            ["@Prusa3D"],
+            drafted=f"Drafted {fw}Prusa3D",
+        )
+    # Append path: composed already carries a full-width marker
+    with pytest.raises(RootTagsError, match="full-width"):
+        ensure_root_tags(
+            f"short {fw}Sneaky",
+            ["@Prusa3D"],
+            drafted="z" * 281 + " @Prusa3D",  # over budget → append path
+        )
+
+
+def test_fullwidth_fe6b_refused_on_composed_drafted_and_append():
+    """﹫ (U+FE6B) refuses on every ensure_root_tags return path."""
+    fw = "\ufe6b"  # ﹫
+    with pytest.raises(RootTagsError, match="full-width"):
+        ensure_root_tags(f"composed {fw}Prusa3D", [])
+    with pytest.raises(RootTagsError, match="full-width"):
+        ensure_root_tags(
+            "agent rewrite",
+            ["@Prusa3D"],
+            drafted=f"Drafted {fw}Prusa3D",
+        )
+    with pytest.raises(RootTagsError, match="full-width"):
+        ensure_root_tags(
+            f"short {fw}Sneaky",
+            ["@Prusa3D"],
+            drafted="z" * 281 + " @Prusa3D",
+        )
+
+
+def test_posted_mention_cap_after_nfkc_on_all_paths():
+    six = " ".join(f"@U{i}" for i in range(6))
+    with pytest.raises(RootTagsError, match=f"cap {MAX_REQUIRED_HANDLES}"):
+        ensure_root_tags(f"composed {six}", [])
+    # Drafted path carries 6 mentions
+    with pytest.raises(RootTagsError, match=f"cap {MAX_REQUIRED_HANDLES}"):
+        ensure_root_tags("agent", ["@U0"], drafted=f"Draft {six}")
+    # Append that would produce 6 mentions
+    five = " ".join(f"@U{i}" for i in range(5))
+    with pytest.raises(RootTagsError, match=f"cap {MAX_REQUIRED_HANDLES}"):
+        ensure_root_tags(
+            f"root {five}",
+            ["@Extra"],
+            drafted="z" * 281 + " @Extra",
+        )
+
+
+def test_count_posted_mentions_nfkc_folds_fullwidth():
+    # After NFKC, ＠ and ﹫ become @ — counted as mention tokens.
+    assert count_posted_mentions("hi \uff20Ab") == 1
+    assert count_posted_mentions("hi \ufe6bAb") == 1
+    assert count_posted_mentions("@a @b @c") == 3
+
+
+def test_assert_postable_text_refuses_fullwidth_before_count():
+    with pytest.raises(RootTagsError, match="U\\+FF20"):
+        assert_postable_text("x \uff20Y")
+    with pytest.raises(RootTagsError, match="U\\+FE6B"):
+        assert_postable_text("x \ufe6bY")
+
+
+def test_message_digest_is_sha256_of_nfkc_first_paragraph():
+    import hashlib
+    import unicodedata
+
+    body = "## Message\n\nHello \uff20world @Prusa3D\n\nMore.\n"
+    para = message_root_paragraph(body)
+    expected = hashlib.sha256(
+        unicodedata.normalize("NFKC", para).encode("utf-8")
+    ).hexdigest()
+    assert message_digest(body) == expected
+    # Digest choice: ## Message first paragraph only (not the whole body).
+    assert message_digest(body) != hashlib.sha256(
+        unicodedata.normalize("NFKC", body).encode("utf-8")
+    ).hexdigest()
+
+
+def test_parse_message_digest_round_trip():
+    from growth.roottags import digest_comment_line
+
+    body = "## Message\n\nTagged @Prusa3D\n"
+    line = digest_comment_line(body)
+    comment = f"<!-- growth-twitter:dry-run -->\n{line}\nbody"
+    assert parse_message_digest(comment) == message_digest(body)
+    assert parse_message_digest("no digest here") is None
