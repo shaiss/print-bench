@@ -15,11 +15,13 @@ Lark owns how Twitter/X says it: the hook, the thread shape, the weighted
 would-be tweet lands as a comment on the queue issue for a human to read —
 and a live post additionally requires the live key AND the preview →
 re-label → post loop the tool enforces: a trusted bot preview comment
-(marker + `message-digest` as the first two lines — the digest binds
-NFKC(`## Message` first paragraph) + `\n` + NFKC(`## Link`), not the
-rendered tweet; live copy may be recomposed under the length, tag, and
-approval gates, and the live tweet `text` is not yet compared to the
-preview — #1023) that matches the current body, then the **latest**
+(body **begins** with marker + `message-digest` at column 0 — leading
+whitespace refused; mid-body / quoted / fenced copies never trusted —
+#1021; the digest binds NFKC(`## Message` first paragraph) + `\n` +
+NFKC(`## Link`), not the rendered tweet; live copy may be recomposed
+under the length, tag, and approval gates, and the live tweet `text` is
+not yet compared to the preview — #1023) that matches the current body,
+then the **latest**
 `approved-to-post` labeled event
 overall must be a human on `GROWTH_APPROVER_LOGINS` (and, when
 `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true, not via a GitHub App;

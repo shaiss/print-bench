@@ -4,13 +4,15 @@ The ``approved-to-post`` label is the human gate on a queue item. This
 module is the pure half of the LIVE gates (the posting tool fetches
 network data and acts):
 
-* **Trusted preview** — a dry-run / self-migrate comment whose *first two
-  lines* are exactly the dry-run marker and the ``message-digest`` line,
+* **Trusted preview** — a dry-run / self-migrate comment whose body
+  *begins* with exactly the dry-run marker then the ``message-digest``
+  line (writer prefix at column 0; leading whitespace refused — #1021),
   authored by ``github-actions[bot]`` with ``type == "Bot"``, never edited
   (``updated_at == created_at``). The old marker-only format is never
-  trusted. Markers mid-body are never trusted. The digest binds the
-  NFKC ``## Message`` first paragraph (the drafted root); live copy may
-  be recomposed under the length, tag, and approval gates.
+  trusted. Markers mid-body / quoted / fenced are never trusted. The
+  digest binds the NFKC ``## Message`` first paragraph (the drafted
+  root); live copy may be recomposed under the length, tag, and
+  approval gates.
 
 * **Exactly-one rule** — there must be **exactly one** trusted preview
   whose ``created_at`` is **strictly later** than GraphQL ``lastEditedAt``

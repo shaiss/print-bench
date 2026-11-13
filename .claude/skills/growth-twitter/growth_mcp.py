@@ -241,15 +241,22 @@ def _digest_comment_line(body):
 
 
 def _parse_message_digest(comment_body):
-    """Require marker + digest as the first two lines, exact."""
+    """sha256 when body *begins* with marker + digest (parity with roottags).
+
+    Writer emits ``{DRYRUN_MARKER}\\n{digest_line}\\n...`` at column 0.
+    Trust is ``startswith(DRYRUN_MARKER + \"\\n\")`` then an exact digest
+    line — no strip (leading whitespace is a deliberate reject, #1021).
+    Mid-body / quoted / fenced markers and a digest not right after the
+    marker return None.
+    """
     if not comment_body:
         return None
-    lines = comment_body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    if len(lines) < 2:
+    text = comment_body.replace("\r\n", "\n").replace("\r", "\n")
+    prefix = DRYRUN_MARKER + "\n"
+    if not text.startswith(prefix):
         return None
-    if lines[0] != DRYRUN_MARKER:
-        return None
-    m = DIGEST_LINE_RE.fullmatch(lines[1])
+    line2, _sep, _tail = text[len(prefix):].partition("\n")
+    m = DIGEST_LINE_RE.fullmatch(line2)
     return m.group(1) if m else None
 
 

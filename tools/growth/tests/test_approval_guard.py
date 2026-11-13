@@ -101,16 +101,28 @@ def _unlabeled(at, login=TRUSTED_PREVIEW_LOGIN, utype=TRUSTED_PREVIEW_TYPE):
 
 def test_parse_message_digest_requires_first_two_lines_exact():
     body = "## Message\n\nHi\n"
-    good = f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\nrest"
+    dig = digest_comment_line(body)
+    good = f"{DRYRUN_MARKER}\n{dig}\nrest"
     assert parse_message_digest(good) == message_digest(body)
-    # Mid-body markers never trusted.
+    # Mid-body / quoted / fenced markers never trusted (#1021).
     assert parse_message_digest(
-        f"x\n{DRYRUN_MARKER}\n{digest_comment_line(body)}\n"
+        f"x\n{DRYRUN_MARKER}\n{dig}\n"
     ) is None
+    assert parse_message_digest(
+        f"> {DRYRUN_MARKER}\n> {dig}\n"
+    ) is None
+    assert parse_message_digest(
+        f"```html\n{DRYRUN_MARKER}\n{dig}\n```\n"
+    ) is None
+    # Digest present but not immediately after the marker.
+    assert parse_message_digest(
+        f"{DRYRUN_MARKER}\npreview header\n{dig}\n"
+    ) is None
+    # Leading whitespace on the marker line is a deliberate reject.
+    assert parse_message_digest(f" {DRYRUN_MARKER}\n{dig}\n") is None
     # Old format (no digest line).
     assert parse_message_digest(f"{DRYRUN_MARKER}\nno digest") is None
     # Whitespace on the digest line rejects.
-    dig = digest_comment_line(body)
     assert parse_message_digest(f"{DRYRUN_MARKER}\n {dig}\n") is None
 
 

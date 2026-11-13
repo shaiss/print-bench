@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from growth.roottags import (
+    DRYRUN_MARKER,
     MAX_REQUIRED_HANDLES,
     RootTagsError,
     allowed_urls,
@@ -17,6 +18,7 @@ from growth.roottags import (
     assert_postable_text,
     assert_thread_mention_cap,
     count_posted_mentions,
+    digest_comment_line,
     ensure_root_tags,
     extract_handles,
     message_digest,
@@ -402,11 +404,63 @@ def test_message_digest_binds_message_paragraph_and_link():
 
 
 def test_parse_message_digest_round_trip():
-    from growth.roottags import DRYRUN_MARKER, digest_comment_line
-
     body = "## Message\n\nTagged @Prusa3D\n\n## Link\n\nhttps://x.example\n"
     line = digest_comment_line(body)
     comment = f"{DRYRUN_MARKER}\n{line}\nbody"
     assert parse_message_digest(comment) == message_digest(body)
     assert parse_message_digest("no digest here") is None
     assert parse_message_digest(f"x\n{DRYRUN_MARKER}\n{line}\n") is None
+
+
+def test_parse_message_digest_requires_body_prefix():
+    """Issue #1021: trust only writer prefix; never mid-body marker/digest.
+
+    Behavioral cases against the real parser (not string greps):
+    (1) valid writer-shaped prefix is trusted;
+    (2) marker present but not at start (after text / quoted / fenced) is not;
+    (3) digest present but not immediately after the marker is not;
+    leading whitespace is a deliberate reject (writer emits marker at col 0).
+    """
+    body = "## Message\n\nTagged @Prusa3D\n\n## Link\n\nhttps://x.example\n"
+    dig = digest_comment_line(body)
+    expected = message_digest(body)
+
+    # (1) Writer-shaped prefix (marker at col 0, digest on the next line).
+    valid = f"{DRYRUN_MARKER}\n{dig}\n## Growth dry run\n\nrest"
+    assert parse_message_digest(valid) == expected
+    # CRLF bodies still match after newline normalization.
+    assert parse_message_digest(
+        f"{DRYRUN_MARKER}\r\n{dig}\r\nrest"
+    ) == expected
+    # Exactly marker+digest with no trailing body is still trusted.
+    assert parse_message_digest(f"{DRYRUN_MARKER}\n{dig}") == expected
+
+    # (2) Marker present but not at start — never trusted.
+    assert parse_message_digest(
+        f"intro prose\n{DRYRUN_MARKER}\n{dig}\n"
+    ) is None
+    assert parse_message_digest(
+        f"> quoted reply\n> {DRYRUN_MARKER}\n> {dig}\n"
+    ) is None
+    assert parse_message_digest(
+        f"```\n{DRYRUN_MARKER}\n{dig}\n```\n"
+    ) is None
+    # Leading whitespace is a deliberate reject (writer does not emit it).
+    assert parse_message_digest(f" {DRYRUN_MARKER}\n{dig}\n") is None
+    assert parse_message_digest(f"\t{DRYRUN_MARKER}\n{dig}\n") is None
+    assert parse_message_digest(f"\n{DRYRUN_MARKER}\n{dig}\n") is None
+
+    # (3) Digest line elsewhere, not directly after the marker.
+    assert parse_message_digest(
+        f"{DRYRUN_MARKER}\nnot-a-digest\n{dig}\n"
+    ) is None
+    assert parse_message_digest(
+        f"{DRYRUN_MARKER}\n\n{dig}\n"
+    ) is None
+    assert parse_message_digest(f"{dig}\n{DRYRUN_MARKER}\n") is None
+    assert parse_message_digest(
+        f"noise\n{dig}\n{DRYRUN_MARKER}\n{dig}\n"
+    ) is None
+    # Whitespace on the digest line (not what the writer emits) rejects.
+    assert parse_message_digest(f"{DRYRUN_MARKER}\n {dig}\n") is None
+    assert parse_message_digest(f"{DRYRUN_MARKER}\n{dig} \n") is None
