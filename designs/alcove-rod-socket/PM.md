@@ -71,7 +71,7 @@ the one motion the part really performs — seeded from the hero.
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
 | ~~B3~~ | ~~Ship the shallow collar as a gated part (`engagement_depth=12` in `ci.parts`, exported with the Release)~~ | **Done** (#631): `collar-shallow` gated via `ci.parts`; plate stays boss+collar; README points at the Release/gated part | — |
-| B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints | one print + NOTES entry |
+| B4 | PETG/ASA field test in a hot window | the page now tells permanent installs to print PETG/ASA with retune numbers — unproven advice until this prints. Rider: the proving print runs the page's own instructions verbatim, and its FIELD-TEST entry logs one full wash-day cycle (unthread → lift → re-hang) | one print + NOTES entry |
 | ~~B1~~ | ~~Witness slot / seat detent ("is the rod fully in?")~~ | **Done** (#989, supersedes #787): seat detent (0.30 mm radial lip) + two 1.6×8 mm witness slots on `collar_use`; shallow collar inherits via `depth=`. Field click/visibility still waits on the proving print's week-of-use seat check. | — |
 | ~~B2~~ | ~~Anti-rotation rib (screwless alternative to `screw_count=2`)~~ | **Done** (#991, supersedes #792): eight 0.8 mm 45° V-grooves on the boss wall face, default on for `screw_count=1`; omitted at `screw_count=2`. Field bite still waits on the proving print. | — |
 | B5c | 25 mm preview shots (`collar-25` print-orientation + `boss-25` iso as **new** `cameras.conf` lines) | every frozen camera is still 40 mm; the 25 mm buyer buys sight-unseen. Due before the Release that ships the 25 mm STLs (#992 Jane/Drik queue) | two camera lines + regen |
