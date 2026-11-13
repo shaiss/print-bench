@@ -154,7 +154,9 @@ so the serving join never window-attributes it or counts it as a claim),
 ``shipped``→brief.shipped,
 ``declined``/``deferred``/``ship_lock_withdrawn``→brief.declined/deferred/
 withdrawn (each with its own ``lead_fields.design_name``; a withdrawal's
-``fields.death`` marks routine-lock-cleanup's dead-run notice), timeline
+``fields.death`` marks routine-lock-cleanup's dead-run notice),
+``burn_cooldown``→brief.cooldown (routine-lock-cleanup's picker cooldown for a
+run that neither delivered nor declined, #924; ``design_name`` always null), timeline
 ``closed`` → brief.closed (``closed_by_pr`` when a PR in ``ctx.merge_shas``
 closed it: the closed event's ``commit_id`` is that PR's merge sha, or a
 ``referenced`` timeline event whose ``commit_id`` is a frozen PR's merge sha
@@ -227,7 +229,7 @@ from typing import Any, Optional
 from . import canonical, episodes, markers, membership, trust
 from .protocols import GitReader
 
-EXTRACTOR_VERSION = "provenance-extract 2"
+EXTRACTOR_VERSION = "provenance-extract 3"
 RECORD_FORMAT = "record@1"
 BUILDER_BOTS = frozenset({"github-actions[bot]", "claude[bot]"})
 #: The Actions bot's REST and GraphQL spellings plus claude-code-action's ``claude[bot]``: the
@@ -308,7 +310,7 @@ NOISE_LEADS = frozenset({"bugbot_limit", "qodo_paused", "decision_needed", "clea
 NAME_AUTHOR_LOGINS = frozenset({"github-actions[bot]"})
 BRIEF_LEAD_KINDS = {"ship_lock": "brief.claimed", "ship_lock_settle": "brief.claimed",
                     "shipped": "brief.shipped", "declined": "brief.declined", "deferred": "brief.deferred",
-                    "ship_lock_withdrawn": "brief.withdrawn"}
+                    "ship_lock_withdrawn": "brief.withdrawn", "burn_cooldown": "brief.cooldown"}
 CLOSE_REFERENCE_SECONDS = 60
 #: ``trust.status_tier``'s verified result — the only status tier that carries a runtime join.
 STATUS_RECEIPT_TIER = ("verified", "actions-status+receipt")

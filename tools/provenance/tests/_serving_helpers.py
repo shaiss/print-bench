@@ -198,7 +198,8 @@ def brief_record(n: int, events: list[dict], *, labels: Iterable[str] = ("design
 
 
 _LEAD_KIND = {"ship_lock": "brief.claimed", "ship_lock_settle": "brief.claimed", "shipped": "brief.shipped",
-              "declined": "brief.declined", "deferred": "brief.deferred", "ship_lock_withdrawn": "brief.withdrawn"}
+              "declined": "brief.declined", "deferred": "brief.deferred", "ship_lock_withdrawn": "brief.withdrawn",
+              "burn_cooldown": "brief.cooldown"}
 
 
 def brief_from_raw(raw: dict) -> dict[str, Any]:
