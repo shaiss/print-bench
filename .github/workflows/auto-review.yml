@@ -79,18 +79,19 @@ name: Auto design review (Jane / Drik / PM / coach)
 # and its checkout stays the PR (full history) so git push has the
 # branch local. Comments go through mcp__reviewer__post_coach on the
 # same server (REVIEWER_ID=coach). The posting files themselves are
-# restored from pull_request.base.sha before EACH agent step — Jane/Drik
-# checkout base wholesale; the coach cannot, so a trusted overlay puts
-# reviewer-post / design-coach-settings / the skill / coach-lock-check.sh
-# back to the base copy immediately before every chain link (a failed
-# first link with Write/Edit/Bash must not leave a rewritten MCP for
-# the next spawn). The MCP config's command is `/usr/bin/python3`, not
-# PATH `python3`: GITHUB_PATH from a failed Bash link is prepended on
-# later steps, and claude-code-action looks up the command before
-# `--allowedTools` applies. claude-code-action still exits 0 on a
-# denial-only turn, so
-# after any ship step that claims success the lock-check step extracts
-# `scripts/coach-lock-check.sh` from base.sha into a temp file (the
+# restored from the trusted tip of the default branch (server-side tip
+# of base.ref — never the event payload's base.sha) before EACH agent
+# step — Jane/Drik checkout base wholesale; the coach cannot, so a
+# trusted overlay puts reviewer-post / design-coach-settings / the skill
+# / coach-lock-check.sh back to the trusted tip immediately before every
+# chain link (a failed first link with Write/Edit/Bash must not leave a
+# rewritten MCP for the next spawn). The MCP config's command is
+# `/usr/bin/python3`, not PATH `python3`: GITHUB_PATH from a failed Bash
+# link is prepended on later steps, and claude-code-action looks up the
+# command before `--allowedTools` applies. claude-code-action still
+# exits 0 on a denial-only turn, so after any ship step that claims
+# success the lock-check step extracts `scripts/coach-lock-check.sh`
+# from the trusted tip into a temp file (the
 # workspace copy is Write-able) and runs that; it fails the job unless
 # an Actions-bot comment from *this run* (created_at >= the ready
 # step's started_at) *ends* with the assembled suffix
@@ -196,13 +197,12 @@ name: Auto design review (Jane / Drik / PM / coach)
 # the ship routines.
 #
 # Transition (#770 landing): pm-triage checks out base.ref and design-coach
-# restores reviewer-posted.sh from base.sha — both keep the trust boundary
-# (never the PR-head checker). A pre-#770 base checker rejects --reviewer
-# pm|coach with exit 2; under set -e that would abort before served is set
-# and freeze the fallback walk. Those artifact-check steps treat that
-# specific exit-2 message as served=false (not a pass) so the walk continues
-# until main carries the extended checker — including open PRs whose
-# base.sha still predates the merge.
+# restores reviewer-posted.sh from the trusted tip — both keep the trust
+# boundary (never the PR-head checker). A pre-#770 tip checker rejects
+# --reviewer pm|coach with exit 2; under set -e that would abort before
+# served is set and freeze the fallback walk. Those artifact-check steps
+# treat that specific exit-2 message as served=false (not a pass) so the
+# walk continues until main carries the extended checker.
 #
 # Required secrets (at least one; the chain uses whichever are present):
 #   ZAI_KEY          — Z.AI key, used via the Anthropic-compatible endpoint
@@ -323,8 +323,8 @@ jobs:
       # matches HEAD we skip the round (already reviewed this commit).
       # Split in two so repo code never runs beside a token: this step holds
       # GH_TOKEN and only reads the stamp comment through gh; the next step
-      # restores reviewer-signoff.sh from base.sha into RUNNER_TEMP (never the
-      # PR-head copy) and holds none.
+      # restores reviewer-signoff.sh from the trusted tip into RUNNER_TEMP
+      # (never the PR-head copy) and holds none.
       - name: Read the last review stamp
         id: stamp
         if: steps.check.outputs.designs_changed == 'true'
@@ -347,17 +347,76 @@ jobs:
         if: steps.check.outputs.designs_changed == 'true'
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GH_TOKEN: ${{ github.token }}
           ACTION: ${{ github.event.action }}
           LAST_REVIEWED: ${{ steps.stamp.outputs.sha }}
           SIGNOFF_TRUST_REGEN: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
         run: |
           set -euo pipefail
-          # Trust boundary: restore reviewer-signoff.sh from base.sha — never
-          # the PR-head copy — same pattern as reviewer-posted.sh / coach-lock.
+          # Always-tip trusted restore: resolve refs/heads/<base.ref> from the
+          # server NOW — never github.event.pull_request.base.sha (stale on
+          # open PRs whose head lacks current main). base.ref is payload-
+          # supplied, so it must equal the repository default_branch from the
+          # API; anything else fails closed. Choice: always tip (not
+          # "tip when base.sha predates it") so one path cannot fail open and
+          # a race against a main push cannot restore a pre-marker checker.
+          resolve_trusted_sha() {
+            local want_ref="$1" default_branch tip ref_tip fetch_auth
+            # gh api --jq takes the filter as the next arg; do NOT pass -r
+            # (that makes the filter `-r` and leaves default_branch empty).
+            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+            default_branch="${default_branch//$'\r'/}"
+            default_branch="${default_branch//$'\n'/}"
+            if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
+              echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
+              return 1
+            fi
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq .object.sha)"
+            tip="${tip//$'\r'/}"
+            tip="${tip//$'\n'/}"
+            if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::trusted tip sha empty or malformed: '${tip}' — fail closed" >&2
+              return 1
+            fi
+            # persist-credentials: false — GH_TOKEN authenticates gh, not git.
+            # Same masked, command-scoped extraheader as the head-staging fetches.
+            fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
+            echo "::add-mask::${fetch_auth}" >&2
+            if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
+              git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+                fetch --no-tags origin "$tip" || {
+                echo "::error::could not fetch trusted tip ${tip} — fail closed" >&2
+                return 1
+              }
+            fi
+            ref_tip="$(git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+              ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
+            if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
+              return 1
+            fi
+            if [[ "$tip" != "$ref_tip" ]]; then
+              echo "::error::API tip ${tip} diverges from ls-remote tip ${ref_tip} — fail closed" >&2
+              return 1
+            fi
+            if ! git merge-base --is-ancestor "$tip" "$ref_tip"; then
+              echo "::error::trusted sha ${tip} is not an ancestor of the trusted ref tip — fail closed" >&2
+              return 1
+            fi
+            printf '%s\n' "$tip"
+          }
+          TRUSTED_SHA="$(resolve_trusted_sha "$BASE_REF")"
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          # Trust boundary: restore reviewer-signoff.sh from the trusted tip —
+          # never the PR-head copy — same pattern as reviewer-posted.sh / coach-lock.
           SIGNOFF="${RUNNER_TEMP}/reviewer-signoff.sh"
-          if ! /usr/bin/git show "${BASE_SHA}:scripts/reviewer-signoff.sh" > "$SIGNOFF"; then
-            echo "::error::could not restore reviewer-signoff.sh from ${BASE_SHA}" >&2
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-signoff.sh" > "$SIGNOFF"; then
+            echo "::error::could not restore reviewer-signoff.sh from ${TRUSTED_SHA}" >&2
             exit 1
           fi
           chmod +x "$SIGNOFF"
@@ -2112,11 +2171,63 @@ jobs:
       - name: Check the coach posting surface is on the base branch
         id: ready
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Always-tip trusted restore: resolve refs/heads/<base.ref> from the
+          # server NOW — never github.event.pull_request.base.sha (stale on
+          # open PRs whose head lacks current main). base.ref is payload-
+          # supplied, so it must equal the repository default_branch from the
+          # API; anything else fails closed. Choice: always tip (not
+          # "tip when base.sha predates it") so one path cannot fail open and
+          # a race against a main push cannot restore a pre-marker checker.
+          resolve_trusted_sha() {
+            local want_ref="$1" default_branch tip ref_tip fetch_auth
+            # gh api --jq takes the filter as the next arg; do NOT pass -r
+            # (that makes the filter `-r` and leaves default_branch empty).
+            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+            default_branch="${default_branch//$'\r'/}"
+            default_branch="${default_branch//$'\n'/}"
+            if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
+              echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
+              return 1
+            fi
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq .object.sha)"
+            tip="${tip//$'\r'/}"
+            tip="${tip//$'\n'/}"
+            if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::trusted tip sha empty or malformed: '${tip}' — fail closed" >&2
+              return 1
+            fi
+            # persist-credentials: false — GH_TOKEN authenticates gh, not git.
+            # Same masked, command-scoped extraheader as the head-staging fetches.
+            fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
+            echo "::add-mask::${fetch_auth}" >&2
+            if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
+              git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+                fetch --no-tags origin "$tip" || {
+                echo "::error::could not fetch trusted tip ${tip} — fail closed" >&2
+                return 1
+              }
+            fi
+            ref_tip="$(git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+              ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
+            if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
+              return 1
+            fi
+            if [[ "$tip" != "$ref_tip" ]]; then
+              echo "::error::API tip ${tip} diverges from ls-remote tip ${ref_tip} — fail closed" >&2
+              return 1
+            fi
+            if ! git merge-base --is-ancestor "$tip" "$ref_tip"; then
+              echo "::error::trusted sha ${tip} is not an ancestor of the trusted ref tip — fail closed" >&2
+              return 1
+            fi
+            printf '%s\n' "$tip"
+          }
           # Stamp before any ship step so the lock-check can refuse a
           # COACH-LOCK left by an earlier coach run (reopened /
           # ready_for_review / denial-only turn — issue #806).
@@ -2125,27 +2236,33 @@ jobs:
           # Keep the Actions expression in env: EVENT_HEAD — the ready-step
           # run body must not interpolate expressions (git-containment guard).
           printf '%s\n' "$EVENT_HEAD" > "${RUNNER_TEMP}/reviewer-head-sha"
-          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            FETCH_AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
-            echo "::add-mask::${FETCH_AUTH}"
-            git -c "http.https://github.com/.extraheader=Authorization: Basic ${FETCH_AUTH}" \
-              fetch --no-tags origin "$BASE_SHA"
+          # Always-tip for trust-script restores (reviewer-posted / coach-lock).
+          TRUSTED_SHA="$(resolve_trusted_sha "$BASE_REF")"
+          if ! [[ "$TRUSTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed — fail closed" >&2
+            exit 1
           fi
-          if git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer_mcp.py" 2>/dev/null \
-             && git cat-file -e "${BASE_SHA}:.claude/reviewer-post/reviewer-mcp.json" 2>/dev/null \
-             && git cat-file -e "${BASE_SHA}:.claude/design-coach-settings.json" 2>/dev/null \
-             && git cat-file -e "${BASE_SHA}:.claude/skills/design-coach/SKILL.md" 2>/dev/null \
-             && git cat-file -e "${BASE_SHA}:scripts/coach-lock-check.sh" 2>/dev/null; then
+          # Publish via step output — never GITHUB_ENV. A Write/Edit/Bash
+          # coach link can overwrite GITHUB_ENV with the PR head SHA; every
+          # later restore would then execute PR-controlled checkers.
+          echo "trusted_sha=${TRUSTED_SHA}" >> "$GITHUB_OUTPUT"
+          # Presence of the coach surface: tip must carry it (always-tip), so
+          # a stale event base.sha cannot skip a coach that main already has.
+          if git cat-file -e "${TRUSTED_SHA}:.claude/reviewer-post/reviewer_mcp.py" 2>/dev/null \
+             && git cat-file -e "${TRUSTED_SHA}:.claude/reviewer-post/reviewer-mcp.json" 2>/dev/null \
+             && git cat-file -e "${TRUSTED_SHA}:.claude/design-coach-settings.json" 2>/dev/null \
+             && git cat-file -e "${TRUSTED_SHA}:.claude/skills/design-coach/SKILL.md" 2>/dev/null \
+             && git cat-file -e "${TRUSTED_SHA}:scripts/coach-lock-check.sh" 2>/dev/null; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::the coach posting surface is not on the base branch yet (first landing) — skipping the coach rather than running a PR-controlled copy"
+            echo "::notice::the coach posting surface is not on the trusted tip yet (first landing) — skipping the coach rather than running a PR-controlled copy"
           fi
 
       - name: Restore the coach posting surface from the base branch (before chain link 1)
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2192,7 +2309,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -2268,7 +2385,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -2315,9 +2432,17 @@ jobs:
             printf '%s\n' "$live" > "$PIN"
           fi
           echo "artifact check head=${HEAD_SHA:0:12}"
-          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          # Extract from trusted tip — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
-          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh; then
+            echo "::error::could not restore reviewer-posted.sh from ${TRUSTED_SHA}" >&2
+            exit 1
+          fi
           chmod +x scripts/reviewer-posted.sh
           # Transition: base.sha may still be a pre-#770 checker (jane|drik
           # only) — including open PRs whose base.sha predates the #770
@@ -2348,7 +2473,7 @@ jobs:
       - name: Restore the coach posting surface from the base branch (before chain link 2)
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2395,7 +2520,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -2471,7 +2596,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -2518,9 +2643,17 @@ jobs:
             printf '%s\n' "$live" > "$PIN"
           fi
           echo "artifact check head=${HEAD_SHA:0:12}"
-          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          # Extract from trusted tip — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
-          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh; then
+            echo "::error::could not restore reviewer-posted.sh from ${TRUSTED_SHA}" >&2
+            exit 1
+          fi
           chmod +x scripts/reviewer-posted.sh
           # Transition: base.sha may still be a pre-#770 checker (jane|drik
           # only) — including open PRs whose base.sha predates the #770
@@ -2551,7 +2684,7 @@ jobs:
       - name: Restore the coach posting surface from the base branch (before chain link 3)
         if: steps.ready.outputs.ready == 'true' && env.HAS_ZAI == 'true' && steps.v1.outputs.served != 'true' && steps.v2.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2598,7 +2731,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -2674,7 +2807,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -2721,9 +2854,17 @@ jobs:
             printf '%s\n' "$live" > "$PIN"
           fi
           echo "artifact check head=${HEAD_SHA:0:12}"
-          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          # Extract from trusted tip — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
-          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh; then
+            echo "::error::could not restore reviewer-posted.sh from ${TRUSTED_SHA}" >&2
+            exit 1
+          fi
           chmod +x scripts/reviewer-posted.sh
           # Transition: base.sha may still be a pre-#770 checker (jane|drik
           # only) — including open PRs whose base.sha predates the #770
@@ -2759,7 +2900,7 @@ jobs:
           && steps.v2.outputs.served != 'true'
           && steps.v3.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -2806,7 +2947,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -2884,7 +3025,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -2931,9 +3072,17 @@ jobs:
             printf '%s\n' "$live" > "$PIN"
           fi
           echo "artifact check head=${HEAD_SHA:0:12}"
-          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          # Extract from trusted tip — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
-          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh; then
+            echo "::error::could not restore reviewer-posted.sh from ${TRUSTED_SHA}" >&2
+            exit 1
+          fi
           chmod +x scripts/reviewer-posted.sh
           # Transition: base.sha may still be a pre-#770 checker (jane|drik
           # only) — including open PRs whose base.sha predates the #770
@@ -2970,7 +3119,7 @@ jobs:
           && steps.v3.outputs.served != 'true'
           && steps.v4.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -3017,7 +3166,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -3096,7 +3245,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -3143,9 +3292,17 @@ jobs:
             printf '%s\n' "$live" > "$PIN"
           fi
           echo "artifact check head=${HEAD_SHA:0:12}"
-          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          # Extract from trusted tip — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
-          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh; then
+            echo "::error::could not restore reviewer-posted.sh from ${TRUSTED_SHA}" >&2
+            exit 1
+          fi
           chmod +x scripts/reviewer-posted.sh
           # Transition: base.sha may still be a pre-#770 checker (jane|drik
           # only) — including open PRs whose base.sha predates the #770
@@ -3183,7 +3340,7 @@ jobs:
           && steps.v4.outputs.served != 'true'
           && steps.v5.outputs.served != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -3230,7 +3387,7 @@ jobs:
           export GIT_CONFIG_VALUE_2=/dev/null
           export GIT_CONFIG_KEY_3=core.pager
           export GIT_CONFIG_VALUE_3=cat
-          /usr/bin/git checkout "$BASE_SHA" -- \
+          /usr/bin/git checkout "$TRUSTED_SHA" -- \
             .claude/reviewer-post \
             .claude/design-coach-settings.json \
             .claude/skills/design-coach \
@@ -3311,7 +3468,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SINCE: ${{ steps.ready.outputs.started_at }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PYTHONPATH: ""
           PYTHONHOME: ""
           PYTHONSTARTUP: ""
@@ -3358,9 +3515,17 @@ jobs:
             printf '%s\n' "$live" > "$PIN"
           fi
           echo "artifact check head=${HEAD_SHA:0:12}"
-          # Extract from base — coach ship steps can Write/Edit the workspace copy.
+          # Extract from trusted tip — coach ship steps can Write/Edit the workspace copy.
           mkdir -p scripts
-          /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh" > scripts/reviewer-posted.sh; then
+            echo "::error::could not restore reviewer-posted.sh from ${TRUSTED_SHA}" >&2
+            exit 1
+          fi
           chmod +x scripts/reviewer-posted.sh
           # Transition: base.sha may still be a pre-#770 checker (jane|drik
           # only) — including open PRs whose base.sha predates the #770
@@ -3392,8 +3557,9 @@ jobs:
         # claude-code-action exits 0 on a denial-only turn (#538/#764/#806).
         # A ship-step success is not a completed coach round unless the
         # marker is on the thread. Fail here so review-stamp cannot mark
-        # the round complete. Extract the pin from base.sha AFTER the
-        # agent (Write/Edit/Bash): the workspace copy is not trusted.
+        # the round complete. Extract the pin from TRUSTED_SHA (ready
+        # step output — never GITHUB_ENV) AFTER the agent: the workspace
+        # copy is not trusted.
         #
         # Success-only on purpose (Bugbot on #820): the #770 artifact walk
         # widened this to success|failure, so a chain where every provider
@@ -3413,7 +3579,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_SHA: ${{ steps.ready.outputs.trusted_sha }}
           PR: ${{ github.event.pull_request.number }}
           SINCE: ${{ steps.ready.outputs.started_at }}
           # Process-start pins: GITHUB_ENV from a prior Bash coach link
@@ -3464,7 +3630,15 @@ jobs:
             exit 1
           fi
           CHECK="${RUNNER_TEMP:-/tmp}/coach-lock-check.sh"
-          /usr/bin/git show "${BASE_SHA}:scripts/coach-lock-check.sh" > "$CHECK"
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/coach-lock-check.sh" > "$CHECK"; then
+            echo "::error::could not restore coach-lock-check.sh from ${TRUSTED_SHA}" >&2
+            exit 1
+          fi
           chmod +x "$CHECK"
           /usr/bin/bash "$CHECK" "$PR" --since "$SINCE"
 
@@ -3696,12 +3870,12 @@ jobs:
   #    Runs on EVERY PR event (always(), needs the reviewer jobs only so the
   #    sign-off markers are already posted when we read them). Marker discovery
   #    (issue #947) goes through scripts/reviewer-posted.sh `marker`, restored
-  #    from pull_request.base.sha — the same trust boundary as the artifact
-  #    checks (Actions-bot author + MCP suffix, issue comments only). The
-  #    pass/block decision also restores reviewer-signoff.sh (`key`,
-  #    `fuse-warn`, `decide`) from base.sha into RUNNER_TEMP — never a PR-head
-  #    copy — so the skip, the fuse sticky, and the currency are always the
-  #    base-pinned version of one rule.
+  #    from the trusted tip of the default branch (never event base.sha) —
+  #    the same trust boundary as the artifact checks (Actions-bot author +
+  #    MCP suffix, issue comments only). The pass/block decision also
+  #    restores reviewer-signoff.sh (`key`, `fuse-warn`, `decide`) from that
+  #    tip into RUNNER_TEMP — never a PR-head copy — so the skip, the fuse
+  #    sticky, and the currency are always the tip-pinned version of one rule.
   #
   #    ARMING (the one manual step): this status only *blocks* a merge once an
   #    admin adds `reviewer-signoff` to the branch's required status checks.
@@ -3723,9 +3897,9 @@ jobs:
           # Full history: older head shas must resolve, and the currency key
           # walks the head's first-parent line. The default (merge) ref, not
           # head.sha: the head is one of its parents. reviewer-signoff.sh is
-          # restored from base.sha below — never taken from the PR-head tree —
-          # so a branch that predates the `key` verb cannot rewrite the rule
-          # this status was written against.
+          # restored from the trusted tip below — never taken from the
+          # PR-head tree — so a branch that predates the `key` verb cannot
+          # rewrite the rule this status was written against.
           fetch-depth: 0
       - name: Compute and post the reviewer-signoff status
         env:
@@ -3733,7 +3907,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           DESIGNS_CHANGED: ${{ needs.design-changes.outputs.designs_changed }}
           NO_AUTO_REVIEW: ${{ contains(github.event.pull_request.labels.*.name, 'no-auto-review') }}
@@ -3743,21 +3917,79 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Always-tip trusted restore: resolve refs/heads/<base.ref> from the
+          # server NOW — never github.event.pull_request.base.sha (stale on
+          # open PRs whose head lacks current main). base.ref is payload-
+          # supplied, so it must equal the repository default_branch from the
+          # API; anything else fails closed. Choice: always tip (not
+          # "tip when base.sha predates it") so one path cannot fail open and
+          # a race against a main push cannot restore a pre-marker checker.
+          resolve_trusted_sha() {
+            local want_ref="$1" default_branch tip ref_tip fetch_auth
+            # gh api --jq takes the filter as the next arg; do NOT pass -r
+            # (that makes the filter `-r` and leaves default_branch empty).
+            default_branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+            default_branch="${default_branch//$'\r'/}"
+            default_branch="${default_branch//$'\n'/}"
+            if [[ -z "$default_branch" || "$want_ref" != "$default_branch" ]]; then
+              echo "::error::base.ref '${want_ref}' is not the repository default branch '${default_branch}' — fail closed" >&2
+              return 1
+            fi
+            tip="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${want_ref}" --jq .object.sha)"
+            tip="${tip//$'\r'/}"
+            tip="${tip//$'\n'/}"
+            if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::trusted tip sha empty or malformed: '${tip}' — fail closed" >&2
+              return 1
+            fi
+            # persist-credentials: false — GH_TOKEN authenticates gh, not git.
+            # Same masked, command-scoped extraheader as the head-staging fetches.
+            fetch_auth="$(printf 'x-access-token:%s' "${GH_TOKEN:?}" | base64 | tr -d '\n')"
+            echo "::add-mask::${fetch_auth}" >&2
+            if ! git cat-file -e "${tip}^{commit}" 2>/dev/null; then
+              git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+                fetch --no-tags origin "$tip" || {
+                echo "::error::could not fetch trusted tip ${tip} — fail closed" >&2
+                return 1
+              }
+            fi
+            ref_tip="$(git -c "http.https://github.com/.extraheader=Authorization: Basic ${fetch_auth}" \
+              ls-remote origin "refs/heads/${want_ref}" | awk '{print $1; exit}')"
+            if ! [[ "$ref_tip" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::ls-remote tip for refs/heads/${want_ref} empty or malformed — fail closed" >&2
+              return 1
+            fi
+            if [[ "$tip" != "$ref_tip" ]]; then
+              echo "::error::API tip ${tip} diverges from ls-remote tip ${ref_tip} — fail closed" >&2
+              return 1
+            fi
+            if ! git merge-base --is-ancestor "$tip" "$ref_tip"; then
+              echo "::error::trusted sha ${tip} is not an ancestor of the trusted ref tip — fail closed" >&2
+              return 1
+            fi
+            printf '%s\n' "$tip"
+          }
+          TRUSTED_SHA="$(resolve_trusted_sha "$BASE_REF")"
+          # LOW-1: empty TRUSTED_SHA makes `git show :path` read the index (fail open).
+          if ! [[ "${TRUSTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::TRUSTED_SHA empty or malformed before trusted restore — fail closed" >&2
+            exit 1
+          fi
           # Trust boundary (issue #947): restore reviewer-posted.sh and
-          # reviewer-signoff.sh from base.sha — never the PR-head copies —
-          # then discover markers only through posted's `marker` verb
-          # (Actions-bot + MCP suffix, issue comments only) and decide via
-          # the base-pinned signoff helper. Same restore pattern as the
+          # reviewer-signoff.sh from the trusted tip — never the PR-head
+          # copies — then discover markers only through posted's `marker`
+          # verb (Actions-bot + MCP suffix, issue comments only) and decide
+          # via the tip-pinned signoff helper. Same restore pattern as the
           # coach artifact checks.
           POSTED="${RUNNER_TEMP}/reviewer-posted.sh"
-          if ! /usr/bin/git show "${BASE_SHA}:scripts/reviewer-posted.sh" > "$POSTED"; then
-            echo "::error::could not restore reviewer-posted.sh from ${BASE_SHA}" >&2
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-posted.sh" > "$POSTED"; then
+            echo "::error::could not restore reviewer-posted.sh from ${TRUSTED_SHA}" >&2
             exit 1
           fi
           chmod +x "$POSTED"
           SIGNOFF="${RUNNER_TEMP}/reviewer-signoff.sh"
-          if ! /usr/bin/git show "${BASE_SHA}:scripts/reviewer-signoff.sh" > "$SIGNOFF"; then
-            echo "::error::could not restore reviewer-signoff.sh from ${BASE_SHA}" >&2
+          if ! /usr/bin/git show "${TRUSTED_SHA}:scripts/reviewer-signoff.sh" > "$SIGNOFF"; then
+            echo "::error::could not restore reviewer-signoff.sh from ${TRUSTED_SHA}" >&2
             exit 1
           fi
           chmod +x "$SIGNOFF"
@@ -3771,9 +4003,9 @@ jobs:
 
           # Last QUALIFYING marker per family on HEAD_SHA, with --currency so
           # a trusted older-sha marker can still feed decide's tree-carry-
-          # forward. Pre-#947 base checkers lack `marker` (exit 2) — treat as
-          # empty (fail-closed); this landing PR is non-design so decide
-          # still PASSes. Never fall back to an author-blind grep.
+          # forward. The tip-pinned checker must carry `marker`; exit 2 means
+          # the trusted restore is wrong — fail closed visibly, never treat
+          # a genuine marker as absent. Never fall back to an author-blind grep.
           trusted_marker() {  # $1 = jane|drik
             local who="$1" err out rc
             err="$(mktemp)"
@@ -3784,9 +4016,12 @@ jobs:
             rc=$?
             set -e
             if [[ "$rc" -eq 2 ]]; then
-              # stderr only — stdout is captured as the marker string.
-              echo "::notice::base reviewer-posted.sh predates #947 marker verb — treating $who marker as absent" >&2
-              out=""
+              # Trusted tip must carry the marker verb. A silent "treat as
+              # absent" here masked stale restores; fail closed visibly.
+              echo "::error::trusted reviewer-posted.sh rejected marker verb (exit 2) for $who — fail closed (tip must carry #947 marker)" >&2
+              cat "$err" >&2
+              rm -f "$err"
+              exit 1
             elif [[ "$rc" -ne 0 ]]; then
               cat "$err" >&2
               rm -f "$err"
@@ -3809,8 +4044,11 @@ jobs:
           # "No fusecheck STRONG WARN" cannot trip it. Best-effort: if the
           # sticky isn't posted yet the flag is false and the reviewers' own
           # acknowledgement plus the visible warn carry it.
+          # LOW-2: same trust rule as markers — only an Actions-bot sticky
+          # (github-actions[bot], type Bot) counts; a user-planted body that
+          # starts with the marker must not drive fuse-warn.
           sticky="$(gh api --paginate "/repos/$REPO/issues/$PR_NUMBER/comments" \
-            --jq '[.[] | select((.body // "") | startswith("<!-- printcheck-gate-report -->"))] | last | .body // empty' \
+            --jq '[.[] | select((.user.login // "") == "github-actions[bot]" and (.user.type // "") == "Bot" and ((.body // "") | startswith("<!-- printcheck-gate-report -->")))] | last | .body // empty' \
             2>/dev/null || true)"
           fuse_warn="$(printf '%s' "$sticky" | "$SIGNOFF" fuse-warn || true)"
           [[ "$fuse_warn" == true ]] || fuse_warn=false
