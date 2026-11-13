@@ -5,14 +5,15 @@ module is the pure half of the LIVE gates (the posting tool fetches
 network data and acts):
 
 * **Trusted preview** — a dry-run / self-migrate comment whose body
-  *begins* with exactly the dry-run marker then the ``message-digest``
-  line (writer prefix at column 0; leading whitespace refused — #1021),
-  authored by ``github-actions[bot]`` with ``type == "Bot"``, never edited
-  (``updated_at == created_at``). The old marker-only format is never
-  trusted. Markers mid-body / quoted / fenced are never trusted. The
-  digest binds the NFKC ``## Message`` first paragraph (the drafted
-  root); live copy may be recomposed under the length, tag, and
-  approval gates.
+  *begins* with exactly the dry-run marker, then the ``message-digest``
+  line, then the ``render-digest`` line (writer prefix at column 0;
+  leading whitespace refused — #1021), authored by ``github-actions[bot]``
+  with ``type == "Bot"``, never edited (``updated_at == created_at``).
+  The old marker-only and message-digest-only formats are never trusted.
+  Markers mid-body / quoted / fenced are never trusted. The message
+  digest binds the NFKC ``## Message`` first paragraph + ``## Link``; the
+  render digest binds the exact root + thread that will be posted — LIVE
+  refuses unless that copy matches (issue #1023).
 
 * **Exactly-one rule** — there must be **exactly one** trusted preview
   whose ``created_at`` is **strictly later** than GraphQL ``lastEditedAt``
@@ -45,7 +46,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, timezone
 
-from .roottags import message_digest, parse_message_digest
+from .roottags import (
+    message_digest,
+    parse_message_digest,
+    parse_render_digest,
+    render_digest,
+)
 
 APPROVAL_LABEL = "approved-to-post"
 # REST GITHUB_TOKEN comments are exactly this login + type. GraphQL's bare
@@ -249,7 +255,12 @@ def is_trusted_preview_comment(comment: dict) -> bool:
         return False
     if created != updated:
         return False
-    return parse_message_digest(comment.get("body") or "") is not None
+    body = comment.get("body") or ""
+    # Both digests required: message-digest-only (pre-#1023) is not trusted.
+    return (
+        parse_message_digest(body) is not None
+        and parse_render_digest(body) is not None
+    )
 
 
 def trusted_previews_after_edit(
@@ -420,6 +431,34 @@ def assert_digest_binds(
     return digest, preview
 
 
+def assert_render_binds(
+    preview: dict,
+    root: str,
+    thread: list[str] | None = None,
+) -> str:
+    """Refuse when live root+thread does not match the preview render-digest.
+
+    Returns the matching digest hex. A missing/unreadable render-digest or a
+    mismatch fails closed (issue #1023) — bare-domain injection via
+    recomposed live prose cannot pass because the approved preview's
+    exact copy is the only text that posts.
+    """
+    dig = parse_render_digest(preview.get("body") or "")
+    if dig is None:
+        raise ApprovalGuardError(
+            "trusted preview comment has an unreadable render-digest — "
+            "refusing live post (fail closed)"
+        )
+    expected = render_digest(root, thread)
+    if dig != expected:
+        raise ApprovalGuardError(
+            f"render-digest mismatch: live copy does not match the approved "
+            f"preview (preview={dig}, live={expected}) — refusing (fail "
+            f"closed); post the approved preview copy or re-preview"
+        )
+    return dig
+
+
 def assert_live_gates(
     comments: list[dict],
     body: str | None,
@@ -432,7 +471,9 @@ def assert_live_gates(
     """Full LIVE gate: preview bind + human approval after preview + freeze.
 
     Returns ``(digest, approved_at, preview_comment)``. Propagates
-    :class:`PreviewMigrationNeeded` for the self-migrate path.
+    :class:`PreviewMigrationNeeded` for the self-migrate path. Callers must
+    still run :func:`assert_render_binds` on the postable root+thread
+    against the returned preview (issue #1023).
     """
     digest, preview = assert_digest_binds(
         comments, body, last_edited_at=last_edited_at

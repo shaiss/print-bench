@@ -100,6 +100,10 @@ DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
 DIGEST_LINE_RE = re.compile(
     r"^<!-- growth-twitter:message-digest:sha256=([0-9a-f]{64}) -->$"
 )
+RENDER_DIGEST_PREFIX = "<!-- growth-twitter:render-digest:sha256="
+RENDER_DIGEST_LINE_RE = re.compile(
+    r"^<!-- growth-twitter:render-digest:sha256=([0-9a-f]{64}) -->$"
+)
 # REST GITHUB_TOKEN issue comments are exactly this login + Bot type.
 TRUSTED_PREVIEW_LOGIN = "github-actions[bot]"
 TRUSTED_PREVIEW_TYPE = "Bot"
@@ -236,18 +240,40 @@ def _message_digest(body):
     return hashlib.sha256((para + "\n" + link).encode("utf-8")).hexdigest()
 
 
+def _render_digest(root, thread=None):
+    parts = [unicodedata.normalize("NFKC", root or "")]
+    for part in thread or []:
+        parts.append(unicodedata.normalize("NFKC", part))
+    payload = "\0".join(parts)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _digest_comment_line(body):
     return f"{DIGEST_PREFIX}{_message_digest(body)} -->"
+
+
+def _render_digest_comment_line(root, thread=None):
+    return f"{RENDER_DIGEST_PREFIX}{_render_digest(root, thread)} -->"
+
+
+def _preview_digest_header(body, root, thread=None):
+    return (
+        f"{DRYRUN_MARKER}\n"
+        f"{_digest_comment_line(body)}\n"
+        f"{_render_digest_comment_line(root, thread)}\n"
+    )
 
 
 def _parse_message_digest(comment_body):
     """sha256 when body *begins* with marker + digest (parity with roottags).
 
-    Writer emits ``{DRYRUN_MARKER}\\n{digest_line}\\n...`` at column 0.
-    Trust is ``startswith(DRYRUN_MARKER + \"\\n\")`` then an exact digest
-    line — no strip (leading whitespace is a deliberate reject, #1021).
-    Mid-body / quoted / fenced markers and a digest not right after the
-    marker return None.
+    Writer emits ``{DRYRUN_MARKER}\\n{message-digest}\\n{render-digest}\\n...``
+    at column 0. Trust for the message binding is
+    ``startswith(DRYRUN_MARKER + \"\\n\")`` then an exact digest line — no
+    strip (leading whitespace is a deliberate reject, #1021). Mid-body /
+    quoted / fenced markers and a digest not right after the marker return
+    None. A missing render-digest still yields the message digest here;
+    trusted-preview checks require :func:`_parse_render_digest` too.
     """
     if not comment_body:
         return None
@@ -257,6 +283,23 @@ def _parse_message_digest(comment_body):
         return None
     line2, _sep, _tail = text[len(prefix):].partition("\n")
     m = DIGEST_LINE_RE.fullmatch(line2)
+    return m.group(1) if m else None
+
+
+def _parse_render_digest(comment_body):
+    """sha256 of approved root+thread from a three-line preview header."""
+    if not comment_body:
+        return None
+    text = comment_body.replace("\r\n", "\n").replace("\r", "\n")
+    prefix = DRYRUN_MARKER + "\n"
+    if not text.startswith(prefix):
+        return None
+    rest = text[len(prefix):]
+    line2, sep2, after2 = rest.partition("\n")
+    if not sep2 or not DIGEST_LINE_RE.fullmatch(line2):
+        return None
+    line3, _sep3, _tail = after2.partition("\n")
+    m = RENDER_DIGEST_LINE_RE.fullmatch(line3)
     return m.group(1) if m else None
 
 
@@ -424,7 +467,11 @@ def _is_trusted_preview_comment(comment):
     updated = comment.get("updated_at") or ""
     if not created or not updated or created != updated:
         return False
-    return _parse_message_digest(comment.get("body") or "") is not None
+    body = comment.get("body") or ""
+    return (
+        _parse_message_digest(body) is not None
+        and _parse_render_digest(body) is not None
+    )
 
 
 def _trusted_previews_after_edit(comments, last_edited_at):
@@ -600,6 +647,23 @@ def _assert_digest_binds(comments, body, last_edited_at=None):
             f"preview"
         )
     return digest, preview
+
+
+def _assert_render_binds(preview, root, thread=None):
+    dig = _parse_render_digest(preview.get("body") or "")
+    if dig is None:
+        raise _ApprovalGuardError(
+            "trusted preview comment has an unreadable render-digest — "
+            "refusing live post (fail closed)"
+        )
+    expected = _render_digest(root, thread)
+    if dig != expected:
+        raise _ApprovalGuardError(
+            f"render-digest mismatch: live copy does not match the approved "
+            f"preview (preview={dig}, live={expected}) — refusing (fail "
+            f"closed); post the approved preview copy or re-preview"
+        )
+    return dig
 
 
 def _assert_live_gates(comments, body, events, last_edited_at, approver_logins,
@@ -1318,15 +1382,17 @@ def _post_tweet(arguments):
             f"paragraph")
 
     # --- LIVE gates / self-migrate / dry-run freeze notes -------------------
-    # LIVE posts only when: exactly one trusted preview after lastEditedAt,
-    # digest matches, the latest approved-to-post labeled event overall is
-    # an allowlisted User (optionally direct, not via GitHub App) strictly
-    # after that preview AND after the bot's most recent label removal,
-    # with no unlabeled after it, and the body freeze passes. Missing
-    # preview → write preview (drafted ## Message digest + recomposed copy
-    # under the gates) + REMOVE approved-to-post only + do not post; does
-    # not consume the run's post slot or the daycap. Digest mismatch on an
-    # existing trusted preview → refuse (do not write a second preview).
+    # LIVE posts only when: exactly one trusted preview after lastEditedAt
+    # (marker + message-digest + render-digest), message-digest matches,
+    # render-digest matches the postable root+thread, the latest
+    # approved-to-post labeled event overall is an allowlisted User
+    # (optionally direct, not via GitHub App) strictly after that preview
+    # AND after the bot's most recent label removal, with no unlabeled
+    # after it, and the body freeze passes. Missing preview → write
+    # preview (both digests + the exact copy) + REMOVE approved-to-post
+    # only + do not post; does not consume the run's post slot or the
+    # daycap. Digest mismatch on an existing trusted preview → refuse
+    # (do not write a second preview).
     approval_notes = []
     events = None
     last_edited = None
@@ -1368,10 +1434,11 @@ def _post_tweet(arguments):
                 approval_notes.append(f"{e}; a LIVE post would refuse")
 
     rendered = _render_parts(text, thread)
+    digest_header = _preview_digest_header(issue_body, text, thread)
 
     if need_live_gates:
         try:
-            _assert_live_gates(
+            _digest, _approved_at, preview_comment = _assert_live_gates(
                 comments,
                 issue.get("body") or "",
                 events or [],
@@ -1379,11 +1446,12 @@ def _post_tweet(arguments):
                 _approver_logins(),
                 require_direct_human_label=_require_direct_human_label(),
             )
+            _assert_render_binds(preview_comment, text, thread)
         except _PreviewMigrationNeeded as e:
-            # Self-migrate: write preview (marker + digest of ## Message
-            # first paragraph + ## Link + the recomposed copy under the
-            # gates), REMOVE approved-to-post only, do not post, no
-            # post-slot / daycap burn. Bounded by MAX_PREVIEWS_PER_RUN.
+            # Self-migrate: write preview (marker + message-digest +
+            # render-digest of the exact copy under the gates), REMOVE
+            # approved-to-post only, do not post, no post-slot / daycap
+            # burn. Bounded by MAX_PREVIEWS_PER_RUN.
             if state is not None:
                 try:
                     n_previews = _cap_state_preview_count(state)
@@ -1395,15 +1463,14 @@ def _post_tweet(arguments):
                         f"({n_previews}/{MAX_PREVIEWS_PER_RUN}); refusing "
                         f"further self-migrates this run"
                     )
-            digest_line = _digest_comment_line(issue_body)
             preview = (
-                f"{DRYRUN_MARKER}\n{digest_line}\n{PREVIEW_HEADER}\n\n"
+                f"{digest_header}{PREVIEW_HEADER}\n\n"
                 f"{rendered}\n\n"
                 f"**Preview (self-migrate)** — nothing was published. "
-                f"The digest binds the `## Message` first paragraph and "
-                f"`## Link`; live copy may be recomposed under the length, "
-                f"tag, URL, and approval gates. Re-apply `{APPROVAL_LABEL}` "
-                f"after reviewing; a later LIVE run will post. ({e})\n\n"
+                f"The message-digest binds the `## Message` first paragraph "
+                f"and `## Link`; the render-digest binds this exact root + "
+                f"thread — a later LIVE post must match it (issue #1023). "
+                f"Re-apply `{APPROVAL_LABEL}` after reviewing. ({e})\n\n"
                 f"{FOOTER}"
             )
             try:
@@ -1560,12 +1627,12 @@ def _post_tweet(arguments):
             + "; ".join(approval_notes)
             + "."
         )
-    digest_line = _digest_comment_line(issue.get("body") or "")
     comment = (
-        f"{DRYRUN_MARKER}\n{digest_line}\n{DRYRUN_HEADER}\n\n{rendered}\n\n"
+        f"{digest_header}{DRYRUN_HEADER}\n\n{rendered}\n\n"
         f"**Dry run** — nothing was published. Going live needs: "
         f"{'; '.join(reasons) if reasons else 'nothing further'}. "
-        f"See docs/growth.md."
+        f"The render-digest binds this exact copy; a LIVE post must match "
+        f"it (issue #1023). See docs/growth.md."
         f"{note_block}\n\n{FOOTER}"
     )
     try:
@@ -1722,15 +1789,16 @@ def selftest():
     PREVIEW_AT = "2026-01-01T10:00:00Z"
     APPROVE_AT = "2026-01-01T12:00:00Z"  # strictly after preview
 
-    def _seed_trusted_preview(number, body="", created_at=PREVIEW_AT,
-                              updated_at=None, login=TRUSTED_PREVIEW_LOGIN,
+    def _seed_trusted_preview(number, body="", root="", thread=None,
+                              created_at=PREVIEW_AT, updated_at=None,
+                              login=TRUSTED_PREVIEW_LOGIN,
                               utype=TRUSTED_PREVIEW_TYPE):
-        """A workflow-bot preview whose digest matches *body*."""
-        dig = _digest_comment_line(body)
+        """A workflow-bot preview whose digests match *body* and *root*+*thread*."""
+        header = _preview_digest_header(body, root, thread)
         if updated_at is None:
             updated_at = created_at
         _FAKE_COMMENTS[number] = [{
-            "body": f"{DRYRUN_MARKER}\n{dig}\ndry-ran earlier",
+            "body": f"{header}dry-ran earlier",
             "user": {"login": login, "type": utype},
             "created_at": created_at,
             "updated_at": updated_at,
@@ -1752,9 +1820,9 @@ def selftest():
             _FAKE_EVENTS[number] = [ev]
         _FAKE_LAST_EDITED.pop(number, None)
 
-    def _ready_live(number, body=""):
+    def _ready_live(number, body="", root="", thread=None):
         """Trusted preview + allowlisted human approval after it."""
-        _seed_trusted_preview(number, body=body)
+        _seed_trusted_preview(number, body=body, root=root, thread=thread)
         _approve(number)
 
     _FAKE_ISSUES = {
@@ -1779,7 +1847,7 @@ def selftest():
     _FAKE_LAST_EDITED.clear()
     for n in (10, 12):
         _approve(n)
-    _ready_live(12)
+    _ready_live(12, root="approved and live", thread=["part two"])
 
     # Input guards.
     check("missing number is rejected", err(_post_tweet({"text": "x"})))
@@ -1820,6 +1888,9 @@ def selftest():
     check("the dry-run comment carries a message-digest of ## Message",
           _last_comment and _parse_message_digest(_last_comment["body"])
           == _message_digest(""))
+    check("the dry-run comment carries a render-digest of root+thread",
+          _last_comment and _parse_render_digest(_last_comment["body"])
+          == _render_digest("hello bench", ["second part"]))
     check("the dry-run comment carries the attribution footer",
           _last_comment and _last_comment["body"].endswith(FOOTER))
     check("the dry-run comment renders the thread part",
@@ -1883,7 +1954,7 @@ def selftest():
     # (the X-credits-depleted lesson — a rejected post must not strand a queued
     # message behind a claim marker a human has to hand-delete).
     _FAKE_ISSUES[13] = q(13, OK + [APPROVAL_LABEL])
-    _ready_live(13)
+    _ready_live(13, root="fails on the first tweet")
     _last_deleted = None
     os.environ["GROWTH_MCP_FAKE_X_FAIL"] = "1"
     r = _post_tweet({"number": 13, "text": "fails on the first tweet"})
@@ -1897,13 +1968,14 @@ def selftest():
           any(FAILURE_HEADER in c["body"] for c in _FAKE_COMMENTS.get(13, [])))
     os.environ.pop("GROWTH_MCP_FAKE_X_FAIL", None)
     check("a withdrawn item is postable again (not refused as a duplicate)",
-          _post_tweet({"number": 13, "text": "retry after fix"}).get("isError") is False)
+          _post_tweet({"number": 13, "text": "fails on the first tweet"}
+                      ).get("isError") is False)
 
     # A MID-THREAD failure is the OPPOSITE: the first tweet IS live, so the
     # claim must STAND (withdrawing it would risk a public double-post) and the
     # item stays refused on retry.
     _FAKE_ISSUES[15] = q(15, OK + [APPROVAL_LABEL])
-    _ready_live(15)
+    _ready_live(15, root="first is fine", thread=["this part fails"])
     _last_deleted = None
     os.environ["GROWTH_MCP_FAKE_X_FAIL_PART"] = "1"
     r = _post_tweet({"number": 15, "text": "first is fine", "thread": ["this part fails"]})
@@ -1918,7 +1990,7 @@ def selftest():
 
     # If the claim itself cannot be written, nothing is published.
     _FAKE_ISSUES[14] = q(14, OK + [APPROVAL_LABEL])
-    _ready_live(14)
+    _ready_live(14, root="cannot claim")
     _last_tweets = None
     os.environ["GROWTH_MCP_FAKE_COMMENT_FAIL"] = "1"
     r = _post_tweet({"number": 14, "text": "cannot claim"})
@@ -2165,6 +2237,8 @@ def selftest():
           r.get("isError") is False
           and "PREVIEW self-migrated" in r["content"][0]["text"]
           and _last_comment and _parse_message_digest(_last_comment["body"])
+          and _parse_render_digest(_last_comment["body"])
+          == _render_digest("needs preview")
           and _last_label_removed == {"number": 43, "label": APPROVAL_LABEL}
           and not _last_tweets
           and APPROVAL_LABEL not in _label_names(_FAKE_ISSUES[43]))
@@ -2231,7 +2305,10 @@ def selftest():
     _FAKE_ISSUES[45] = q(45, OK + [APPROVAL_LABEL])
     _FAKE_ISSUES[45]["body"] = "## Message\n\nCurrent body @Prusa3D\n"
     _approve(45)
-    _seed_trusted_preview(45, body="## Message\n\nOld draft @Prusa3D\n")
+    _seed_trusted_preview(
+        45, body="## Message\n\nOld draft @Prusa3D\n",
+        root="Current body @Prusa3D",
+    )
     _last_tweets = None
     _last_comment = None
     r = _post_tweet({"number": 45, "text": "Current body @Prusa3D"})
@@ -2241,8 +2318,7 @@ def selftest():
 
     # Two trusted previews after last edit → refuse (ambiguity, no migrate).
     _FAKE_ISSUES[51] = q(51, OK + [APPROVAL_LABEL])
-    dig = _digest_comment_line("")
-    body_prev = f"{DRYRUN_MARKER}\n{dig}\none"
+    body_prev = f"{_preview_digest_header('', 'two previews')}one"
     _FAKE_COMMENTS[51] = [
         {"body": body_prev,
          "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
@@ -2255,6 +2331,21 @@ def selftest():
     r = _post_tweet({"number": 51, "text": "two previews"})
     check("LIVE refuses when two trusted previews exist after last edit",
           err(r) and "ambiguous" in r["content"][0]["text"])
+
+    # Message-digest-only preview (pre-#1023) → not trusted → self-migrate.
+    _FAKE_ISSUES[69] = q(69, OK + [APPROVAL_LABEL])
+    _approve(69)
+    dig_only = _digest_comment_line("")
+    _FAKE_COMMENTS[69] = [{
+        "body": f"{DRYRUN_MARKER}\n{dig_only}\nold two-line header",
+        "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
+        "created_at": PREVIEW_AT,
+        "updated_at": PREVIEW_AT,
+    }]
+    r = _post_tweet({"number": 69, "text": "needs render digest"})
+    check("LIVE self-migrates when preview lacks render-digest (#1023)",
+          r.get("isError") is False
+          and "PREVIEW self-migrated" in r["content"][0]["text"])
 
     # Bot-actor label as the LATEST labeled → refuse (not a User approval).
     _FAKE_ISSUES[52] = q(52, OK + [APPROVAL_LABEL])
@@ -2331,7 +2422,7 @@ def selftest():
     # App-performed label refused when GROWTH_REQUIRE_DIRECT_HUMAN_LABEL=true.
     os.environ[DIRECT_HUMAN_LABEL_ENV] = "true"
     _FAKE_ISSUES[58] = q(58, OK + [APPROVAL_LABEL])
-    _seed_trusted_preview(58)
+    _seed_trusted_preview(58, root="via app allowed")
     _approve(58, via_app={"id": 1, "slug": "cursor"})
     r = _post_tweet({"number": 58, "text": "via app"})
     check("LIVE refuses app-performed label when direct-human required",
@@ -2365,7 +2456,9 @@ def selftest():
     # A ready item can still post after those previews.
     _FAKE_ISSUES[61] = q(61, OK + [APPROVAL_LABEL])
     _FAKE_ISSUES[61]["body"] = "## Message\n\nAfter previews @Prusa3D\n"
-    _ready_live(61, body=_FAKE_ISSUES[61]["body"])
+    _ready_live(
+        61, body=_FAKE_ISSUES[61]["body"], root="After previews @Prusa3D"
+    )
     _last_tweets = None
     r3 = _post_tweet({"number": 61, "text": "After previews @Prusa3D"})
     check("LIVE still posts one item after non-consuming preview-migrates",
@@ -2383,7 +2476,9 @@ def selftest():
     _FAKE_ISSUES[62]["labels"] = [
         {"name": n} for n in OK + [APPROVAL_LABEL]
     ]
-    _ready_live(62, body=_FAKE_ISSUES[62]["body"])
+    _ready_live(
+        62, body=_FAKE_ISSUES[62]["body"], root="Same-run @Prusa3D"
+    )
     # Keep the preview-migrate record; overlay a trusted preview + approval.
     r_same = _post_tweet({"number": 62, "text": "Same-run @Prusa3D"})
     check("LIVE refuses to post an issue preview-migrated earlier this run",
@@ -2464,11 +2559,53 @@ def selftest():
         os.environ[v] = "cred"
     _FAKE_ISSUES[46] = q(46, OK + [APPROVAL_LABEL])
     _FAKE_ISSUES[46]["body"] = "## Message\n\nBound draft @Prusa3D\n"
-    _ready_live(46, body=_FAKE_ISSUES[46]["body"])
+    _ready_live(
+        46, body=_FAKE_ISSUES[46]["body"], root="Bound draft @Prusa3D"
+    )
     _last_tweets, _last_close = None, None
     r = _post_tweet({"number": 46, "text": "Bound draft @Prusa3D"})
     check("LIVE proceeds when trusted digest matches and freeze is fresh",
           r.get("isError") is False and "POSTED live" in r["content"][0]["text"])
+
+    # #1023: matching render-digest posts; altered copy / bare-domain refuse.
+    _FAKE_ISSUES[70] = q(70, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[70]["body"] = (
+        "## Message\n\nApproved copy @Prusa3D\n\n"
+        "## Link\n\nhttps://github.com/shaiss/print-bench\n"
+    )
+    approved_copy = (
+        "Approved copy @Prusa3D https://github.com/shaiss/print-bench"
+    )
+    _ready_live(70, body=_FAKE_ISSUES[70]["body"], root=approved_copy)
+    _last_tweets = None
+    r = _post_tweet({"number": 70, "text": approved_copy})
+    check("LIVE posts when render-digest matches approved preview (#1023)",
+          r.get("isError") is False and "POSTED live" in r["content"][0]["text"]
+          and _last_tweets == [{"text": approved_copy, "reply_to": None}])
+
+    _FAKE_ISSUES[71] = q(71, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[71]["body"] = _FAKE_ISSUES[70]["body"]
+    _ready_live(71, body=_FAKE_ISSUES[71]["body"], root=approved_copy)
+    _last_tweets = None
+    r = _post_tweet({
+        "number": 71,
+        "text": "Altered prose @Prusa3D https://github.com/shaiss/print-bench",
+    })
+    check("LIVE refuses altered copy vs approved preview (#1023)",
+          err(r) and "render-digest mismatch" in r["content"][0]["text"]
+          and not _last_tweets)
+
+    _FAKE_ISSUES[72] = q(72, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[72]["body"] = _FAKE_ISSUES[70]["body"]
+    _ready_live(72, body=_FAKE_ISSUES[72]["body"], root=approved_copy)
+    _last_tweets = None
+    r = _post_tweet({
+        "number": 72,
+        "text": approved_copy + " see example.com/x",
+    })
+    check("LIVE refuses bare-domain injection via recomposed copy (#1023)",
+          err(r) and "render-digest mismatch" in r["content"][0]["text"]
+          and not _last_tweets)
 
     # Dry-run with a stale body still proceeds but reports the condition.
     os.environ.pop("GROWTH_TWITTER_LIVE", None)
@@ -2488,6 +2625,9 @@ def selftest():
     check("dry-run on a stale body still records a message-digest",
           _last_comment and _parse_message_digest(_last_comment["body"])
           == _message_digest(""))
+    check("dry-run on a stale body still records a render-digest",
+          _last_comment and _parse_render_digest(_last_comment["body"])
+          == _render_digest("dry-run with stale body"))
 
     # The JSON-RPC surface exposes exactly the one tool.
     check("tools/list exposes exactly post_tweet",

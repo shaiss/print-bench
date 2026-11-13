@@ -77,16 +77,22 @@ _LINK_HEADING_RE = re.compile(
 )
 _NEXT_HEADING_RE = re.compile(r"^#{2,3}[ \t]+\S", re.MULTILINE)
 
-# Dry-run / live digest: sha256 of NFKC(## Message first paragraph) + '\n' +
-# NFKC(## Link value) (empty string when Link is absent). The writer emits
-# exactly ``{DRYRUN_MARKER}\n{digest_line}\n...`` with the marker at column 0;
-# :func:`parse_message_digest` trusts only that prefix (issue #1021). Leading
-# whitespace, quoted / mid-body / fenced copies, a digest not immediately
-# after the marker, and the old marker-only format are never trusted.
+# Dry-run / live digests. The writer emits exactly
+# ``{DRYRUN_MARKER}\n{message-digest}\n{render-digest}\n...`` with the marker
+# at column 0 (issue #1021). :func:`parse_message_digest` trusts marker +
+# message-digest; :func:`parse_render_digest` requires the third line too
+# (issue #1023 — LIVE posts only what the approved preview rendered).
+# Leading whitespace, quoted / mid-body / fenced copies, a digest not
+# immediately after the marker, and the old marker-only / message-digest-only
+# formats are never trusted as a full preview.
 DRYRUN_MARKER = "<!-- growth-twitter:dry-run -->"
 DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
 DIGEST_LINE_RE = re.compile(
     r"^<!-- growth-twitter:message-digest:sha256=([0-9a-f]{64}) -->$"
+)
+RENDER_DIGEST_PREFIX = "<!-- growth-twitter:render-digest:sha256="
+RENDER_DIGEST_LINE_RE = re.compile(
+    r"^<!-- growth-twitter:render-digest:sha256=([0-9a-f]{64}) -->$"
 )
 
 
@@ -150,12 +156,29 @@ def message_digest(body: str | None) -> str:
     Dry-run / preview comments record this; live posts re-check it — binding
     approval to the drafted root text **and** the queue Link. An empty Link
     still contributes the trailing newline + empty string so the format is
-    stable. Live copy may be recomposed under the length, tag, and URL
-    gates; only URLs from the bound paragraph and Link may appear.
+    stable. The live tweet text is bound separately by :func:`render_digest`
+    (issue #1023); only URLs from the bound paragraph and Link may appear as
+    scheme URLs, and bare-domain injection in recomposed prose cannot reach
+    a live post because the render-digest must match the approved preview.
     """
     para = unicodedata.normalize("NFKC", message_root_paragraph(body))
     link = unicodedata.normalize("NFKC", message_link_value(body))
     return hashlib.sha256((para + "\n" + link).encode("utf-8")).hexdigest()
+
+
+def render_digest(root: str, thread: list[str] | None = None) -> str:
+    """sha256 hex of the exact root + thread parts that will be posted.
+
+    Each part is NFKC-normalized and joined with a NUL separator so an
+    embedded newline in a tweet cannot forge a different part split. Dry-run
+    / preview comments record this on the third header line; LIVE refuses
+    unless the postable text matches (issue #1023).
+    """
+    parts = [unicodedata.normalize("NFKC", root or "")]
+    for part in thread or []:
+        parts.append(unicodedata.normalize("NFKC", part))
+    payload = "\0".join(parts)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def digest_comment_line(body: str | None) -> str:
@@ -163,20 +186,43 @@ def digest_comment_line(body: str | None) -> str:
     return f"{DIGEST_PREFIX}{message_digest(body)} -->"
 
 
+def render_digest_comment_line(
+    root: str, thread: list[str] | None = None
+) -> str:
+    """The render-digest HTML comment line for a dry-run / preview comment."""
+    return f"{RENDER_DIGEST_PREFIX}{render_digest(root, thread)} -->"
+
+
+def preview_digest_header(
+    body: str | None,
+    root: str,
+    thread: list[str] | None = None,
+) -> str:
+    """First three lines of a dry-run / preview comment (trailing newline)."""
+    return (
+        f"{DRYRUN_MARKER}\n"
+        f"{digest_comment_line(body)}\n"
+        f"{render_digest_comment_line(root, thread)}\n"
+    )
+
+
 def parse_message_digest(comment_body: str | None) -> str | None:
     """sha256 from a preview whose body *begins* with marker + digest line.
 
     The dry-run / preview writer emits exactly::
 
-        {DRYRUN_MARKER}\\n{digest_line}\\n...
+        {DRYRUN_MARKER}\\n{message-digest}\\n{render-digest}\\n...
 
-    with the marker at column 0 (no leading whitespace). Trust requires that
-    same prefix: :meth:`str.startswith` ``DRYRUN_MARKER + \"\\n\"``, then a
-    line matching :data:`DIGEST_LINE_RE` exactly. Newlines are normalized
-    (CRLF → LF) but the body is **not** stripped — leading whitespace is a
-    deliberate reject (issue #1021). Quoted / mid-body / fenced copies of
-    the marker, a digest line that is not immediately after the marker, and
-    the old marker-only format all return ``None``.
+    with the marker at column 0 (no leading whitespace). Trust for the
+    *message* binding requires that same prefix: :meth:`str.startswith`
+    ``DRYRUN_MARKER + \"\\n\"``, then a line matching :data:`DIGEST_LINE_RE`
+    exactly. Newlines are normalized (CRLF → LF) but the body is **not**
+    stripped — leading whitespace is a deliberate reject (issue #1021).
+    Quoted / mid-body / fenced copies of the marker, a digest line that is
+    not immediately after the marker, and the old marker-only format all
+    return ``None``. A missing render-digest line still returns the message
+    digest here; :func:`parse_render_digest` / trusted-preview checks refuse
+    that incomplete header.
     """
     if not comment_body:
         return None
@@ -186,6 +232,29 @@ def parse_message_digest(comment_body: str | None) -> str | None:
         return None
     line2, _sep, _tail = text[len(prefix) :].partition("\n")
     m = DIGEST_LINE_RE.fullmatch(line2)
+    return m.group(1) if m else None
+
+
+def parse_render_digest(comment_body: str | None) -> str | None:
+    """sha256 of approved root+thread from a three-line preview header.
+
+    Requires the body to *begin* with marker + message-digest + render-digest
+    (issue #1021 prefix trust, issue #1023 render bind). Missing / misplaced
+    render-digest, or a message-digest-only (pre-#1023) header, returns
+    ``None``.
+    """
+    if not comment_body:
+        return None
+    text = comment_body.replace("\r\n", "\n").replace("\r", "\n")
+    prefix = DRYRUN_MARKER + "\n"
+    if not text.startswith(prefix):
+        return None
+    rest = text[len(prefix) :]
+    line2, sep2, after2 = rest.partition("\n")
+    if not sep2 or not DIGEST_LINE_RE.fullmatch(line2):
+        return None
+    line3, _sep3, _tail = after2.partition("\n")
+    m = RENDER_DIGEST_LINE_RE.fullmatch(line3)
     return m.group(1) if m else None
 
 
