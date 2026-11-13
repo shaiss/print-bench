@@ -12,12 +12,15 @@ import pytest
 from growth.roottags import (
     MAX_REQUIRED_HANDLES,
     RootTagsError,
+    allowed_urls,
+    assert_only_allowed_urls,
     assert_postable_text,
     assert_thread_mention_cap,
     count_posted_mentions,
     ensure_root_tags,
     extract_handles,
     message_digest,
+    message_link_value,
     message_root_paragraph,
     missing_handles,
     parse_message_digest,
@@ -128,18 +131,35 @@ def test_missing_tags_restored_via_drafted_verbatim_when_it_fits():
     assert missing_handles(out, required) == []
 
 
-def test_drafted_fallback_preserves_composed_url():
+def test_drafted_fallback_reattaches_only_issue_link():
     drafted = "Measured margin. @Prusa3D"
     required = ["@Prusa3D"]
     link = "https://github.com/shaiss/print-bench/tree/main/designs/x"
     composed = f"Agent rewrite without the tag. {link}"
-    out = ensure_root_tags(composed, required, drafted=drafted)
+    out = ensure_root_tags(composed, required, drafted=drafted, link=link)
     assert out == f"{drafted} {link}"
     assert tweet_weight(out) <= MAX_WEIGHT
 
 
+def test_extra_composed_url_refused():
+    """Model text with a URL outside ## Message / ## Link refuses."""
+    drafted = "Measured margin. @Prusa3D"
+    link = "https://github.com/shaiss/print-bench/tree/main/designs/x"
+    evil = "https://evil.example/phish"
+    composed = f"Agent rewrite with tag. @Prusa3D {link} {evil}"
+    with pytest.raises(RootTagsError, match="not in the approved"):
+        ensure_root_tags(composed, required=["@Prusa3D"], drafted=drafted, link=link)
+    with pytest.raises(RootTagsError, match="not in the approved"):
+        assert_only_allowed_urls(
+            f"thread with {evil}",
+            allowed_urls(
+                f"## Message\n\n{drafted}\n\n## Link\n\n{link}\n"
+            ),
+        )
+
+
 def test_drafted_url_overflow_falls_through_to_append():
-    """When draft+URL exceeds 280, append handles on the composed root."""
+    """When draft+Link exceeds 280, append handles on the composed root."""
     link = "https://github.com/shaiss/print-bench/tree/main/designs/x"
     # Draft fits alone with the tag, but draft + URL (weight 23) overflows.
     drafted = ("d" * (MAX_WEIGHT - 10)) + " @Prusa3D"
@@ -147,7 +167,9 @@ def test_drafted_url_overflow_falls_through_to_append():
     assert tweet_weight(f"{drafted} {link}") > MAX_WEIGHT
     required = ["@Prusa3D"]
     composed = f"Short rewrite. {link}"
-    out = ensure_root_tags(composed, required, drafted=drafted)
+    out = ensure_root_tags(
+        composed, required, drafted=drafted, link=link
+    )
     assert out == f"Short rewrite. {link} @Prusa3D"
     assert tweet_weight(out) <= MAX_WEIGHT
     assert missing_handles(out, required) == []
@@ -313,26 +335,38 @@ def test_assert_postable_text_refuses_fullwidth_before_count():
         assert_postable_text("x \ufe6bY")
 
 
-def test_message_digest_is_sha256_of_nfkc_first_paragraph():
+def test_message_digest_binds_message_paragraph_and_link():
     import hashlib
     import unicodedata
 
-    body = "## Message\n\nHello \uff20world @Prusa3D\n\nMore.\n"
-    para = message_root_paragraph(body)
-    expected = hashlib.sha256(
-        unicodedata.normalize("NFKC", para).encode("utf-8")
-    ).hexdigest()
+    body = (
+        "## Message\n\nHello \uff20world @Prusa3D\n\nMore.\n\n"
+        "## Link\n\nhttps://example.com/a\n"
+    )
+    para = unicodedata.normalize("NFKC", message_root_paragraph(body))
+    link = unicodedata.normalize("NFKC", message_link_value(body))
+    assert link == "https://example.com/a"
+    expected = hashlib.sha256((para + "\n" + link).encode("utf-8")).hexdigest()
     assert message_digest(body) == expected
-    # Digest choice: ## Message first paragraph only (not the whole body).
-    assert message_digest(body) != hashlib.sha256(
-        unicodedata.normalize("NFKC", body).encode("utf-8")
+    # Changing ## Link after the preview changes the digest.
+    body2 = (
+        "## Message\n\nHello \uff20world @Prusa3D\n\nMore.\n\n"
+        "## Link\n\nhttps://example.com/b\n"
+    )
+    assert message_digest(body2) != message_digest(body)
+    # Empty Link still contributes the trailing newline.
+    body_nolink = "## Message\n\nHello \uff20world @Prusa3D\n\nMore.\n"
+    assert message_link_value(body_nolink) == ""
+    assert message_digest(body_nolink) == hashlib.sha256(
+        (para + "\n").encode("utf-8")
     ).hexdigest()
+    assert allowed_urls(body) == frozenset({"https://example.com/a"})
 
 
 def test_parse_message_digest_round_trip():
     from growth.roottags import DRYRUN_MARKER, digest_comment_line
 
-    body = "## Message\n\nTagged @Prusa3D\n"
+    body = "## Message\n\nTagged @Prusa3D\n\n## Link\n\nhttps://x.example\n"
     line = digest_comment_line(body)
     comment = f"{DRYRUN_MARKER}\n{line}\nbody"
     assert parse_message_digest(comment) == message_digest(body)

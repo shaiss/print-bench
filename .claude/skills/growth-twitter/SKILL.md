@@ -18,16 +18,20 @@ re-label → post loop the tool enforces: a trusted bot preview comment
 (marker + `message-digest` of the NFKC `## Message` first paragraph as the
 first two lines — that paragraph is what the digest binds; live copy may
 be recomposed under the length, tag, and approval gates) that matches the
-current body, then the **latest** `approved-to-post` labeled event overall
-must be a human on `GROWTH_APPROVER_LOGINS` (and, when
-`GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true, not via a GitHub App)
+current body (digest = NFKC(`## Message` first paragraph) + `\n` +
+NFKC(`## Link`)), then the **latest** `approved-to-post` labeled event
+overall must be a human on `GROWTH_APPROVER_LOGINS` (and, when
+`GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true, not via a GitHub App —
+**not** a gate against agents on the shared box; see docs/growth.md)
 strictly **after** that preview and after the bot's own most recent
-removal of the label, with the body freeze still clean. If LIVE finds no
+removal of the label, with the body freeze still clean. Only URLs from
+that paragraph or `## Link` may appear in root/thread. If LIVE finds no
 trusted preview it writes one and removes the approval label (never adds
 labels) instead of posting — that self-migrate does **not** consume the
-run's post slot. On a LIVE run: first preview-migrate every approved item
-that needs one (up to 60), then post at most `GROWTH_MAX_POSTS` among
-items that pass every gate.
+run's post slot (capped at 60 previews/run in the tool). On a LIVE run:
+first preview-migrate every approved item that needs one, then post at
+most `GROWTH_MAX_POSTS` among items that pass every gate — never post an
+item preview-migrated earlier in the same run.
 
 ## The one boundary you may never cross
 

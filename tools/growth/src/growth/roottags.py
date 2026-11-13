@@ -71,12 +71,16 @@ _URL_RE = re.compile(r"https?://\S+")
 _MESSAGE_HEADING_RE = re.compile(
     r"^#{2,3}[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE
 )
+_LINK_HEADING_RE = re.compile(
+    r"^#{2,3}[ \t]+Link[ \t]*\r?$", re.IGNORECASE | re.MULTILINE
+)
 _NEXT_HEADING_RE = re.compile(r"^#{2,3}[ \t]+\S", re.MULTILINE)
 
-# Dry-run / live digest of the NFKC-normalized ## Message first paragraph.
-# A trusted preview's FIRST two lines must be exactly these forms (no
-# leading/trailing spaces on the lines; old marker-only comments and
-# mid-body forgeries are never trusted).
+# Dry-run / live digest: sha256 of NFKC(## Message first paragraph) + '\n' +
+# NFKC(## Link value) (empty string when Link is absent). A trusted preview's
+# FIRST two lines must be exactly the marker + digest line (no leading /
+# trailing spaces; old marker-only comments and mid-body forgeries are
+# never trusted).
 DRYRUN_MARKER = "<!-- growth-twitter:dry-run -->"
 DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
 DIGEST_LINE_RE = re.compile(
@@ -89,25 +93,22 @@ class RootTagsError(ValueError):
     every @handle within 280 weight."""
 
 
-def message_root_paragraph(body: str | None) -> str:
-    """The first non-empty paragraph under ``## Message``, or ``\"\"``.
+def _section_first_paragraph(body: str | None, heading_re: re.Pattern[str]) -> str:
+    """First non-empty paragraph under *heading_re*, or ``\"\"``.
 
-    Stops at a blank line or the next ``##`` heading. Leading/trailing
-    whitespace on the paragraph is stripped; internal newlines inside a
-    single paragraph (no blank line) are kept as spaces-normalized lines
-    joined with a single space so a soft-wrapped draft still yields one
-    root string.
+    Stops at a blank line or the next ``##``/``###`` heading. Leading /
+    trailing whitespace on the paragraph is stripped; soft-wrapped lines
+    inside one paragraph join with a single space.
     """
     if not body:
         return ""
-    m = _MESSAGE_HEADING_RE.search(body)
+    m = heading_re.search(body)
     if not m:
         return ""
     rest = body[m.end() :]
     next_h = _NEXT_HEADING_RE.search(rest)
     if next_h:
         rest = rest[: next_h.start()]
-    # Walk paragraphs (blank-line separated); skip empties.
     chunks: list[str] = []
     buf: list[str] = []
     for line in rest.splitlines():
@@ -127,16 +128,32 @@ def message_root_paragraph(body: str | None) -> str:
     return ""
 
 
-def message_digest(body: str | None) -> str:
-    """sha256 hex of the NFKC-normalized ``## Message`` first paragraph.
+def message_root_paragraph(body: str | None) -> str:
+    """The first non-empty paragraph under ``## Message``, or ``\"\"``."""
+    return _section_first_paragraph(body, _MESSAGE_HEADING_RE)
 
-    This is what dry-run comments record and live posts re-check — binding
-    approval to the drafted root text (not the whole issue body), because
-    that paragraph is what the verbatim restore path can publish.
+
+def message_link_value(body: str | None) -> str:
+    """The first non-empty paragraph under ``## Link``, or ``\"\"``.
+
+    This is the queue item's one canonical URL (may be empty). Bound into
+    the message-digest alongside the ``## Message`` first paragraph.
     """
-    para = message_root_paragraph(body)
-    nfkc = unicodedata.normalize("NFKC", para)
-    return hashlib.sha256(nfkc.encode("utf-8")).hexdigest()
+    return _section_first_paragraph(body, _LINK_HEADING_RE)
+
+
+def message_digest(body: str | None) -> str:
+    """sha256 hex of NFKC(``## Message`` first para) + ``\\n`` + NFKC(``## Link``).
+
+    Dry-run / preview comments record this; live posts re-check it — binding
+    approval to the drafted root text **and** the queue Link. An empty Link
+    still contributes the trailing newline + empty string so the format is
+    stable. Live copy may be recomposed under the length, tag, and URL
+    gates; only URLs from the bound paragraph and Link may appear.
+    """
+    para = unicodedata.normalize("NFKC", message_root_paragraph(body))
+    link = unicodedata.normalize("NFKC", message_link_value(body))
+    return hashlib.sha256((para + "\n" + link).encode("utf-8")).hexdigest()
 
 
 def digest_comment_line(body: str | None) -> str:
@@ -225,6 +242,30 @@ def extract_urls(text: str | None) -> list[str]:
     return out
 
 
+def allowed_urls(body: str | None) -> frozenset[str]:
+    """URLs the root/thread may carry: those in ``## Message`` para + ``## Link``."""
+    return frozenset(
+        extract_urls(message_root_paragraph(body))
+        + extract_urls(message_link_value(body))
+    )
+
+
+def assert_only_allowed_urls(
+    text: str | None,
+    allowed: frozenset[str] | set[str] | list[str],
+) -> str:
+    """Refuse any ``http(s)://`` token in *text* not in *allowed*."""
+    raw = text if text is not None else ""
+    allow = frozenset(allowed)
+    bad = [u for u in extract_urls(raw) if u not in allow]
+    if bad:
+        raise RootTagsError(
+            f"postable text carries URL(s) not in the approved ## Message "
+            f"first paragraph or ## Link: {bad} — refusing"
+        )
+    return raw
+
+
 def count_posted_mentions(text: str | None) -> int:
     """Mention-shaped tokens after NFKC, counting ``@``/``＠``/``﹫`` + any
     length of ``[A-Za-z0-9_]``. URL-path ``@`` (e.g. YouTube ``/@user``) is
@@ -297,25 +338,36 @@ def ensure_root_tags(
     required: list[str],
     *,
     drafted: str = "",
+    link: str = "",
 ) -> str:
     """Return a root tweet that carries every *required* handle.
 
     *text* is the agent's composed root. *drafted* is ``## Message``'s first
-    paragraph (may be empty). Raises :class:`RootTagsError` when neither the
-    drafted paragraph nor an append can fit every tag under :data:`MAX_WEIGHT`,
-    or when the chosen root fails :func:`assert_postable_text`.
+    paragraph (may be empty). *link* is the ``## Link`` value (may be empty).
+    On the drafted-restore path only the issue's ``## Link`` URL(s) are
+    re-attached — never arbitrary URLs from the model composition. Every
+    return path also refuses URLs outside ``drafted`` ∪ ``link`` via
+    :func:`assert_only_allowed_urls`.
+
+    Raises :class:`RootTagsError` when neither the drafted paragraph nor an
+    append can fit every tag under :data:`MAX_WEIGHT`, when the chosen root
+    fails :func:`assert_postable_text`, or when a disallowed URL is present.
 
     When *required* is empty the composed *text* is still run through the
-    posted-mention gates (full-width refuse + NFKC count cap).
+    posted-mention and allowed-URL gates.
     """
     # Filter to the strict ASCII pattern only — never emit full-width handles.
     required = [h for h in required if HANDLE_RE.match(h)] if required else []
+    allow = frozenset(extract_urls(drafted) + extract_urls(link))
+
+    def _finish(candidate: str) -> str:
+        return assert_only_allowed_urls(assert_postable_text(candidate), allow)
 
     if not required:
-        return assert_postable_text(text)
+        return _finish(text)
 
     if not missing_handles(text, required):
-        return assert_postable_text(text)
+        return _finish(text)
 
     drafted = (drafted or "").strip()
     if drafted and tweet_weight(drafted) <= MAX_WEIGHT:
@@ -323,17 +375,18 @@ def ensure_root_tags(
         # mentions — never publish it verbatim in that case.
         assert_postable_text(drafted)
         if not missing_handles(drafted, required):
-            # Drafted path: re-attach any URL the composed root had that the
-            # draft lacks (the queue Link). If that overflows 280, fall through
-            # to append-on-composed — append may still fit (contract: raise
-            # only when NEITHER path works).
-            composed_urls = extract_urls(text)
+            # Drafted path: re-attach ONLY the issue ## Link URL(s) the draft
+            # lacks. Model-composed URLs are never appended (digest does not
+            # cover them). If Link re-attach overflows 280, fall through to
+            # append-on-composed — append may still fit.
             draft_urls = set(extract_urls(drafted))
-            missing_urls = [u for u in composed_urls if u not in draft_urls]
+            missing_link_urls = [
+                u for u in extract_urls(link) if u not in draft_urls
+            ]
             candidate = drafted
             use_drafted = True
-            if missing_urls:
-                url_suffix = " ".join(missing_urls)
+            if missing_link_urls:
+                url_suffix = " ".join(missing_link_urls)
                 if candidate and not candidate[-1].isspace():
                     with_urls = f"{candidate.rstrip()} {url_suffix}"
                 else:
@@ -343,18 +396,18 @@ def ensure_root_tags(
                 else:
                     use_drafted = False
             if use_drafted:
-                return assert_postable_text(candidate)
+                return _finish(candidate)
 
     missing = missing_handles(text, required)
     if not missing:
-        return assert_postable_text(text)
+        return _finish(text)
     suffix = " ".join(missing)
     if text and not text[-1].isspace():
         candidate = f"{text.rstrip()} {suffix}"
     else:
         candidate = f"{text}{suffix}" if text else suffix
     if tweet_weight(candidate) <= MAX_WEIGHT:
-        return assert_postable_text(candidate)
+        return _finish(candidate)
 
     raise RootTagsError(
         f"root tweet is missing required handle(s) {missing} and neither the "

@@ -411,7 +411,7 @@ def assert_digest_binds(
     if digest != expected:
         raise ApprovalGuardError(
             f"digest mismatch without edit: trusted preview message-digest "
-            f"{digest} does not match current ## Message first paragraph "
+            f"{digest} does not match current ## Message + ## Link binding "
             f"({expected}) — refusing (fail closed); do not create a second "
             f"preview"
         )

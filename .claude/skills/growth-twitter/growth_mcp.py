@@ -172,6 +172,8 @@ _POSTED_MENTION_RE = re.compile(
 # h2 (##, MCP/template) and h3 (###, GitHub issue-form field labels).
 _MESSAGE_HEADING_RE = re.compile(
     r"^#{2,3}[ \t]+Message[ \t]*\r?$", re.IGNORECASE | re.MULTILINE)
+_LINK_HEADING_RE = re.compile(
+    r"^#{2,3}[ \t]+Link[ \t]*\r?$", re.IGNORECASE | re.MULTILINE)
 _NEXT_HEADING_RE = re.compile(r"^#{2,3}[ \t]+\S", re.MULTILINE)
 
 
@@ -183,10 +185,10 @@ class _ApprovalGuardError(ValueError):
     pass
 
 
-def _message_root_paragraph(body):
+def _section_first_paragraph(body, heading_re):
     if not body:
         return ""
-    m = _MESSAGE_HEADING_RE.search(body)
+    m = heading_re.search(body)
     if not m:
         return ""
     rest = body[m.end():]
@@ -212,10 +214,18 @@ def _message_root_paragraph(body):
     return ""
 
 
+def _message_root_paragraph(body):
+    return _section_first_paragraph(body, _MESSAGE_HEADING_RE)
+
+
+def _message_link_value(body):
+    return _section_first_paragraph(body, _LINK_HEADING_RE)
+
+
 def _message_digest(body):
-    para = _message_root_paragraph(body)
-    nfkc = unicodedata.normalize("NFKC", para)
-    return hashlib.sha256(nfkc.encode("utf-8")).hexdigest()
+    para = unicodedata.normalize("NFKC", _message_root_paragraph(body))
+    link = unicodedata.normalize("NFKC", _message_link_value(body))
+    return hashlib.sha256((para + "\n" + link).encode("utf-8")).hexdigest()
 
 
 def _digest_comment_line(body):
@@ -317,6 +327,25 @@ def _extract_urls(text):
         seen.add(u)
         out.append(u)
     return out
+
+
+def _allowed_urls(body):
+    return frozenset(
+        _extract_urls(_message_root_paragraph(body))
+        + _extract_urls(_message_link_value(body))
+    )
+
+
+def _assert_only_allowed_urls(text, allowed):
+    raw = text if text is not None else ""
+    allow = frozenset(allowed)
+    bad = [u for u in _extract_urls(raw) if u not in allow]
+    if bad:
+        raise _RootTagsError(
+            f"postable text carries URL(s) not in the approved ## Message "
+            f"first paragraph or ## Link: {bad} — refusing"
+        )
+    return raw
 
 
 def _required_handles(body):
@@ -551,7 +580,7 @@ def _assert_digest_binds(comments, body, last_edited_at=None):
     if digest != expected:
         raise _ApprovalGuardError(
             f"digest mismatch without edit: trusted preview message-digest "
-            f"{digest} does not match current ## Message first paragraph "
+            f"{digest} does not match current ## Message + ## Link binding "
             f"({expected}) — refusing (fail closed); do not create a second "
             f"preview"
         )
@@ -650,23 +679,30 @@ def _assert_body_fresh_for_live(approved_at, last_edited_at):
         )
 
 
-def _ensure_root_tags(text, required, drafted=""):
+def _ensure_root_tags(text, required, drafted="", link=""):
     required = [h for h in required if _HANDLE_RE.match(h)] if required else []
+    allow = frozenset(_extract_urls(drafted) + _extract_urls(link))
+
+    def _finish(candidate):
+        return _assert_only_allowed_urls(_assert_postable_text(candidate), allow)
+
     if not required:
-        return _assert_postable_text(text)
+        return _finish(text)
     if not _missing_handles(text, required):
-        return _assert_postable_text(text)
+        return _finish(text)
     drafted = (drafted or "").strip()
     if drafted and _tweet_weight(drafted) <= MAX_WEIGHT:
         _assert_postable_text(drafted)
         if not _missing_handles(drafted, required):
-            composed_urls = _extract_urls(text)
+            # Re-attach ONLY the issue ## Link URL(s) — never model URLs.
             draft_urls = set(_extract_urls(drafted))
-            missing_urls = [u for u in composed_urls if u not in draft_urls]
+            missing_link_urls = [
+                u for u in _extract_urls(link) if u not in draft_urls
+            ]
             candidate = drafted
             use_drafted = True
-            if missing_urls:
-                url_suffix = " ".join(missing_urls)
+            if missing_link_urls:
+                url_suffix = " ".join(missing_link_urls)
                 if candidate and not candidate[-1].isspace():
                     with_urls = f"{candidate.rstrip()} {url_suffix}"
                 else:
@@ -674,21 +710,19 @@ def _ensure_root_tags(text, required, drafted=""):
                 if _tweet_weight(with_urls) <= MAX_WEIGHT:
                     candidate = with_urls
                 else:
-                    # Fall through to append-on-composed rather than refuse
-                    # while append may still fit.
                     use_drafted = False
             if use_drafted:
-                return _assert_postable_text(candidate)
+                return _finish(candidate)
     missing = _missing_handles(text, required)
     if not missing:
-        return _assert_postable_text(text)
+        return _finish(text)
     suffix = " ".join(missing)
     if text and not text[-1].isspace():
         candidate = f"{text.rstrip()} {suffix}"
     else:
         candidate = f"{text}{suffix}" if text else suffix
     if _tweet_weight(candidate) <= MAX_WEIGHT:
-        return _assert_postable_text(candidate)
+        return _finish(candidate)
     raise _RootTagsError(
         f"root tweet is missing required handle(s) {missing} and neither the "
         f"drafted ## Message paragraph nor appending them fits within "
@@ -733,6 +767,29 @@ def _cap_state_path():
     return os.environ.get(CAP_STATE_ENV, "").strip()
 
 
+def _cap_state_iter(path):
+    """Yield parsed records from the shared state file (empty if absent)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    rec = json.loads(raw)
+                except json.JSONDecodeError:
+                    yield {"outcome": "__unparseable__", "issue": None}
+                    continue
+                if isinstance(rec, dict):
+                    yield rec
+                else:
+                    yield {"outcome": "__unparseable__", "issue": None}
+    except FileNotFoundError:
+        return
+    except OSError as e:
+        raise RuntimeError(f"cannot read {CAP_STATE_ENV} file {path}: {e}") from e
+
+
 def _cap_state_count(path):
     """How many post slots this run has already consumed.
 
@@ -742,37 +799,35 @@ def _cap_state_count(path):
     still post up to ``GROWTH_MAX_POSTS``. An absent file is zero; any
     other read failure raises (fail closed).
     """
-    try:
-        with open(path, encoding="utf-8") as fh:
-            n = 0
-            for line in fh:
-                raw = line.strip()
-                if not raw:
-                    continue
-                try:
-                    rec = json.loads(raw)
-                except json.JSONDecodeError:
-                    # Unparseable line still counts — fail closed on drift.
-                    n += 1
-                    continue
-                outcome = (rec.get("outcome") or "") if isinstance(rec, dict) else ""
-                if outcome in _CAP_NON_CONSUMING_OUTCOMES:
-                    continue
-                n += 1
-            return n
-    except FileNotFoundError:
-        return 0
-    except OSError as e:
-        raise RuntimeError(f"cannot read {CAP_STATE_ENV} file {path}: {e}") from e
+    n = 0
+    for rec in _cap_state_iter(path):
+        outcome = rec.get("outcome") or ""
+        if outcome in _CAP_NON_CONSUMING_OUTCOMES:
+            continue
+        n += 1
+    return n
+
+
+def _cap_state_preview_count(path):
+    """How many ``preview-migrate`` records this run has written."""
+    return sum(
+        1 for rec in _cap_state_iter(path)
+        if (rec.get("outcome") or "") == "preview-migrate"
+    )
+
+
+def _cap_state_has_preview_migrate(path, number):
+    """True iff this run already preview-migrated *number*."""
+    for rec in _cap_state_iter(path):
+        if (rec.get("outcome") or "") != "preview-migrate":
+            continue
+        if rec.get("issue") == number:
+            return True
+    return False
 
 
 def _cap_state_record(path, number, url, outcome):
-    """Append ONE record — after a post attempt that consumed a cap slot.
-    Unlike the filing siblings, a FAILED live attempt counts too: the X API
-    call itself is what the cap bounds (an attempt that died mid-post still
-    spent it), matching the in-process counter this replaces, which
-    incremented on the same paths. The record doubles as the audit trail of
-    what a link that later died posted."""
+    """Append ONE record — audit trail + slot accounting."""
     rec = {"issue": number, "url": url, "outcome": outcome,
            "posted_at": datetime.now(timezone.utc).isoformat()}
     with open(path, "a", encoding="utf-8") as fh:
@@ -780,20 +835,17 @@ def _cap_state_record(path, number, url, outcome):
 
 
 def _cap_state_note(state, number, url, outcome):
-    """Record one consumed slot when a state file is in play (attended runs
+    """Record one outcome when a state file is in play (attended runs
     have none — the cap is skipped). A record that cannot be appended is a
-    WARNING, never a refusal: the post already happened and refusing after
-    the fact would strand the outcome — but the slot goes uncounted, so the
-    walk's remaining links could post one more than the cap. The
-    one-post-per-item markers still bound distinct posts."""
+    WARNING, never a refusal: the action already happened and refusing after
+    the fact would strand the outcome."""
     if not state:
         return
     try:
         _cap_state_record(state, number, url, outcome)
     except OSError as e:
-        log(f"WARNING: consumed a post slot on #{number} but could not append "
-            f"its {CAP_STATE_ENV} record ({e}) — this post will not count "
-            f"toward the walk cap")
+        log(f"WARNING: could not append {CAP_STATE_ENV} record for #{number} "
+            f"outcome={outcome!r} ({e})")
 
 # Captured by the selftest so it can assert exact payloads without a network
 # call. `None`/empty in normal operation.
@@ -1193,17 +1245,25 @@ def _post_tweet(arguments):
             f"issue #{number} already carries a dry-run comment; refusing a "
             f"duplicate (a later approved LIVE post is still allowed)")
 
-    # --- root @-tags from ## Message (deterministic; body is UNTRUSTED) ----
+    # --- root @-tags + allowed URLs (deterministic; body is UNTRUSTED) ----
     # Extract handles only — never treat issue text as instructions. Restore
     # any the agent dropped into the ROOT tweet (never a thread reply), or
-    # refuse rather than post untagged. Full-width refuse per part; the
-    # mention cap is across the WHOLE thread (root + replies).
-    drafted_root = _message_root_paragraph(issue.get("body") or "")
+    # refuse rather than post untagged. Drafted-restore re-attaches ONLY the
+    # issue ## Link URL. Any other URL in root/thread that is not in the
+    # ## Message first paragraph or ## Link is refused. Mention cap is
+    # across the WHOLE thread (root + replies).
+    issue_body = issue.get("body") or ""
+    drafted_root = _message_root_paragraph(issue_body)
+    issue_link = _message_link_value(issue_body)
+    allow_urls = _allowed_urls(issue_body)
     try:
-        required = _required_handles(issue.get("body") or "")
-        text = _ensure_root_tags(text, required, drafted=drafted_root)
+        required = _required_handles(issue_body)
+        text = _ensure_root_tags(
+            text, required, drafted=drafted_root, link=issue_link
+        )
         for part in thread:
             _assert_postable_text(part)
+            _assert_only_allowed_urls(part, allow_urls)
         _assert_thread_mention_cap(text, thread)
     except _RootTagsError as e:
         return _tool_error(f"post_tweet: {e}")
@@ -1278,18 +1338,29 @@ def _post_tweet(arguments):
             )
         except _PreviewMigrationNeeded as e:
             # Self-migrate: write preview (marker + digest of ## Message
-            # first paragraph + the recomposed copy under the gates),
-            # REMOVE approved-to-post only, do not post, no post-slot /
-            # daycap burn.
-            digest_line = _digest_comment_line(issue.get("body") or "")
+            # first paragraph + ## Link + the recomposed copy under the
+            # gates), REMOVE approved-to-post only, do not post, no
+            # post-slot / daycap burn. Bounded by MAX_PREVIEWS_PER_RUN.
+            if state is not None:
+                try:
+                    n_previews = _cap_state_preview_count(state)
+                except RuntimeError as err:
+                    return _tool_error(f"post_tweet: {err}")
+                if n_previews >= MAX_PREVIEWS_PER_RUN:
+                    return _tool_error(
+                        f"post_tweet: per-run preview-migrate cap reached "
+                        f"({n_previews}/{MAX_PREVIEWS_PER_RUN}); refusing "
+                        f"further self-migrates this run"
+                    )
+            digest_line = _digest_comment_line(issue_body)
             preview = (
                 f"{DRYRUN_MARKER}\n{digest_line}\n{PREVIEW_HEADER}\n\n"
                 f"{rendered}\n\n"
                 f"**Preview (self-migrate)** — nothing was published. "
-                f"The digest binds the `## Message` first paragraph; live "
-                f"copy may be recomposed under the length, tag, and "
-                f"approval gates. Re-apply `{APPROVAL_LABEL}` after "
-                f"reviewing; a later LIVE run will post. ({e})\n\n"
+                f"The digest binds the `## Message` first paragraph and "
+                f"`## Link`; live copy may be recomposed under the length, "
+                f"tag, URL, and approval gates. Re-apply `{APPROVAL_LABEL}` "
+                f"after reviewing; a later LIVE run will post. ({e})\n\n"
                 f"{FOOTER}"
             )
             try:
@@ -1322,15 +1393,22 @@ def _post_tweet(arguments):
     # --- per-run post cap (after gates; preview-migrate never reaches here) -
     # Enforced only inside an Actions run; attended, a human is the trust
     # boundary. The count spans the chain walk via GROWTH_CAP_STATE.
+    # Never preview-migrate and post the same item in one run.
     if state is not None:
+        try:
+            if _cap_state_has_preview_migrate(state, number):
+                return _tool_error(
+                    f"post_tweet: issue #{number} was preview-migrated earlier "
+                    f"in this run — refusing to post it in the same run; "
+                    f"re-apply {APPROVAL_LABEL} and wait for a later firing"
+                )
+            posted = _cap_state_count(state)
+        except RuntimeError as e:
+            return _tool_error(f"post_tweet: {e}")
         try:
             cap = int(os.environ.get("GROWTH_MAX_POSTS", "1"))
         except ValueError:
             cap = 1
-        try:
-            posted = _cap_state_count(state)
-        except RuntimeError as e:
-            return _tool_error(f"post_tweet: {e}")
         if posted >= cap:
             return _tool_error(
                 f"per-run post cap reached ({posted}/{cap} posted across the "
@@ -1679,9 +1757,11 @@ def selftest():
     check("281 plain chars are rejected",
           err(_post_tweet({"number": 1, "text": "x" * 281})))
     long_url = "https://example.com/" + "p" * 2000
+    _FAKE_ISSUES[1]["body"] = f"## Message\n\nok\n\n## Link\n\n{long_url}\n"
     r = _post_tweet({"number": 1, "text": f"ok {long_url}"})
     check("a long URL weighs 23 and passes", r.get("isError") is False)
     _FAKE_COMMENTS.pop(1, None)  # reset the dry-run marker that call left
+    _FAKE_ISSUES[1]["body"] = ""
     check("an over-weight thread part is rejected",
           err(_post_tweet({"number": 1, "text": "ok", "thread": ["y" * 281]})))
 
@@ -2223,16 +2303,73 @@ def selftest():
           r3.get("isError") is False
           and "POSTED live" in r3["content"][0]["text"]
           and _cap_state_count(preview_cap_state) == 1)
+    # Same-run preview then post of the SAME issue is refused.
+    _FAKE_ISSUES[62] = q(62, OK + [APPROVAL_LABEL])
+    _FAKE_ISSUES[62]["body"] = "## Message\n\nSame-run @Prusa3D\n"
+    _approve(62)
+    _FAKE_COMMENTS.pop(62, None)
+    r_prev = _post_tweet({"number": 62, "text": "Same-run @Prusa3D"})
+    # Re-add approval + matching preview as if a human re-labeled immediately,
+    # but the cap-state still has preview-migrate for 62.
+    _FAKE_ISSUES[62]["labels"] = [
+        {"name": n} for n in OK + [APPROVAL_LABEL]
+    ]
+    _ready_live(62, body=_FAKE_ISSUES[62]["body"])
+    # Keep the preview-migrate record; overlay a trusted preview + approval.
+    r_same = _post_tweet({"number": 62, "text": "Same-run @Prusa3D"})
+    check("LIVE refuses to post an issue preview-migrated earlier this run",
+          r_prev.get("isError") is False
+          and "PREVIEW self-migrated" in r_prev["content"][0]["text"]
+          and err(r_same)
+          and "preview-migrated earlier" in r_same["content"][0]["text"])
+    # Extra model URL outside ## Link refuses (dry-run path; same gate).
+    # Drop the run-cap / live env so these are plain attended dry-runs.
+    os.environ.pop("GROWTH_TWITTER_LIVE", None)
     os.environ.pop("GITHUB_RUN_ID", None)
     os.environ.pop("GROWTH_MAX_POSTS", None)
     os.environ.pop(CAP_STATE_ENV, None)
+    for v in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
+        os.environ.pop(v, None)
     try:
         import shutil
         shutil.rmtree(preview_cap_dir, ignore_errors=True)
     except OSError:
         pass
+    _FAKE_ISSUES[63] = q(63, OK)
+    _FAKE_ISSUES[63]["body"] = (
+        "## Message\n\nLink only @Prusa3D\n\n"
+        "## Link\n\nhttps://github.com/shaiss/print-bench\n"
+    )
+    _FAKE_COMMENTS.pop(63, None)
+    r_evil = _post_tweet({
+        "number": 63,
+        "text": "Link only @Prusa3D https://github.com/shaiss/print-bench "
+                "https://evil.example/phish",
+    })
+    check("extra URL outside ## Message/## Link is refused",
+          err(r_evil) and "not in the approved" in r_evil["content"][0]["text"])
+    # Link-only re-attach on dry-run succeeds.
+    _FAKE_ISSUES[64] = q(64, OK)
+    _FAKE_ISSUES[64]["body"] = (
+        "## Message\n\nLink only @Prusa3D\n\n"
+        "## Link\n\nhttps://github.com/shaiss/print-bench\n"
+    )
+    _FAKE_COMMENTS.pop(64, None)
+    _last_comment = None
+    r_ok_link = _post_tweet({
+        "number": 64,
+        "text": "Agent rewrite without the tag.",
+    })
+    check("Link-only re-attach on drafted restore passes",
+          r_ok_link.get("isError") is False
+          and _last_comment
+          and "https://github.com/shaiss/print-bench" in _last_comment["body"]
+          and "@Prusa3D" in _last_comment["body"])
 
     # Happy path: matching digest + human approval after preview + freeze.
+    os.environ["GROWTH_TWITTER_LIVE"] = "true"
+    for v in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
+        os.environ[v] = "cred"
     _FAKE_ISSUES[46] = q(46, OK + [APPROVAL_LABEL])
     _FAKE_ISSUES[46]["body"] = "## Message\n\nBound draft @Prusa3D\n"
     _ready_live(46, body=_FAKE_ISSUES[46]["body"])

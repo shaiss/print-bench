@@ -129,19 +129,31 @@ def test_roottags_ensure_agrees_on_preserve_append_and_verbatim():
     assert server._ensure_root_tags(bare, required, drafted=drafted) == (
         ensure_root_tags(bare, required, drafted=drafted)
     )
-    # drafted + preserve composed URL
+    # drafted + re-attach ONLY the issue ## Link URL
     link = "https://github.com/shaiss/print-bench"
     with_link = f"Agent rewrite. {link}"
     assert server._ensure_root_tags(
-        with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D"
-    ) == ensure_root_tags(with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D")
-    # draft+URL overflow → fall through to append (both sides)
+        with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D", link=link
+    ) == ensure_root_tags(
+        with_link, ["@Prusa3D"], drafted="Measured. @Prusa3D", link=link
+    )
+    # Extra model URL refuses when it would be published (tags already present).
+    evil = f"Measured. @Prusa3D {link} https://evil.example/x"
+    with pytest.raises(RootTagsError, match="not in the approved"):
+        ensure_root_tags(
+            evil, ["@Prusa3D"], drafted="Measured. @Prusa3D", link=link
+        )
+    with pytest.raises(server._RootTagsError, match="not in the approved"):
+        server._ensure_root_tags(
+            evil, ["@Prusa3D"], drafted="Measured. @Prusa3D", link=link
+        )
+    # draft+Link overflow → fall through to append (both sides)
     from growth.tweetlen import MAX_WEIGHT
     fat = ("d" * (MAX_WEIGHT - 10)) + " @Prusa3D"
     composed = f"Short. {link}"
     assert server._ensure_root_tags(
-        composed, ["@Prusa3D"], drafted=fat
-    ) == ensure_root_tags(composed, ["@Prusa3D"], drafted=fat)
+        composed, ["@Prusa3D"], drafted=fat, link=link
+    ) == ensure_root_tags(composed, ["@Prusa3D"], drafted=fat, link=link)
 
 
 def test_roottags_fail_closed_agrees():
@@ -231,6 +243,8 @@ def test_message_digest_parity():
         "## Message\n\nHello @Prusa3D\n\nMore.\n",
         "## Message\n\nNFKC \uff20fold @x\n",
         "## Message\r\n\r\nCRLF @y\r\n",
+        "## Message\n\nHello @Prusa3D\n\n## Link\n\nhttps://example.com/a\n",
+        "## Message\n\nHello @Prusa3D\n\n## Link\n\nhttps://example.com/b\n",
     ]
     for body in bodies:
         assert server._message_digest(body) == message_digest(body)
@@ -240,6 +254,12 @@ def test_message_digest_parity():
         # Lone digest line (old mid-body search) is never trusted.
         assert server._parse_message_digest(digest_comment_line(body)) is None
         assert parse_message_digest(digest_comment_line(body)) is None
+    # Link change flips the digest on both sides.
+    a = "## Message\n\nHello @Prusa3D\n\n## Link\n\nhttps://example.com/a\n"
+    b = "## Message\n\nHello @Prusa3D\n\n## Link\n\nhttps://example.com/b\n"
+    assert message_digest(a) != message_digest(b)
+    assert server._message_digest(a) != server._message_digest(b)
+    assert server._message_link_value(a) == "https://example.com/a"
 
 
 def test_digest_bind_parity():
