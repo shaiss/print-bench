@@ -112,12 +112,10 @@ declines design requests). The queue is the contract between the seats:
   bot's own most recent removal of the label, with no unlabeled after it
   (stale/revoked approvals refuse). When
   `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true (anything but the literal
-  `false`; default), `performed_via_github_app` must be null. **This is
-  not a human gate against agents on the shared box**: the box's `gh` is
-  logged in as `shaiss` with admin scopes, so a box agent can label as
-  `shaiss` with `performed_via_github_app=null` and can rewrite the
-  `GROWTH_*` repo variables — the credential fix is tracked outside this
-  path. The body freeze must still pass. Missing preview on a LIVE run
+  `false`; default), `performed_via_github_app` must be null. Caveat: an
+  automation credential with Shai's permissions can apply labels, so a
+  label is not proof a human applied it. The body freeze must still pass.
+  Missing preview on a LIVE run
   **self-migrates**: writes the preview, **removes** `approved-to-post`
   only (never adds a label), does not post, does not consume the run's
   post slot or the daycap — a LIVE run first preview-migrates every
@@ -195,9 +193,10 @@ as approval. No agent or workflow adds `approved-to-post` unless Shai asked,
 in his own words, for that specific issue. A relay from another agent does
 not count, and neither do blanket instructions. Each agent add is logged
 with the time, the issue, the agent, and a link to Shai's ask. The approver
-allowlist (`GROWTH_APPROVER_LOGINS`) stays shaiss-only. Caveat: the box's
-`shaiss` `gh` token means a label is not proof that a human applied it.
-(Also in `.claude/skills/growth-twitter/SKILL.md`.)
+allowlist (`GROWTH_APPROVER_LOGINS`) stays shaiss-only. Caveat: an
+automation credential with Shai's permissions can apply labels, so a
+label is not proof a human applied it. (Also in
+`.claude/skills/growth-twitter/SKILL.md`.)
 
 Turning `require_approval` off (a one-line reviewed PR) is the deliberate
 last step to a fully autonomous channel — never a default, and rungs 1–2
