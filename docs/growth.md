@@ -101,7 +101,8 @@ declines design requests). The queue is the contract between the seats:
   ``message-digest`` sha256 of NFKC(``## Message`` first paragraph) +
   ``\n`` + NFKC(``## Link``) — the drafted root and the queue Link the
   digest binds; live copy may be recomposed under the length, tag, URL,
-  and approval gates; only scheme URLs (``http(s)://…``, case-insensitive)
+  and approval gates — the live tweet ``text`` is not yet compared to the
+  preview (#1023); only scheme URLs (``http(s)://…``, case-insensitive)
   from that paragraph or ``## Link`` may appear — bare domains such as
   ``evil.example/x`` are **not** covered here and are tracked in follow-up
   issue #1023 (unbound live prose); draft URLs bare (exact match refuses a
@@ -180,12 +181,17 @@ declines design requests). The queue is the contract between the seats:
    `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`) as repo secrets. The posting
    tool checks both itself; a model cannot reach either.
 3. **This post, now** — per item, the `approved-to-post` label (while the
-   committed policy says `require_approval: true`). The dry-run comment on
-   the queue issue is exactly what is being approved. The label itself is
-   **auto-ensured by the first armed run** (the drain job creates the label
-   *definition* idempotently; it does not apply the label to issues), so it
-   always exists for an approver to apply — merging the desk's code never
-   creates repo labels.
+   committed policy says `require_approval: true`). The dry-run / preview
+   comment on the queue issue shows the rendered copy under the gates. The
+   approval digest binds only the `## Message` first paragraph and
+   `## Link`, not the rendered tweet — the live tweet `text` is not yet
+   compared to the preview (tracked in
+   https://github.com/shaiss/print-bench/issues/1023). The first armed run
+   **tries** to create the label *definition* idempotently (`gh label
+   create … || true`; creation errors are ignored) and does not apply the
+   label to issues — merging the desk's code never creates repo labels. If
+   the label is missing, an approver can create it manually before applying
+   it.
 
 **approved-to-post rule (Shai, 2026-11-13):**
 `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL=false`, so a label an agent adds counts
