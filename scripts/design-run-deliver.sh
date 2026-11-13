@@ -4797,7 +4797,13 @@ EOF
     'Bash(gh pr create*autonomy-ok*)' 'Bash(gh pr create*design-brief*)' \
     'Bash(gh issue edit*autonomy-ok*)' 'Bash(gh issue edit*design-brief*)' \
     'Bash(gh api*autonomy-ok*)' 'Bash(gh api*design-brief*)' \
-    'Bash(curl*autonomy-ok*)' 'Bash(curl*design-brief*)'; do
+    'Bash(curl*autonomy-ok*)' 'Bash(curl*design-brief*)' \
+    'Bash(gh issue comment)' 'Bash(gh issue comment:*)' 'Bash(gh issue comment*)' \
+    'Bash(gh issue edit)' 'Bash(gh issue edit:*)' 'Bash(gh issue edit*)' \
+    'Bash(gh label)' 'Bash(gh label:*)' 'Bash(gh label*)' \
+    'Bash(gh api*--method POST*comments*)' 'Bash(gh api*--method POST*labels*)' \
+    'Bash(gh api*labels*-f*)' 'Bash(gh api*-f*labels*)' \
+    'Bash(curl*-X POST*comments*)' 'Bash(curl*-X POST*labels*)'; do
     grep -qF "\"${rule}\"" "$burn_settings" || {
       echo "selftest: backlog-burn settings missing deny ${rule}" >&2
       exit 1

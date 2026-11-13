@@ -260,11 +260,18 @@ When the invoker is `backlog-burn.yml`, §6's "Draft PR … then
 `subscribe_pr_activity`" is not yours to do. The agent job runs with
 `github.token` and cannot push; a PAT could have steered more than the
 issue it was handed, so it holds none (issue #863, the #859/#861
-pattern). The agent job's next step writes a git bundle of the commits on
-`claude/issue-<N>-*`; a separate deliver workflow, running no agent code,
-checks out the commit the job started from, verifies that bundle, and only
-then pushes the branch and opens the draft PR. Nothing in the bundle is
-executed. The success comment is posted only after both of these are true:
+pattern). Issue #1022 also denies Bash `gh issue comment`, `gh issue
+edit` (including `--add-label`/`--remove-label`), `gh label …`, and
+non-GET `gh api`/`curl` writes to issue comments/labels — do **not**
+attempt those verbs; the workflow concurrency group, the lock artifact,
+and a `claude/issue-<N>-*` branch claim carry the claim, and
+`backlog-burn-ship-check.sh` posts an explicit `🚢 DEFERRED` stop when
+the walk ends with no branch. The agent job's next step writes a git
+bundle of the commits on `claude/issue-<N>-*`; a separate deliver
+workflow, running no agent code, checks out the commit the job started
+from, verifies that bundle, and only then pushes the branch and opens
+the draft PR. Nothing in the bundle is executed. The success comment is
+posted only after both of these are true:
 
 - `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
 - an open **draft** pull request in this repository, whose `headRefOid` is

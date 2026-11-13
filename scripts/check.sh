@@ -654,6 +654,20 @@ if ! ./scripts/backlog-burn-ship-check.sh --selftest; then
   fail=1
 fi
 
+# backlog-burn agent Bash deny backstop (issue #1022): loads the real
+# .claude/backlog-burn-settings.json and asserts — under Claude Code's
+# matcher, not a grep — that gh issue comment/edit, gh label, and
+# non-GET issue comment/label REST writes are refused while the
+# legitimate local-git / read-only gh surface still passes.
+echo "-- backlog-burn-perms selftest: scripts/backlog-burn-perms-check.sh --selftest"
+if ! ./scripts/backlog-burn-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- backlog-burn-perms check: scripts/backlog-burn-perms-check.sh"
+if ! ./scripts/backlog-burn-perms-check.sh; then
+  fail=1
+fi
+
 # Greenlight wrapper selftest (.claude/skills/reeve-greenlight/
 # greenlight-helper.sh --selftest, the growth-queue MCP precedent): the
 # wrapper is the greenlight loop's ONE shell surface, and its --selftest is
