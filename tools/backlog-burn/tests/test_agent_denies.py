@@ -127,6 +127,13 @@ def allow_rules() -> list[str]:
         "gh api repos/o/r/issues/1/labels -f name=x",
         "curl -X POST https://api.github.com/repos/o/r/issues/1/comments -d body=x",
         "curl -X POST https://api.github.com/repos/o/r/issues/1/labels -d name=x",
+        "gh issue close 5 --comment x",
+        "gh issue reopen 5 -c x",
+        "gh api graphql -f query='mutation{addComment(input:{subjectId:\"I_x\",body:\"y\"}){clientMutationId}}'",
+        "gh api -X PATCH repos/o/r/issues/5 -f body=x",
+        "gh api --method PATCH repos/o/r/issues/5 -f title=x",
+        "gh api --method POST repos/o/r/issues/5 -f title=x",
+        "python3 -c \"import urllib.request\"",
     ],
 )
 def test_issue_write_probes_denied(deny_rules, command):

@@ -4803,7 +4803,11 @@ EOF
     'Bash(gh label)' 'Bash(gh label:*)' 'Bash(gh label*)' \
     'Bash(gh api*--method POST*comments*)' 'Bash(gh api*--method POST*labels*)' \
     'Bash(gh api*labels*-f*)' 'Bash(gh api*-f*labels*)' \
-    'Bash(curl*-X POST*comments*)' 'Bash(curl*-X POST*labels*)'; do
+    'Bash(curl*-X POST*comments*)' 'Bash(curl*-X POST*labels*)' \
+    'Bash(gh issue close*)' 'Bash(gh issue reopen*)' \
+    'Bash(gh api*graphql*addComment*)' \
+    'Bash(gh api*--method PATCH*issues/*)' 'Bash(gh api*-X PATCH*issues/*)' \
+    'Bash(python3*)'; do
     grep -qF "\"${rule}\"" "$burn_settings" || {
       echo "selftest: backlog-burn settings missing deny ${rule}" >&2
       exit 1

@@ -408,10 +408,10 @@ surfaces studies awaiting a read live in
     backlog-burn agent backstop (`.claude/backlog-burn-settings.json`,
     issue #1022): loads the settings the agent actually runs with and
     asserts under Claude Code's Bash matcher — not a grep — that
-    `gh issue comment`, `gh issue edit` (incl. `--add-label`/
-    `--remove-label`), `gh label …`, and non-GET issue comment/label
-    REST writes are refused while the legitimate local-git and
-    read-only `gh` surface still passes; `--selftest` plus the live
+    `gh issue comment`/`edit`/`close`/`reopen`, `gh label …`, GraphQL
+    comment/issue/label mutations, non-GET `issues/<n>` REST writes,
+    and `python3`/`python` are refused while the legitimate local-git
+    and read-only `gh` surface still passes; `--selftest` plus the live
     check, run by check.sh
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
