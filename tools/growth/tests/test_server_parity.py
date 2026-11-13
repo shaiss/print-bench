@@ -288,6 +288,41 @@ def test_message_digest_parity():
     assert server._message_link_value(a) == "https://example.com/a"
 
 
+def test_parse_message_digest_prefix_parity_issue_1021():
+    """Package and MCP copy agree on #1021 prefix-anchored trust cases."""
+    server = _load_server()
+    body = "## Message\n\nHello @Prusa3D\n\n## Link\n\nhttps://example.com/a\n"
+    dig = digest_comment_line(body)
+    expected = message_digest(body)
+
+    def both(comment: str):
+        pkg = parse_message_digest(comment)
+        mcp = server._parse_message_digest(comment)
+        assert pkg == mcp, (comment[:80], pkg, mcp)
+        return pkg
+
+    # (1) Valid writer prefix trusted on both sides.
+    assert both(f"{DRYRUN_MARKER}\n{dig}\nrest") == expected
+    assert both(f"{DRYRUN_MARKER}\r\n{dig}\r\nrest") == expected
+    assert both(f"{DRYRUN_MARKER}\n{dig}") == expected
+
+    # (2) Marker not at start — after text / quoted / fenced / leading ws.
+    assert both(f"intro\n{DRYRUN_MARKER}\n{dig}\n") is None
+    assert both(f"> {DRYRUN_MARKER}\n> {dig}\n") is None
+    assert both(f"```\n{DRYRUN_MARKER}\n{dig}\n```\n") is None
+    assert both(f" {DRYRUN_MARKER}\n{dig}\n") is None
+    assert both(f"\t{DRYRUN_MARKER}\n{dig}\n") is None
+    assert both(f"\n{DRYRUN_MARKER}\n{dig}\n") is None
+
+    # (3) Digest elsewhere, not immediately after the marker.
+    assert both(f"{DRYRUN_MARKER}\nheader\n{dig}\n") is None
+    assert both(f"{DRYRUN_MARKER}\n\n{dig}\n") is None
+    assert both(f"{dig}\n{DRYRUN_MARKER}\n") is None
+    assert both(f"noise\n{dig}\n{DRYRUN_MARKER}\n{dig}\n") is None
+    assert both(f"{DRYRUN_MARKER}\n {dig}\n") is None
+    assert both(f"{DRYRUN_MARKER}\n{dig} \n") is None
+
+
 def test_digest_bind_parity():
     server = _load_server()
     body = "## Message\n\nBound @Prusa3D\n"

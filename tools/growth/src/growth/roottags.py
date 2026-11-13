@@ -78,10 +78,11 @@ _LINK_HEADING_RE = re.compile(
 _NEXT_HEADING_RE = re.compile(r"^#{2,3}[ \t]+\S", re.MULTILINE)
 
 # Dry-run / live digest: sha256 of NFKC(## Message first paragraph) + '\n' +
-# NFKC(## Link value) (empty string when Link is absent). A trusted preview's
-# FIRST two lines must be exactly the marker + digest line (no leading /
-# trailing spaces; old marker-only comments and mid-body forgeries are
-# never trusted).
+# NFKC(## Link value) (empty string when Link is absent). The writer emits
+# exactly ``{DRYRUN_MARKER}\n{digest_line}\n...`` with the marker at column 0;
+# :func:`parse_message_digest` trusts only that prefix (issue #1021). Leading
+# whitespace, quoted / mid-body / fenced copies, a digest not immediately
+# after the marker, and the old marker-only format are never trusted.
 DRYRUN_MARKER = "<!-- growth-twitter:dry-run -->"
 DIGEST_PREFIX = "<!-- growth-twitter:message-digest:sha256="
 DIGEST_LINE_RE = re.compile(
@@ -163,20 +164,28 @@ def digest_comment_line(body: str | None) -> str:
 
 
 def parse_message_digest(comment_body: str | None) -> str | None:
-    """sha256 from a preview whose first two lines are marker + digest.
+    """sha256 from a preview whose body *begins* with marker + digest line.
 
-    Line 1 must equal :data:`DRYRUN_MARKER` exactly; line 2 must match
-    :data:`DIGEST_LINE_RE` exactly. Anything else (old format, mid-body
-    markers, extra whitespace on those lines) returns ``None``.
+    The dry-run / preview writer emits exactly::
+
+        {DRYRUN_MARKER}\\n{digest_line}\\n...
+
+    with the marker at column 0 (no leading whitespace). Trust requires that
+    same prefix: :meth:`str.startswith` ``DRYRUN_MARKER + \"\\n\"``, then a
+    line matching :data:`DIGEST_LINE_RE` exactly. Newlines are normalized
+    (CRLF → LF) but the body is **not** stripped — leading whitespace is a
+    deliberate reject (issue #1021). Quoted / mid-body / fenced copies of
+    the marker, a digest line that is not immediately after the marker, and
+    the old marker-only format all return ``None``.
     """
     if not comment_body:
         return None
-    lines = comment_body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    if len(lines) < 2:
+    text = comment_body.replace("\r\n", "\n").replace("\r", "\n")
+    prefix = DRYRUN_MARKER + "\n"
+    if not text.startswith(prefix):
         return None
-    if lines[0] != DRYRUN_MARKER:
-        return None
-    m = DIGEST_LINE_RE.fullmatch(lines[1])
+    line2, _sep, _tail = text[len(prefix) :].partition("\n")
+    m = DIGEST_LINE_RE.fullmatch(line2)
     return m.group(1) if m else None
 
 

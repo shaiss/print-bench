@@ -97,8 +97,10 @@ declines design requests). The queue is the contract between the seats:
   else refuse untagged; NFKC-normalize the final root and every thread part
   and refuse full-width ``＠``/``﹫`` or more than 5 mention-shaped tokens),
   LIVE posts only after a **preview → human re-label → post** loop:
-  a trusted preview comment (first two lines exactly the dry-run marker and
-  ``message-digest`` sha256 of NFKC(``## Message`` first paragraph) +
+  a trusted preview comment (body **begins** with exactly the dry-run
+  marker then the ``message-digest`` line at column 0 — leading whitespace
+  refused; mid-body / quoted / fenced copies never trusted — #1021;
+  ``message-digest`` is sha256 of NFKC(``## Message`` first paragraph) +
   ``\n`` + NFKC(``## Link``) — the drafted root and the queue Link the
   digest binds; live copy may be recomposed under the length, tag, URL,
   and approval gates — the live tweet ``text`` is not yet compared to the
