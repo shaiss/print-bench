@@ -103,10 +103,12 @@ declines design requests). The queue is the contract between the seats:
   fenced copies never trusted — #1021; pre-#1023 message-digest-only
   headers are not trusted; ``message-digest`` is sha256 of
   NFKC(``## Message`` first paragraph) + ``\n`` + NFKC(``## Link``) —
-  the drafted root and the queue Link; ``render-digest`` is sha256 of
-  the exact NFKC root + thread parts joined by NUL — LIVE refuses unless
-  the postable copy matches that digest (#1023), so altered prose or
-  bare-domain injection via recomposition cannot reach the channel;
+  the drafted root and the queue Link; ``render-digest`` is sha256 of a
+  deterministic JSON array of the raw root + thread parts (no NFKC, no
+  join separator — so ``10⁵``/``105`` and ``a\\0b``/``a``+``b`` cannot
+  collide) — LIVE refuses unless the postable copy matches that digest
+  (#1023), so altered prose or bare-domain injection via recomposition
+  cannot reach the channel;
   only scheme URLs (``http(s)://…``, case-insensitive) from that
   paragraph or ``## Link`` may appear; draft URLs bare (exact match
   refuses a trailing ``.`` or a ``<url>`` wrap) — authored by

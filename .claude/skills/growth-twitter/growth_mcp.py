@@ -241,10 +241,12 @@ def _message_digest(body):
 
 
 def _render_digest(root, thread=None):
-    parts = [unicodedata.normalize("NFKC", root or "")]
-    for part in thread or []:
-        parts.append(unicodedata.normalize("NFKC", part))
-    payload = "\0".join(parts)
+    # Raw parts as a deterministic JSON array — no NFKC (would equate e.g.
+    # 10⁵ with 105) and no NUL join (would equate root "a\0b" with root
+    # "a" + reply "b"). Parity with growth.roottags.render_digest.
+    parts = [root or ""]
+    parts.extend(thread or [])
+    payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

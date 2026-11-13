@@ -39,6 +39,7 @@ and a trusted dry-run digest binding — see :mod:`growth.approval_guard`.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 
@@ -169,15 +170,16 @@ def message_digest(body: str | None) -> str:
 def render_digest(root: str, thread: list[str] | None = None) -> str:
     """sha256 hex of the exact root + thread parts that will be posted.
 
-    Each part is NFKC-normalized and joined with a NUL separator so an
-    embedded newline in a tweet cannot forge a different part split. Dry-run
-    / preview comments record this on the third header line; LIVE refuses
-    unless the postable text matches (issue #1023).
+    Hashes a deterministic JSON array of the **raw** parts (no NFKC, no
+    join separator) so distinct tweet sequences cannot collide: NFKC would
+    equate e.g. ``10⁵`` with ``105``, and a NUL join would equate root
+    ``a\\0b`` with root ``a`` + reply ``b``. Dry-run / preview comments
+    record this on the third header line; LIVE refuses unless the postable
+    text matches (issue #1023).
     """
-    parts = [unicodedata.normalize("NFKC", root or "")]
-    for part in thread or []:
-        parts.append(unicodedata.normalize("NFKC", part))
-    payload = "\0".join(parts)
+    parts = [root or ""]
+    parts.extend(thread or [])
+    payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

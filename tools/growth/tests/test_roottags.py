@@ -473,12 +473,12 @@ def test_parse_message_digest_requires_body_prefix():
 def test_render_digest_binds_exact_root_and_thread():
     """Issue #1023: render-digest is the approved root+thread binding."""
     import hashlib
-    import unicodedata
+    import json
 
     root = "Approved copy @Prusa3D"
     thread = ["part two", "part three"]
-    payload = "\0".join(
-        unicodedata.normalize("NFKC", p) for p in [root, *thread]
+    payload = json.dumps(
+        [root, *thread], ensure_ascii=False, separators=(",", ":")
     )
     expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     assert render_digest(root, thread) == expected
@@ -488,8 +488,18 @@ def test_render_digest_binds_exact_root_and_thread():
     assert render_digest(root, thread) != render_digest(
         root + " see example.com/x", thread
     )
-    # NUL join: a newline inside a tweet cannot forge a part split.
-    assert render_digest("a\nb", ["c"]) != render_digest("a", ["b\0c"])
+
+
+def test_render_digest_no_nfkc_or_nul_join_collisions():
+    """Regression: NFKC and NUL-join encodings must not collide distinct copy.
+
+    Copilot / Agentic Security on #1026: hashing NFKC parts joined by NUL
+    equated ``10⁵`` with ``105``, and root ``a\\0b`` with root ``a`` + reply
+    ``b``. The JSON-array encoding must keep both pairs distinct.
+    """
+    assert render_digest("Print 10⁵ parts") != render_digest("Print 105 parts")
+    assert render_digest("hello\0world") != render_digest("hello", ["world"])
+    assert render_digest("a\0b") != render_digest("a", ["b"])
 
 
 def test_parse_render_digest_requires_three_line_header():

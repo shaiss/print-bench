@@ -321,7 +321,7 @@ def test_render_digest_parity_issue_1023():
         old = f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\nrest"
         assert parse_render_digest(old) is None
         assert server._parse_render_digest(old) is None
-    # Altered / bare-domain flip the digest identically.
+    # Altered / bare-domain / collision vectors flip the digest identically.
     base = "Approved @Prusa3D https://example.com/a"
     altered = "Altered @Prusa3D https://example.com/a"
     bare = base + " see example.com/x"
@@ -329,6 +329,15 @@ def test_render_digest_parity_issue_1023():
     assert server._render_digest(base) != server._render_digest(altered)
     assert render_digest(base) != render_digest(bare)
     assert server._render_digest(base) != server._render_digest(bare)
+    # NFKC / NUL-join collision pairs stay distinct on both sides (#1026).
+    assert render_digest("Print 10⁵ parts") != render_digest("Print 105 parts")
+    assert server._render_digest("Print 10⁵ parts") != (
+        server._render_digest("Print 105 parts")
+    )
+    assert render_digest("hello\0world") != render_digest("hello", ["world"])
+    assert server._render_digest("hello\0world") != (
+        server._render_digest("hello", ["world"])
+    )
     preview = {
         "body": preview_digest_header(body, base),
         "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
