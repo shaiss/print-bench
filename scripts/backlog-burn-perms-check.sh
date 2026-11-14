@@ -155,15 +155,20 @@ MUST_DENY = [
     "gh api --method DELETE repos/o/r/issues/1/labels/foo",
     "gh api -X POST repos/o/r/issues/1/comments -f body=x",
     "gh api -X POST repos/o/r/issues/1/labels -f name=x",
-    "gh api repos/o/r/issues/1/comments -f body=x",
-    "gh api repos/o/r/issues/1/labels -f name=x",
-    "gh api repos/o/r/issues/1/labels --input -",
+    # Copilot #1027: attached --method= / -XMETHOD spellings, both orders.
+    "gh api --method=DELETE repos/o/r/issues/1/labels/needs-decision",
+    "gh api -XDELETE repos/o/r/issues/1/labels/needs-decision",
+    "gh api repos/o/r/issues/1/labels/needs-decision --method=DELETE",
+    "gh api repos/o/r/issues/1/labels/needs-decision -XDELETE",
     "curl -X POST https://api.github.com/repos/o/r/issues/1/comments -d body=x",
     "curl -X POST https://api.github.com/repos/o/r/issues/1/labels -d name=x",
     "curl -X DELETE https://api.github.com/repos/o/r/issues/1/labels/foo",
     "curl --request PATCH https://api.github.com/repos/o/r/issues/1/comments/9 -d body=x",
-    # Autofind on #1027: close/reopen --comment, GraphQL addComment,
-    # REST issue PATCH (edit without /comments|/labels), python3 token use.
+    # Copilot #1027: URL-first curl, attached -XDELETE, data-implied POST.
+    "curl https://api.github.com/repos/o/r/issues/1/labels/needs-decision -X DELETE",
+    "curl https://api.github.com/repos/o/r/issues/1/labels/needs-decision -XDELETE",
+    "curl https://api.github.com/repos/o/r/issues/1/comments --data-raw body=x",
+    "curl https://api.github.com/repos/o/r/issues/1/comments -d body=x",
     "gh issue close 5 --comment x",
     "gh issue reopen 5 -c x",
     "gh api graphql -f query='mutation{addComment(input:{subjectId:\"I_x\",body:\"y\"}){clientMutationId}}'",
@@ -182,6 +187,8 @@ MUST_DENY += [
 ]
 
 # Legitimate burn surface — must NOT be refused.
+# Explicit GET with -f fields (Copilot #1027): gh sends -f as query params
+# on GET; method-based write denies must not block that read shape.
 MUST_ALLOW = [
     "git status",
     "git checkout -b claude/issue-1022-foo",
@@ -198,11 +205,14 @@ MUST_ALLOW = [
     "gh api repos/o/r/labels",
     "gh api repos/o/r/issues/1/comments",
     "gh api repos/o/r/issues/1/labels",
+    "gh api --method GET repos/o/r/issues/1/comments -f per_page=100",
+    "gh api -X GET repos/o/r/issues/1/labels -f per_page=100",
 ]
 
 # Exact-string deny rules that must remain present (coverage floor for
 # shapes the probe list already exercises behaviorally). Extra denies are
 # fine; missing these is drift against the committed backstop contract.
+# Note: no blanket `*-f*` denies — those reject legitimate GET+-f reads.
 REQUIRED_RULE_SUBSTRINGS = [
     "Bash(gh issue comment",
     "Bash(gh issue edit",
@@ -210,13 +220,16 @@ REQUIRED_RULE_SUBSTRINGS = [
     "Bash(gh issue close",
     "Bash(gh issue reopen",
     "Bash(gh api*graphql*addComment*)",
-    "Bash(gh api*--method POST*comments*)",
-    "Bash(gh api*--method POST*labels*)",
+    "Bash(gh api*--method POST*issues/*)",
+    "Bash(gh api*--method=DELETE*issues/*)",
+    "Bash(gh api*-XDELETE*issues/*)",
+    "Bash(gh api*issues/*--method=DELETE*)",
+    "Bash(gh api*issues/*-XDELETE*)",
     "Bash(gh api*--method PATCH*issues/*)",
     "Bash(gh api*-X PATCH*issues/*)",
-    "Bash(gh api*labels*-f*)",
-    "Bash(curl*-X POST*comments*)",
-    "Bash(curl*-X POST*labels*)",
+    "Bash(curl*-X POST*issues/*)",
+    "Bash(curl*issues/*-X DELETE*)",
+    "Bash(curl*issues/*/comments*--data-raw*)",
     "Bash(python3",
     "Bash(git push",
     "Bash(gh pr create",
@@ -283,104 +296,13 @@ selftest() {
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
-  # Positive: a complete fixture (mirrors the real deny shapes) must pass.
-  cat >"$tmp/good.json" <<'EOF'
-{
-  "permissions": {
-    "allow": [
-      "Bash(git commit:*)",
-      "Bash(git add:*)",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(git symbolic-ref:*)",
-      "Bash(git checkout -b claude/issue-*)",
-      "Bash(git switch -c claude/issue-*)"
-    ],
-    "deny": [
-      "Bash(git push)",
-      "Bash(git push:*)",
-      "Bash(git push*)",
-      "Bash(gh pr create)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr create*)",
-      "Bash(gh issue comment)",
-      "Bash(gh issue comment:*)",
-      "Bash(gh issue comment*)",
-      "Bash(gh issue edit)",
-      "Bash(gh issue edit:*)",
-      "Bash(gh issue edit*)",
-      "Bash(gh label)",
-      "Bash(gh label:*)",
-      "Bash(gh label*)",
-      "Bash(gh api*--method POST*comments*)",
-      "Bash(gh api*--method POST*labels*)",
-      "Bash(gh api*--method PUT*labels*)",
-      "Bash(gh api*--method PATCH*comments*)",
-      "Bash(gh api*--method PATCH*labels*)",
-      "Bash(gh api*--method DELETE*comments*)",
-      "Bash(gh api*--method DELETE*labels*)",
-      "Bash(gh api*comments*-f*)",
-      "Bash(gh api*labels*-f*)",
-      "Bash(gh api*-f*comments*)",
-      "Bash(gh api*-f*labels*)",
-      "Bash(gh api*comments*-F*)",
-      "Bash(gh api*labels*-F*)",
-      "Bash(gh api*-F*comments*)",
-      "Bash(gh api*-F*labels*)",
-      "Bash(gh api*comments*--input*)",
-      "Bash(gh api*labels*--input*)",
-      "Bash(gh api*--input*comments*)",
-      "Bash(gh api*--input*labels*)",
-      "Bash(gh api*-X POST*comments*)",
-      "Bash(gh api*-X POST*labels*)",
-      "Bash(gh api*autonomy-ok*)",
-      "Bash(gh api*design-brief*)",
-      "Bash(gh issue edit*autonomy-ok*)",
-      "Bash(gh issue edit*design-brief*)",
-      "Bash(gh issue close)",
-      "Bash(gh issue close:*)",
-      "Bash(gh issue close*)",
-      "Bash(gh issue reopen)",
-      "Bash(gh issue reopen:*)",
-      "Bash(gh issue reopen*)",
-      "Bash(gh api*graphql*addComment*)",
-      "Bash(gh api*--method PATCH*issues/*)",
-      "Bash(gh api*--method POST*issues/*)",
-      "Bash(gh api*-X PATCH*issues/*)",
-      "Bash(gh api*-X POST*issues/*)",
-      "Bash(python3)",
-      "Bash(python3:*)",
-      "Bash(python3*)",
-      "Bash(python)",
-      "Bash(python:*)",
-      "Bash(python*)",
-      "Bash(curl*-X POST*comments*)",
-      "Bash(curl*-X POST*labels*)",
-      "Bash(curl*-X PUT*labels*)",
-      "Bash(curl*-X PATCH*comments*)",
-      "Bash(curl*-X PATCH*labels*)",
-      "Bash(curl*-X DELETE*comments*)",
-      "Bash(curl*-X DELETE*labels*)",
-      "Bash(curl*-X PATCH*issues/*)",
-      "Bash(curl*-X POST*issues/*)",
-      "Bash(curl*--request POST*comments*)",
-      "Bash(curl*--request POST*labels*)",
-      "Bash(curl*--request PUT*labels*)",
-      "Bash(curl*--request PATCH*comments*)",
-      "Bash(curl*--request PATCH*labels*)",
-      "Bash(curl*--request DELETE*comments*)",
-      "Bash(curl*--request DELETE*labels*)"
-    ]
-  }
-}
-EOF
+  # Positive: the real settings file the agent runs with must pass (parity).
+  cp "$SETTINGS" "$tmp/good.json"
   if ! check_settings "$tmp/good.json"; then
-    echo "FAIL  selftest: a complete deny fixture did not pass" >&2
+    echo "FAIL  selftest: committed backlog-burn settings did not pass" >&2
     return 1
   fi
-  echo "ok    selftest: complete deny fixture passes"
+  echo "ok    selftest: committed settings fixture passes"
 
   # Negative: drop gh issue comment denies — must fail (behavioral, not grep).
   python3 - "$tmp/good.json" "$tmp/no-comment.json" <<'PY'

@@ -4801,9 +4801,10 @@ EOF
     'Bash(gh issue comment)' 'Bash(gh issue comment:*)' 'Bash(gh issue comment*)' \
     'Bash(gh issue edit)' 'Bash(gh issue edit:*)' 'Bash(gh issue edit*)' \
     'Bash(gh label)' 'Bash(gh label:*)' 'Bash(gh label*)' \
-    'Bash(gh api*--method POST*comments*)' 'Bash(gh api*--method POST*labels*)' \
-    'Bash(gh api*labels*-f*)' 'Bash(gh api*-f*labels*)' \
-    'Bash(curl*-X POST*comments*)' 'Bash(curl*-X POST*labels*)' \
+    'Bash(gh api*--method POST*issues/*)' 'Bash(gh api*--method=DELETE*issues/*)' \
+    'Bash(gh api*-XDELETE*issues/*)' 'Bash(gh api*issues/*-XDELETE*)' \
+    'Bash(curl*-X POST*issues/*)' 'Bash(curl*issues/*-X DELETE*)' \
+    'Bash(curl*issues/*/comments*--data-raw*)' \
     'Bash(gh issue close*)' 'Bash(gh issue reopen*)' \
     'Bash(gh api*graphql*addComment*)' \
     'Bash(gh api*--method PATCH*issues/*)' 'Bash(gh api*-X PATCH*issues/*)' \

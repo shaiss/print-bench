@@ -124,9 +124,13 @@ def allow_rules() -> list[str]:
         "gh api --method POST repos/o/r/issues/1/comments -f body=x",
         "gh api --method POST repos/o/r/issues/1/labels -f name=x",
         "gh api --method DELETE repos/o/r/issues/1/labels/foo",
-        "gh api repos/o/r/issues/1/labels -f name=x",
+        "gh api --method=DELETE repos/o/r/issues/1/labels/needs-decision",
+        "gh api -XDELETE repos/o/r/issues/1/labels/needs-decision",
+        "gh api repos/o/r/issues/1/labels/needs-decision -XDELETE",
         "curl -X POST https://api.github.com/repos/o/r/issues/1/comments -d body=x",
         "curl -X POST https://api.github.com/repos/o/r/issues/1/labels -d name=x",
+        "curl https://api.github.com/repos/o/r/issues/1/labels/needs-decision -X DELETE",
+        "curl https://api.github.com/repos/o/r/issues/1/comments --data-raw body=x",
         "gh issue close 5 --comment x",
         "gh issue reopen 5 -c x",
         "gh api graphql -f query='mutation{addComment(input:{subjectId:\"I_x\",body:\"y\"}){clientMutationId}}'",
@@ -151,6 +155,8 @@ def test_issue_write_probes_denied(deny_rules, command):
         "gh api repos/o/r/issues/1/comments",
         "gh api repos/o/r/issues/1/labels",
         "gh api repos/o/r/labels",
+        "gh api --method GET repos/o/r/issues/1/comments -f per_page=100",
+        "gh api -X GET repos/o/r/issues/1/labels -f per_page=100",
     ],
 )
 def test_legitimate_probes_allowed(deny_rules, command):
