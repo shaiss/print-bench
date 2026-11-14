@@ -4797,7 +4797,33 @@ EOF
     'Bash(gh pr create*autonomy-ok*)' 'Bash(gh pr create*design-brief*)' \
     'Bash(gh issue edit*autonomy-ok*)' 'Bash(gh issue edit*design-brief*)' \
     'Bash(gh api*autonomy-ok*)' 'Bash(gh api*design-brief*)' \
-    'Bash(curl*autonomy-ok*)' 'Bash(curl*design-brief*)'; do
+    'Bash(curl*autonomy-ok*)' 'Bash(curl*design-brief*)' \
+    'Bash(gh issue comment)' 'Bash(gh issue comment:*)' 'Bash(gh issue comment*)' \
+    'Bash(gh issue edit)' 'Bash(gh issue edit:*)' 'Bash(gh issue edit*)' \
+    'Bash(gh label)' 'Bash(gh label:*)' 'Bash(gh label*)' \
+    'Bash(gh api*--method POST*issues/*)' 'Bash(gh api*--method=DELETE*issues/*)' \
+    'Bash(gh api*-XDELETE*issues/*)' 'Bash(gh api*issues/*-XDELETE*)' \
+    'Bash(curl*-X POST*issues/*)' 'Bash(curl*issues/*-X DELETE*)' \
+    'Bash(curl*issues/*/comments*--data-raw*)' 'Bash(curl*-d *issues/*)' \
+    'Bash(gh issue close*)' 'Bash(gh issue reopen*)' \
+    'Bash(gh api*graphql*addComment*)' \
+    'Bash(gh api*--method PATCH*issues/*)' 'Bash(gh api*-X PATCH*issues/*)' \
+    'Bash(gh api*-f *issues/*)' 'Bash(gh api*issues/*-f *)' \
+    'Bash(gh api*-f*issues/*)' 'Bash(gh api*issues/*-f*)' \
+    'Bash(gh api*--field *issues/*)' 'Bash(gh api*--raw-field *issues/*)' \
+    'Bash(gh api*--input *issues/*)' \
+    'Bash(gh issue *comment*)' 'Bash(/usr/bin/gh issue *comment*)' \
+    'Bash(*=* gh issue *comment*)' 'Bash(gh api*graphql*)' \
+    'Bash(gh * api *graphql*)' 'Bash(gh * api *issues/*)' \
+    'Bash(xvfb-run*gh *)' 'Bash(timeout*gh *)' 'Bash(env gh *)' \
+    'Bash(gh pr comment*)' 'Bash(gh pr edit*)' 'Bash(wget*issues/*)' \
+    'Bash(*/chunk-helper.sh*)' \
+    'Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)' \
+    'Bash(.claude/skills/label-issues/label-helper.sh:*)' \
+    'Bash(curl*--json*issues/*)' 'Bash(curl*-d@*issues/*)' \
+    'Bash(curl*--form*issues/*)' 'Bash(curl*--config*)' \
+    'Bash(curl*-T *issues/*)' \
+    'Bash(python3*)' 'Bash(/bin/python3*)' 'Bash(GITHUB_TOKEN=*python3*)'; do
     grep -qF "\"${rule}\"" "$burn_settings" || {
       echo "selftest: backlog-burn settings missing deny ${rule}" >&2
       exit 1
