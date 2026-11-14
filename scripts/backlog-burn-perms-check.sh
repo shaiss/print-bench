@@ -176,6 +176,33 @@ MUST_DENY = [
     "gh api -X PATCH repos/o/r/issues/5 -f title=x",
     "gh api --method PATCH repos/o/r/issues/5 -f body=x",
     "gh api --method POST repos/o/r/issues/5 -f title=x",
+    # Implicit POST: gh api PATH -f … (no method) — the common comment write.
+    "gh api repos/o/r/issues/1/comments -f body=x",
+    "gh api repos/o/r/issues/1/labels -f name=x",
+    "gh api repos/o/r/issues/1 -f title=x",
+    "gh api -f body=x repos/o/r/issues/1/comments",
+    "gh api -F body=x repos/o/r/issues/1/comments",
+    "gh api --field body=x repos/o/r/issues/1/comments",
+    "gh api --raw-field body=x repos/o/r/issues/1/comments",
+    "gh api --input - repos/o/r/issues/1/comments",
+    "gh api repos/o/r/issues/1/comments --field body=x",
+    "gh api repos/o/r/issues/1/comments --raw-field body=x",
+    "gh api repos/o/r/issues/1/comments --input -",
+    "gh api -fbody=x repos/o/r/issues/1/comments",
+    "gh api repos/o/r/issues/1/comments -fbody=x",
+    "gh api --field=body=x repos/o/r/issues/1/comments",
+    "gh api repos/o/r/issues/1/comments --field=body=x",
+    "gh api --raw-field=body=x repos/o/r/issues/1/comments",
+    "gh api repos/o/r/issues/1/comments --raw-field=body=x",
+    "gh api --input=- repos/o/r/issues/1/comments",
+    "gh api repos/o/r/issues/1/comments --input=-",
+    # Explicit GET + -f is also denied (body-flag rule); use the query string.
+    "gh api --method GET repos/o/r/issues/1/comments -f per_page=100",
+    "gh api -X GET repos/o/r/issues/1/labels -f per_page=100",
+    # curl: data flag before URL (parallel to gh body-flag gap).
+    "curl -d body=x https://api.github.com/repos/o/r/issues/1/comments",
+    "curl --data-raw body=x https://api.github.com/repos/o/r/issues/1/comments",
+    "curl -dbody=x https://api.github.com/repos/o/r/issues/1/comments",
     "python3 -c \"import urllib.request; urllib.request.urlopen('https://api.github.com/repos/o/r/issues/1/comments')\"",
 ]
 
@@ -187,8 +214,8 @@ MUST_DENY += [
 ]
 
 # Legitimate burn surface — must NOT be refused.
-# Explicit GET with -f fields (Copilot #1027): gh sends -f as query params
-# on GET; method-based write denies must not block that read shape.
+# Issues reads that need params use the query string (body flags on
+# issues/ paths are denied — they are gh's implicit-POST write shape).
 MUST_ALLOW = [
     "git status",
     "git checkout -b claude/issue-1022-foo",
@@ -205,14 +232,14 @@ MUST_ALLOW = [
     "gh api repos/o/r/labels",
     "gh api repos/o/r/issues/1/comments",
     "gh api repos/o/r/issues/1/labels",
-    "gh api --method GET repos/o/r/issues/1/comments -f per_page=100",
-    "gh api -X GET repos/o/r/issues/1/labels -f per_page=100",
+    "gh api --method GET repos/o/r/issues/1/comments?per_page=100",
+    "gh api -X GET repos/o/r/issues/1/labels?per_page=100",
+    "gh api repos/o/r/issues/1/comments?per_page=100",
 ]
 
 # Exact-string deny rules that must remain present (coverage floor for
 # shapes the probe list already exercises behaviorally). Extra denies are
 # fine; missing these is drift against the committed backstop contract.
-# Note: no blanket `*-f*` denies — those reject legitimate GET+-f reads.
 REQUIRED_RULE_SUBSTRINGS = [
     "Bash(gh issue comment",
     "Bash(gh issue edit",
@@ -227,9 +254,21 @@ REQUIRED_RULE_SUBSTRINGS = [
     "Bash(gh api*issues/*-XDELETE*)",
     "Bash(gh api*--method PATCH*issues/*)",
     "Bash(gh api*-X PATCH*issues/*)",
+    "Bash(gh api*-f *issues/*)",
+    "Bash(gh api*issues/*-f *)",
+    "Bash(gh api*-f*issues/*)",
+    "Bash(gh api*issues/*-f*)",
+    "Bash(gh api*--field *issues/*)",
+    "Bash(gh api*--raw-field *issues/*)",
+    "Bash(gh api*--input *issues/*)",
+    "Bash(gh api*issues/*--field *)",
+    "Bash(gh api*issues/*--raw-field *)",
+    "Bash(gh api*issues/*--input *)",
     "Bash(curl*-X POST*issues/*)",
     "Bash(curl*issues/*-X DELETE*)",
     "Bash(curl*issues/*/comments*--data-raw*)",
+    "Bash(curl*-d *issues/*)",
+    "Bash(curl*-d*issues/*)",
     "Bash(python3",
     "Bash(git push",
     "Bash(gh pr create",
@@ -351,6 +390,28 @@ PY
     return 1
   fi
   echo "ok    selftest: over-broad git deny fails"
+
+  # Negative: drop body-flag / implicit-POST denies — must fail (#1022 residual).
+  python3 - "$tmp/good.json" "$tmp/no-body-flag.json" <<'PY'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+data = json.load(open(src))
+needles = ("-f", "-F", "--field", "--raw-field", "--input")
+data["permissions"]["deny"] = [
+    r for r in data["permissions"]["deny"]
+    if not (
+        r.startswith("Bash(gh api")
+        and "issues/" in r
+        and any(n in r for n in needles)
+    )
+]
+json.dump(data, open(dst, "w"))
+PY
+  if check_settings "$tmp/no-body-flag.json"; then
+    echo "FAIL  selftest: dropping gh api body-flag denies was NOT caught" >&2
+    return 1
+  fi
+  echo "ok    selftest: missing body-flag / implicit-POST denies fail"
 
   echo "ok    backlog-burn-perms-check selftest passed"
 }

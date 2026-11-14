@@ -131,12 +131,33 @@ def allow_rules() -> list[str]:
         "curl -X POST https://api.github.com/repos/o/r/issues/1/labels -d name=x",
         "curl https://api.github.com/repos/o/r/issues/1/labels/needs-decision -X DELETE",
         "curl https://api.github.com/repos/o/r/issues/1/comments --data-raw body=x",
+        "curl -d body=x https://api.github.com/repos/o/r/issues/1/comments",
+        "curl -dbody=x https://api.github.com/repos/o/r/issues/1/comments",
         "gh issue close 5 --comment x",
         "gh issue reopen 5 -c x",
         "gh api graphql -f query='mutation{addComment(input:{subjectId:\"I_x\",body:\"y\"}){clientMutationId}}'",
         "gh api -X PATCH repos/o/r/issues/5 -f body=x",
         "gh api --method PATCH repos/o/r/issues/5 -f title=x",
         "gh api --method POST repos/o/r/issues/5 -f title=x",
+        # Implicit POST / body-flag shapes (no method) — #1022 residual close.
+        "gh api repos/o/r/issues/1/comments -f body=x",
+        "gh api -f body=x repos/o/r/issues/1/comments",
+        "gh api -F body=x repos/o/r/issues/1/comments",
+        "gh api --field body=x repos/o/r/issues/1/comments",
+        "gh api --raw-field body=x repos/o/r/issues/1/comments",
+        "gh api --input - repos/o/r/issues/1/comments",
+        "gh api repos/o/r/issues/1/comments --field body=x",
+        "gh api repos/o/r/issues/1/comments --raw-field body=x",
+        "gh api repos/o/r/issues/1/comments --input -",
+        "gh api -fbody=x repos/o/r/issues/1/comments",
+        "gh api repos/o/r/issues/1/comments -fbody=x",
+        "gh api --field=body=x repos/o/r/issues/1/comments",
+        "gh api repos/o/r/issues/1/comments --field=body=x",
+        "gh api --raw-field=body=x repos/o/r/issues/1/comments",
+        "gh api repos/o/r/issues/1/comments --raw-field=body=x",
+        "gh api --input=- repos/o/r/issues/1/comments",
+        "gh api repos/o/r/issues/1/comments --input=-",
+        "gh api --method GET repos/o/r/issues/1/comments -f per_page=100",
         "python3 -c \"import urllib.request\"",
     ],
 )
@@ -155,12 +176,29 @@ def test_issue_write_probes_denied(deny_rules, command):
         "gh api repos/o/r/issues/1/comments",
         "gh api repos/o/r/issues/1/labels",
         "gh api repos/o/r/labels",
-        "gh api --method GET repos/o/r/issues/1/comments -f per_page=100",
-        "gh api -X GET repos/o/r/issues/1/labels -f per_page=100",
+        "gh api --method GET repos/o/r/issues/1/comments?per_page=100",
+        "gh api -X GET repos/o/r/issues/1/labels?per_page=100",
+        "gh api repos/o/r/issues/1/comments?per_page=100",
     ],
 )
 def test_legitimate_probes_allowed(deny_rules, command):
     assert not _denies(deny_rules, command), f"expected allow for: {command}"
+
+
+def test_body_flag_denies_present_and_effective(deny_rules):
+    """Removing body-flag rules must let the common implicit-POST comment through."""
+    needles = ("-f", "-F", "--field", "--raw-field", "--input")
+    stripped = [
+        r for r in deny_rules
+        if not (
+            r.startswith("Bash(gh api")
+            and "issues/" in r
+            and any(n in r for n in needles)
+        )
+    ]
+    probe = "gh api repos/o/r/issues/1/comments -f body=x"
+    assert _denies(deny_rules, probe), "committed backstop must deny implicit POST"
+    assert not _denies(stripped, probe), "probes must fail open if body-flag denies drop"
 
 
 def test_allow_list_not_widened_to_issue_writes(allow_rules):

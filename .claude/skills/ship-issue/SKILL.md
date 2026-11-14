@@ -262,11 +262,13 @@ When the invoker is `backlog-burn.yml`, §6's "Draft PR … then
 issue it was handed, so it holds none (issue #863, the #859/#861
 pattern). Issue #1022 also denies Bash `gh issue comment`, `gh issue
 edit` (including `--add-label`/`--remove-label`), `gh label …`, and
-non-GET `gh api`/`curl` writes to issue comments/labels — do **not**
-attempt those verbs; the workflow concurrency group, the lock artifact,
-and a `claude/issue-<N>-*` branch claim carry the claim, and
-`backlog-burn-ship-check.sh` posts an explicit `🚢 DEFERRED` stop when
-the walk ends with no branch. The agent job's next step writes a git
+non-GET `gh api`/`curl` writes to issue comments/labels — including
+`gh api …/issues/… -f …` with no method (gh's implicit POST) and every
+other body-flag form — do **not** attempt those verbs. Issues reads that
+need params use the query string (`?per_page=100`), not `-f`. The
+workflow concurrency group, the lock artifact, and a `claude/issue-<N>-*`
+branch claim carry the claim, and `backlog-burn-ship-check.sh` posts an
+explicit `🚢 DEFERRED` stop when the walk ends with no branch. The agent job's next step writes a git
 bundle of the commits on `claude/issue-<N>-*`; a separate deliver
 workflow, running no agent code, checks out the commit the job started
 from, verifies that bundle, and only then pushes the branch and opens
