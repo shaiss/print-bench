@@ -4815,13 +4815,15 @@ EOF
     'Bash(gh issue *comment*)' 'Bash(/usr/bin/gh issue *comment*)' \
     'Bash(*=* gh issue *comment*)' 'Bash(gh api*graphql*)' \
     'Bash(gh * api *graphql*)' 'Bash(gh * api *issues/*)' \
+    'Bash(xvfb-run*gh *)' 'Bash(timeout*gh *)' 'Bash(env gh *)' \
+    'Bash(gh pr comment*)' 'Bash(gh pr edit*)' 'Bash(wget*issues/*)' \
     'Bash(*/chunk-helper.sh*)' \
     'Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)' \
     'Bash(.claude/skills/label-issues/label-helper.sh:*)' \
     'Bash(curl*--json*issues/*)' 'Bash(curl*-d@*issues/*)' \
     'Bash(curl*--form*issues/*)' 'Bash(curl*--config*)' \
     'Bash(curl*-T *issues/*)' \
-    'Bash(python3*)' 'Bash(/bin/python3*)' 'Bash(*=* python3*)'; do
+    'Bash(python3*)' 'Bash(/bin/python3*)' 'Bash(GITHUB_TOKEN=*python3*)'; do
     grep -qF "\"${rule}\"" "$burn_settings" || {
       echo "selftest: backlog-burn settings missing deny ${rule}" >&2
       exit 1
