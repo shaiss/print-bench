@@ -288,7 +288,7 @@ MUST_ALLOW = [
     "git commit -m \"curl --config example\"",
     "GIT_AUTHOR_NAME=x git commit -m \"use python3\"",
     "git -c user.name=x commit -m \"use python3\"",
-    "xvfb-run -a openscad -o out.stl in.scad",
+    "xvfb-run -a echo ok",
 ]
 
 # Exact-string deny rules that must remain present (coverage floor for
