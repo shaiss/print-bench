@@ -13,6 +13,7 @@ from growth.approval_guard import (
     assert_body_fresh_for_live,
     assert_digest_binds,
     assert_live_gates,
+    assert_render_binds,
     body_edited_after_approval,
     exactly_one_trusted_preview,
     is_trusted_preview_comment,
@@ -23,7 +24,15 @@ from growth.approval_guard import (
     parse_approver_allowlist,
     parse_require_direct_human_label,
 )
-from growth.roottags import DRYRUN_MARKER, digest_comment_line, message_digest, parse_message_digest
+from growth.roottags import (
+    DRYRUN_MARKER,
+    digest_comment_line,
+    message_digest,
+    parse_message_digest,
+    parse_render_digest,
+    preview_digest_header,
+    render_digest,
+)
 
 
 def test_latest_labeled_at_picks_most_recent_approval():
@@ -61,15 +70,21 @@ def test_assert_body_fresh_for_live_refuses_missing_and_stale():
 
 def _preview(body: str, *, created="2026-01-01T10:00:00Z", updated=None,
              login=TRUSTED_PREVIEW_LOGIN, utype=TRUSTED_PREVIEW_TYPE,
-             forged_mid=False, old_format=False) -> dict:
+             forged_mid=False, old_format=False, root="", thread=None,
+             message_digest_only=False) -> dict:
     if updated is None:
         updated = created
     if old_format:
         text = f"{DRYRUN_MARKER}\nold format without digest"
     elif forged_mid:
-        text = f"intro\n{DRYRUN_MARKER}\n{digest_comment_line(body)}\ntrail"
-    else:
+        text = (
+            f"intro\n{DRYRUN_MARKER}\n{digest_comment_line(body)}\n"
+            f"{preview_digest_header(body, root, thread).splitlines()[2]}\ntrail"
+        )
+    elif message_digest_only:
         text = f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\npreview body"
+    else:
+        text = f"{preview_digest_header(body, root, thread)}preview body"
     return {
         "body": text,
         "user": {"login": login, "type": utype},
@@ -140,6 +155,9 @@ def test_is_trusted_preview_rejects_lookalike_edited_old_format():
     )
     assert not is_trusted_preview_comment(_preview(body, old_format=True))
     assert not is_trusted_preview_comment(_preview(body, forged_mid=True))
+    assert not is_trusted_preview_comment(
+        _preview(body, message_digest_only=True)  # pre-#1023 two-line header
+    )
     assert not is_trusted_preview_comment(
         _preview(body, utype="User")  # wrong type even with bot login
     )
@@ -302,13 +320,40 @@ def test_require_direct_human_label_true_and_false():
 
 def test_assert_live_gates_happy_path():
     body = "## Message\n\nBound @Prusa3D\n"
-    preview = _preview(body, created="2026-01-01T10:00:00Z")
+    preview = _preview(body, created="2026-01-01T10:00:00Z", root="Bound @Prusa3D")
     events = [_labeled("2026-01-01T12:00:00Z")]
-    dig, approved, _ = assert_live_gates(
+    dig, approved, prev = assert_live_gates(
         [preview], body, events, None, ["shaiss"]
     )
     assert dig == message_digest(body)
     assert approved == "2026-01-01T12:00:00Z"
+    assert assert_render_binds(prev, "Bound @Prusa3D") == render_digest(
+        "Bound @Prusa3D"
+    )
+
+
+def test_assert_render_binds_match_altered_and_bare_domain():
+    """Issue #1023: live copy must match the approved preview render-digest."""
+    body = (
+        "## Message\n\nApproved copy @Prusa3D\n\n"
+        "## Link\n\nhttps://github.com/shaiss/print-bench\n"
+    )
+    approved = "Approved copy @Prusa3D https://github.com/shaiss/print-bench"
+    preview = _preview(body, root=approved)
+    assert parse_render_digest(preview["body"]) == render_digest(approved)
+    assert assert_render_binds(preview, approved) == render_digest(approved)
+    with pytest.raises(ApprovalGuardError, match="render-digest mismatch"):
+        assert_render_binds(
+            preview,
+            "Altered prose @Prusa3D https://github.com/shaiss/print-bench",
+        )
+    with pytest.raises(ApprovalGuardError, match="render-digest mismatch"):
+        assert_render_binds(preview, approved + " see example.com/x")
+    # Message-digest-only header is not a trusted preview; render parse fails.
+    old = _preview(body, root=approved, message_digest_only=True)
+    assert parse_render_digest(old["body"]) is None
+    with pytest.raises(ApprovalGuardError, match="unreadable render-digest"):
+        assert_render_binds(old, approved)
 
 
 def test_assert_live_gates_migration_needed():

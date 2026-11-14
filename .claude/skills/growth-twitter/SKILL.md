@@ -15,13 +15,14 @@ Lark owns how Twitter/X says it: the hook, the thread shape, the weighted
 would-be tweet lands as a comment on the queue issue for a human to read —
 and a live post additionally requires the live key AND the preview →
 re-label → post loop the tool enforces: a trusted bot preview comment
-(body **begins** with marker + `message-digest` at column 0 — leading
-whitespace refused; mid-body / quoted / fenced copies never trusted —
-#1021; the digest binds NFKC(`## Message` first paragraph) + `\n` +
-NFKC(`## Link`), not the rendered tweet; live copy may be recomposed
-under the length, tag, and approval gates, and the live tweet `text` is
-not yet compared to the preview — #1023) that matches the current body,
-then the **latest**
+(body **begins** with marker + `message-digest` + `render-digest` at
+column 0 — leading whitespace refused; mid-body / quoted / fenced
+copies never trusted — #1021; pre-#1023 message-digest-only headers
+are not trusted; `message-digest` binds NFKC(`## Message` first
+paragraph) + `\n` + NFKC(`## Link`); `render-digest` binds the exact
+root + thread — LIVE refuses unless the postable copy matches, so
+altered prose or bare-domain injection cannot reach the channel —
+#1023) that matches the current body, then the **latest**
 `approved-to-post` labeled event
 overall must be a human on `GROWTH_APPROVER_LOGINS` (and, when
 `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true, not via a GitHub App;
@@ -30,16 +31,15 @@ label is not proof a human applied it — see docs/growth.md)
 strictly **after** that preview and after the bot's own most recent
 removal of the label, with the body freeze still clean. Only scheme URLs
 (`http(s)://…`, case-insensitive) from that paragraph or `## Link` may
-appear in root/thread — bare domains are out of scope here (#1023);
-draft URLs bare (exact match refuses a trailing `.` or `<url>` wrap). A
-digest mismatch without edit recovers only by editing the issue body
-(new edit → new preview → re-label). If LIVE finds no trusted preview it
-writes one and removes the approval label (never adds labels) instead of
-posting — that self-migrate does **not** consume the run's post slot
-(capped at 60 previews/run in the tool). On a LIVE run: first
-preview-migrate every approved item that needs one, then post at most
-`GROWTH_MAX_POSTS` among items that pass every gate — never post an item
-preview-migrated earlier in the same run.
+appear in root/thread; draft URLs bare (exact match refuses a trailing
+`.` or `<url>` wrap). A digest mismatch without edit recovers only by
+editing the issue body (new edit → new preview → re-label). If LIVE
+finds no trusted preview it writes one and removes the approval label
+(never adds labels) instead of posting — that self-migrate does **not**
+consume the run's post slot (capped at 60 previews/run in the tool). On
+a LIVE run: first preview-migrate every approved item that needs one,
+then post at most `GROWTH_MAX_POSTS` among items that pass every gate —
+never post an item preview-migrated earlier in the same run.
 
 ## approved-to-post rule (Shai, 2026-11-13)
 
@@ -238,7 +238,8 @@ already pass every gate. For each item, in order:
    done for now (the tool refuses a second dry-run), but on a LIVE run an
    old dry-run / preview comment plus the `approved-to-post` label is
    the item you are here to post — when the Message+Link digest matches
-   (the live tweet `text` is not yet compared to the preview; #1023).
+   **and** the live root+thread matches the preview `render-digest`
+   (#1023). Post the approved preview copy; do not recompose.
 2. **Verify the facts you will use.** Each claim in your copy must trace to
    the item's Facts & sources or a committed file you opened this run. A
    fact you could not verify does not go in the tweet — compose from what
@@ -247,10 +248,9 @@ already pass every gate. For each item, in order:
    from the first paragraph of `## Message` in the **root** tweet, the
    item's Link, thread only if the message needs it. Prefer keeping the
    drafted root paragraph's tags in place; the tool will restore or refuse
-   if they go missing. The preview shows the recomposed copy under the
-   gates; the digest binds the drafted `## Message` first paragraph and
-   `## Link`, not an exact published string — the live tweet `text` is
-   not yet compared to the preview (#1023).
+   if they go missing. The preview records that exact copy under
+   `render-digest`; LIVE must match it (#1023) — altered prose or
+   bare-domain injection is refused.
 4. **Post it**: `post_tweet({ number: <n>, text, thread? })`. Dry-run mode
    (the default until a human arms live) leaves the would-be tweet as a
    comment on the queue issue — that comment IS your deliverable; tell the
@@ -258,8 +258,8 @@ already pass every gate. For each item, in order:
    (preview + remove label) without burning the post slot — continue to
    the next item. A refusal (unapproved for live, duplicate, over weight,
    missing root tags that cannot fit, out of set, digest mismatch without
-   edit) is final for this run — fix what it names or move on; never retry
-   the same call unchanged.
+   edit, render-digest mismatch) is final for this run — fix what it
+   names or move on; never retry the same call unchanged.
 5. **Report** one line per item: posted live / dry-ran / preview-migrated /
    skipped and why.
 
