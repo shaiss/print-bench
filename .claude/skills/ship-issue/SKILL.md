@@ -264,8 +264,12 @@ pattern). Issue #1022 also denies Bash `gh issue comment`, `gh issue
 edit` (including `--add-label`/`--remove-label`), `gh label …`, and
 non-GET `gh api`/`curl` writes to issue comments/labels — including
 `gh api …/issues/… -f …` with no method (gh's implicit POST) and every
-other body-flag form — do **not** attempt those verbs. Issues reads that
-need params use the query string (`?per_page=100`), not `-f`. The
+other body-flag form — do **not** attempt those verbs. Absolute-path /
+`gh -R` / env-prefixed spellings and `.claude/skills/chunk-issue/chunk-helper.sh`
+are denied too, so §8's `ensure-label` / comment path is unavailable here:
+a taste fork or missing contract becomes a `🚢 DEFERRED` stop (trusted
+intents transport is the #862 follow-up), not a helper write. Issues reads
+that need params use the query string (`?per_page=100`), not `-f`. The
 workflow concurrency group, the lock artifact, and a `claude/issue-<N>-*`
 branch claim carry the claim, and `backlog-burn-ship-check.sh` posts an
 explicit `🚢 DEFERRED` stop when the walk ends with no branch. The agent job's next step writes a git

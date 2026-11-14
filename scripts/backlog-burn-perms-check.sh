@@ -203,6 +203,19 @@ MUST_DENY = [
     "curl -d body=x https://api.github.com/repos/o/r/issues/1/comments",
     "curl --data-raw body=x https://api.github.com/repos/o/r/issues/1/comments",
     "curl -dbody=x https://api.github.com/repos/o/r/issues/1/comments",
+    # SA / Bugbot #1027: absolute paths, gh -R, env prefix, --json/-d@, chunk-helper.
+    "/usr/bin/gh issue comment 1 --body x",
+    "GH_TOKEN=x gh issue comment 1 -b y",
+    "gh -R o/r issue comment 1 --body x",
+    "/usr/bin/gh issue edit 1 --add-label needs-decision",
+    "gh -R o/r label create foo",
+    "/usr/bin/curl -X POST https://api.github.com/repos/o/r/issues/1/comments -d body=x",
+    "curl --json {\"body\":\"x\"} https://api.github.com/repos/o/r/issues/1/comments",
+    "curl -d@/tmp/body https://api.github.com/repos/o/r/issues/1/comments",
+    "/usr/bin/gh api repos/o/r/issues/1/comments -f body=x",
+    "/usr/bin/python3 -c pass",
+    ".claude/skills/chunk-issue/chunk-helper.sh ensure-label needs-decision",
+    "./.claude/skills/chunk-issue/chunk-helper.sh comment 1 --body x",
     "python3 -c \"import urllib.request; urllib.request.urlopen('https://api.github.com/repos/o/r/issues/1/comments')\"",
 ]
 
@@ -269,7 +282,15 @@ REQUIRED_RULE_SUBSTRINGS = [
     "Bash(curl*issues/*/comments*--data-raw*)",
     "Bash(curl*-d *issues/*)",
     "Bash(curl*-d*issues/*)",
+    "Bash(curl*--json*issues/*)",
+    "Bash(curl*-d@*issues/*)",
+    "Bash(*gh issue comment*)",
+    "Bash(gh *issue comment*)",
+    "Bash(/usr/bin/gh issue comment*)",
+    "Bash(*chunk-helper.sh*)",
+    "Bash(.claude/skills/chunk-issue/chunk-helper.sh",
     "Bash(python3",
+    "Bash(/usr/bin/python3",
     "Bash(git push",
     "Bash(gh pr create",
 ]
@@ -350,7 +371,7 @@ src, dst = sys.argv[1], sys.argv[2]
 data = json.load(open(src))
 data["permissions"]["deny"] = [
     r for r in data["permissions"]["deny"]
-    if "gh issue comment" not in r
+    if "issue comment" not in r
 ]
 json.dump(data, open(dst, "w"))
 PY
@@ -400,7 +421,7 @@ needles = ("-f", "-F", "--field", "--raw-field", "--input")
 data["permissions"]["deny"] = [
     r for r in data["permissions"]["deny"]
     if not (
-        r.startswith("Bash(gh api")
+        "gh api" in r
         and "issues/" in r
         and any(n in r for n in needles)
     )

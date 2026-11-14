@@ -4812,6 +4812,10 @@ EOF
     'Bash(gh api*-f*issues/*)' 'Bash(gh api*issues/*-f*)' \
     'Bash(gh api*--field *issues/*)' 'Bash(gh api*--raw-field *issues/*)' \
     'Bash(gh api*--input *issues/*)' \
+    'Bash(*gh issue comment*)' 'Bash(/usr/bin/gh issue comment*)' \
+    'Bash(*chunk-helper.sh*)' \
+    'Bash(.claude/skills/chunk-issue/chunk-helper.sh:*)' \
+    'Bash(curl*--json*issues/*)' 'Bash(curl*-d@*issues/*)' \
     'Bash(python3*)'; do
     grep -qF "\"${rule}\"" "$burn_settings" || {
       echo "selftest: backlog-burn settings missing deny ${rule}" >&2

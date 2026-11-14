@@ -158,6 +158,18 @@ def allow_rules() -> list[str]:
         "gh api --input=- repos/o/r/issues/1/comments",
         "gh api repos/o/r/issues/1/comments --input=-",
         "gh api --method GET repos/o/r/issues/1/comments -f per_page=100",
+        "/usr/bin/gh issue comment 1 --body x",
+        "GH_TOKEN=x gh issue comment 1 -b y",
+        "gh -R o/r issue comment 1 --body x",
+        "/usr/bin/gh issue edit 1 --add-label needs-decision",
+        "gh -R o/r label create foo",
+        "/usr/bin/curl -X POST https://api.github.com/repos/o/r/issues/1/comments -d body=x",
+        "curl --json {\"body\":\"x\"} https://api.github.com/repos/o/r/issues/1/comments",
+        "curl -d@/tmp/body https://api.github.com/repos/o/r/issues/1/comments",
+        "/usr/bin/gh api repos/o/r/issues/1/comments -f body=x",
+        "/usr/bin/python3 -c pass",
+        ".claude/skills/chunk-issue/chunk-helper.sh ensure-label needs-decision",
+        "./.claude/skills/chunk-issue/chunk-helper.sh comment 1 --body x",
         "python3 -c \"import urllib.request\"",
     ],
 )
@@ -191,7 +203,7 @@ def test_body_flag_denies_present_and_effective(deny_rules):
     stripped = [
         r for r in deny_rules
         if not (
-            r.startswith("Bash(gh api")
+            "gh api" in r
             and "issues/" in r
             and any(n in r for n in needles)
         )
