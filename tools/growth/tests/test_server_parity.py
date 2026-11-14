@@ -21,6 +21,7 @@ from growth.approval_guard import (
     assert_body_fresh_for_live,
     assert_digest_binds,
     assert_live_gates,
+    assert_render_binds,
     body_edited_after_approval,
     latest_human_approval_at,
     latest_labeled_at,
@@ -40,6 +41,10 @@ from growth.roottags import (
     message_digest,
     message_root_paragraph,
     parse_message_digest,
+    parse_render_digest,
+    preview_digest_header,
+    render_digest,
+    render_digest_comment_line,
     required_handles,
 )
 from growth.tweetlen import tweet_weight
@@ -288,6 +293,75 @@ def test_message_digest_parity():
     assert server._message_link_value(a) == "https://example.com/a"
 
 
+def test_render_digest_parity_issue_1023():
+    """Package and MCP agree on render-digest bind (#1023)."""
+    server = _load_server()
+    cases = [
+        ("hello", None),
+        ("hello", ["part two"]),
+        ("NFKC \uff20fold", ["a", "b"]),
+        ("Approved @Prusa3D https://example.com/a", None),
+        ("Approved @Prusa3D https://example.com/a see example.com/x", None),
+    ]
+    body = "## Message\n\nHello @Prusa3D\n\n## Link\n\nhttps://example.com/a\n"
+    for root, thread in cases:
+        assert server._render_digest(root, thread) == render_digest(root, thread)
+        assert server._render_digest_comment_line(root, thread) == (
+            render_digest_comment_line(root, thread)
+        )
+        assert server._preview_digest_header(body, root, thread) == (
+            preview_digest_header(body, root, thread)
+        )
+        header = preview_digest_header(body, root, thread)
+        assert parse_render_digest(header + "rest") == render_digest(root, thread)
+        assert server._parse_render_digest(header + "rest") == (
+            parse_render_digest(header + "rest")
+        )
+        # Message-digest-only header: render parse fails on both sides.
+        old = f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\nrest"
+        assert parse_render_digest(old) is None
+        assert server._parse_render_digest(old) is None
+    # Altered / bare-domain / collision vectors flip the digest identically.
+    base = "Approved @Prusa3D https://example.com/a"
+    altered = "Altered @Prusa3D https://example.com/a"
+    bare = base + " see example.com/x"
+    assert render_digest(base) != render_digest(altered)
+    assert server._render_digest(base) != server._render_digest(altered)
+    assert render_digest(base) != render_digest(bare)
+    assert server._render_digest(base) != server._render_digest(bare)
+    # NFKC / NUL-join collision pairs stay distinct on both sides (#1026).
+    assert render_digest("Print 10⁵ parts") != render_digest("Print 105 parts")
+    assert server._render_digest("Print 10⁵ parts") != (
+        server._render_digest("Print 105 parts")
+    )
+    assert render_digest("hello\0world") != render_digest("hello", ["world"])
+    assert server._render_digest("hello\0world") != (
+        server._render_digest("hello", ["world"])
+    )
+    # CodeRabbit on #1026: same collision with a trailing shared reply.
+    assert render_digest("a\0b", ["c"]) != render_digest("a", ["b", "c"])
+    assert server._render_digest("a\0b", ["c"]) != (
+        server._render_digest("a", ["b", "c"])
+    )
+    preview = {
+        "body": preview_digest_header(body, base),
+        "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
+        "created_at": "2026-01-01T10:00:00Z",
+        "updated_at": "2026-01-01T10:00:00Z",
+    }
+    assert assert_render_binds(preview, base) == (
+        server._assert_render_binds(preview, base)
+    )
+    with pytest.raises(ApprovalGuardError, match="render-digest mismatch"):
+        assert_render_binds(preview, altered)
+    with pytest.raises(server._ApprovalGuardError, match="render-digest mismatch"):
+        server._assert_render_binds(preview, altered)
+    with pytest.raises(ApprovalGuardError, match="render-digest mismatch"):
+        assert_render_binds(preview, bare)
+    with pytest.raises(server._ApprovalGuardError, match="render-digest mismatch"):
+        server._assert_render_binds(preview, bare)
+
+
 def test_parse_message_digest_prefix_parity_issue_1021():
     """Package and MCP copy agree on #1021 prefix-anchored trust cases."""
     server = _load_server()
@@ -327,7 +401,7 @@ def test_digest_bind_parity():
     server = _load_server()
     body = "## Message\n\nBound @Prusa3D\n"
     comments = [{
-        "body": f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\n",
+        "body": preview_digest_header(body, "Bound @Prusa3D"),
         "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
         "created_at": "2026-01-01T10:00:00Z",
         "updated_at": "2026-01-01T10:00:00Z",
@@ -344,7 +418,7 @@ def test_digest_bind_parity():
         server._assert_digest_binds([], body)
     # Digest mismatch on an existing trusted preview → refuse, both sides.
     stale = [{
-        "body": f"{DRYRUN_MARKER}\n{digest_comment_line('## Message\\n\\nOld\\n')}\n",
+        "body": preview_digest_header("## Message\n\nOld\n", "Bound @Prusa3D"),
         "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
         "created_at": "2026-01-01T10:00:00Z",
         "updated_at": "2026-01-01T10:00:00Z",
@@ -405,7 +479,7 @@ def test_approval_latest_event_and_direct_human_parity():
     # Happy-path live gates agree.
     body = "## Message\n\nBound @Prusa3D\n"
     comments = [{
-        "body": f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\n",
+        "body": preview_digest_header(body, "Bound @Prusa3D"),
         "user": {"login": TRUSTED_PREVIEW_LOGIN, "type": TRUSTED_PREVIEW_TYPE},
         "created_at": preview_at,
         "updated_at": preview_at,

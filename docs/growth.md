@@ -98,36 +98,39 @@ declines design requests). The queue is the contract between the seats:
   and refuse full-width ``＠``/``﹫`` or more than 5 mention-shaped tokens),
   LIVE posts only after a **preview → human re-label → post** loop:
   a trusted preview comment (body **begins** with exactly the dry-run
-  marker then the ``message-digest`` line at column 0 — leading whitespace
-  refused; mid-body / quoted / fenced copies never trusted — #1021;
-  ``message-digest`` is sha256 of NFKC(``## Message`` first paragraph) +
-  ``\n`` + NFKC(``## Link``) — the drafted root and the queue Link the
-  digest binds; live copy may be recomposed under the length, tag, URL,
-  and approval gates — the live tweet ``text`` is not yet compared to the
-  preview (#1023); only scheme URLs (``http(s)://…``, case-insensitive)
-  from that paragraph or ``## Link`` may appear — bare domains such as
-  ``evil.example/x`` are **not** covered here and are tracked in follow-up
-  issue #1023 (unbound live prose); draft URLs bare (exact match refuses a
-  trailing ``.`` or a ``<url>`` wrap) — authored by ``github-actions[bot]`` /
-  ``type=Bot``, never edited) must match the current body; the **latest**
-  `approved-to-post` labeled event overall must be an allowlisted User
-  (`GROWTH_APPROVER_LOGINS`), strictly after that preview **and** after the
-  bot's own most recent removal of the label, with no unlabeled after it
-  (stale/revoked approvals refuse). When
-  `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true (anything but the literal
-  `false`; default), `performed_via_github_app` must be null. Caveat: an
-  automation credential with Shai's permissions can apply labels, so a
-  label is not proof a human applied it. The body freeze must still pass.
-  Missing preview on a LIVE run
-  **self-migrates**: writes the preview, **removes** `approved-to-post`
-  only (never adds a label), does not post, does not consume the run's
-  post slot or the daycap — a LIVE run first preview-migrates every
-  approved item that needs one (up to `MAX_PREVIEWS_PER_RUN` = 60,
-  enforced in the posting tool), then posts at most `max_posts_per_run`
-  among items that pass every gate; it never posts an issue it
-  preview-migrated earlier in the same run. A digest mismatch on an
-  existing trusted preview refuses (`digest mismatch without edit`)
-  rather than writing a second preview — recovery is edit the issue body
+  marker, then the ``message-digest`` line, then the ``render-digest``
+  line at column 0 — leading whitespace refused; mid-body / quoted /
+  fenced copies never trusted — #1021; pre-#1023 message-digest-only
+  headers are not trusted; ``message-digest`` is sha256 of
+  NFKC(``## Message`` first paragraph) + ``\n`` + NFKC(``## Link``) —
+  the drafted root and the queue Link; ``render-digest`` is sha256 of a
+  deterministic JSON array of the raw root + thread parts (no NFKC, no
+  join separator — so ``10⁵``/``105`` and ``a\\0b``/``a``+``b`` cannot
+  collide) — LIVE refuses unless the postable copy matches that digest
+  (#1023), so altered prose or bare-domain injection via recomposition
+  cannot reach the channel;
+  only scheme URLs (``http(s)://…``, case-insensitive) from that
+  paragraph or ``## Link`` may appear; draft URLs bare (exact match
+  refuses a trailing ``.`` or a ``<url>`` wrap) — authored by
+  ``github-actions[bot]`` / ``type=Bot``, never edited) must match the
+  current body; the **latest** `approved-to-post` labeled event overall
+  must be an allowlisted User (`GROWTH_APPROVER_LOGINS`), strictly after
+  that preview **and** after the bot's own most recent removal of the
+  label, with no unlabeled after it (stale/revoked approvals refuse).
+  When `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true (anything but the
+  literal `false`; default), `performed_via_github_app` must be null.
+  Caveat: an automation credential with Shai's permissions can apply
+  labels, so a label is not proof a human applied it. The body freeze
+  must still pass. Missing preview on a LIVE run **self-migrates**:
+  writes the preview, **removes** `approved-to-post` only (never adds a
+  label), does not post, does not consume the run's post slot or the
+  daycap — a LIVE run first preview-migrates every approved item that
+  needs one (up to `MAX_PREVIEWS_PER_RUN` = 60, enforced in the posting
+  tool), then posts at most `max_posts_per_run` among items that pass
+  every gate; it never posts an issue it preview-migrated earlier in
+  the same run. A digest mismatch on an existing trusted preview refuses
+  (`digest mismatch without edit` / `render-digest mismatch`) rather
+  than writing a second preview — recovery is edit the issue body
   (which creates a new edit), then a new preview, then a re-label.
   Exactly one trusted preview after ``lastEditedAt`` — more is
   refuse-on-ambiguity. Unreadable timeline/comments/label-removal → fail
@@ -185,10 +188,9 @@ declines design requests). The queue is the contract between the seats:
 3. **This post, now** — per item, the `approved-to-post` label (while the
    committed policy says `require_approval: true`). The dry-run / preview
    comment on the queue issue shows the rendered copy under the gates. The
-   approval digest binds only the `## Message` first paragraph and
-   `## Link`, not the rendered tweet — the live tweet `text` is not yet
-   compared to the preview (tracked in
-   https://github.com/shaiss/print-bench/issues/1023). The first armed run
+   `message-digest` binds the `## Message` first paragraph and `## Link`;
+   the `render-digest` binds that exact root + thread — LIVE refuses
+   unless the postable copy matches (issue #1023). The first armed run
    **tries** to create the label *definition* idempotently (`gh label
    create … || true`; creation errors are ignored) and does not apply the
    label to issues — merging the desk's code never creates repo labels. If

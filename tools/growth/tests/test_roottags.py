@@ -26,6 +26,10 @@ from growth.roottags import (
     message_root_paragraph,
     missing_handles,
     parse_message_digest,
+    parse_render_digest,
+    preview_digest_header,
+    render_digest,
+    render_digest_comment_line,
     required_handles,
 )
 from growth.tweetlen import MAX_WEIGHT, tweet_weight
@@ -464,3 +468,59 @@ def test_parse_message_digest_requires_body_prefix():
     # Whitespace on the digest line (not what the writer emits) rejects.
     assert parse_message_digest(f"{DRYRUN_MARKER}\n {dig}\n") is None
     assert parse_message_digest(f"{DRYRUN_MARKER}\n{dig} \n") is None
+
+
+def test_render_digest_binds_exact_root_and_thread():
+    """Issue #1023: render-digest is the approved root+thread binding."""
+    import hashlib
+    import json
+
+    root = "Approved copy @Prusa3D"
+    thread = ["part two", "part three"]
+    payload = json.dumps(
+        [root, *thread], ensure_ascii=False, separators=(",", ":")
+    )
+    expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    assert render_digest(root, thread) == expected
+    assert render_digest(root, thread) != render_digest(
+        "Altered copy @Prusa3D", thread
+    )
+    assert render_digest(root, thread) != render_digest(
+        root + " see example.com/x", thread
+    )
+
+
+def test_render_digest_no_nfkc_or_nul_join_collisions():
+    """Regression: NFKC and NUL-join encodings must not collide distinct copy.
+
+    Copilot / Agentic Security on #1026: hashing NFKC parts joined by NUL
+    equated ``10⁵`` with ``105``, and root ``a\\0b`` with root ``a`` + reply
+    ``b``. The JSON-array encoding must keep both pairs distinct.
+    """
+    assert render_digest("Print 10⁵ parts") != render_digest("Print 105 parts")
+    assert render_digest("hello\0world") != render_digest("hello", ["world"])
+    assert render_digest("a\0b") != render_digest("a", ["b"])
+    # CodeRabbit on #1026: same collision with a trailing shared reply.
+    assert render_digest("a\0b", ["c"]) != render_digest("a", ["b", "c"])
+
+
+def test_parse_render_digest_requires_three_line_header():
+    body = "## Message\n\nTagged @Prusa3D\n"
+    root = "Tagged @Prusa3D"
+    header = preview_digest_header(body, root)
+    assert parse_render_digest(f"{header}rest") == render_digest(root)
+    assert parse_render_digest(
+        f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\n"
+        f"{render_digest_comment_line(root)}"
+    ) == render_digest(root)
+    # Message-digest-only (pre-#1023) is not a render bind.
+    assert parse_render_digest(
+        f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\nrest"
+    ) is None
+    assert parse_render_digest(
+        f"intro\n{preview_digest_header(body, root)}"
+    ) is None
+    assert parse_render_digest(
+        f"{DRYRUN_MARKER}\n{digest_comment_line(body)}\n "
+        f"{render_digest_comment_line(root)}\n"
+    ) is None
