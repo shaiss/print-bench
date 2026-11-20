@@ -281,9 +281,10 @@ surfaces studies awaiting a read live in
   `print-in-place.scad` (print-in-place slide rails, tabs, end-stops,
   sacrificial membranes and a teardrop-bore hinge, extracted from the
   archived sushi-battleship),
-  `compliant.scad` (flexure primitives — the bistable snap-through arch and
-  weld-safe flexure-root fillets, harvested from the compliant designs;
-  issue #202 stage 1),
+  `compliant.scad` (flexure primitives — the bistable snap-through arch,
+  weld-safe flexure-root fillets, the small-length flexural pivot and the
+  cross-axis flexure pivot, harvested from the compliant designs; issue
+  #202 stage 2),
   `spaceframe.scad` (parametric space-frame trusses — warren/pratt/vierendeel
   topologies, cosine taper to needle ends, a separate core/web split for
   two-tone exports),
@@ -404,6 +405,15 @@ surfaces studies awaiting a read live in
     subtype, `permission_denials` tool names only, final message
     length+sha256 — never message text) without enabling
     `show_full_output`; `--selftest` run by check.sh
+  - `backlog-burn-perms-check.sh` — behavioral deny check for the
+    backlog-burn agent backstop (`.claude/backlog-burn-settings.json`,
+    issue #1022): loads the settings the agent actually runs with and
+    asserts under Claude Code's Bash matcher — not a grep — that
+    `gh issue comment`/`edit`/`close`/`reopen`, `gh label …`, GraphQL
+    comment/issue/label mutations, non-GET `issues/<n>` REST writes,
+    and `python3`/`python` are refused while the legitimate local-git
+    and read-only `gh` surface still passes; `--selftest` plus the live
+    check, run by check.sh
   - `reviewer-perms-check.sh` — the same drift check for the auto-review
     reviewer sessions' deny backstops (`.claude/reviewer-settings.json` for
     Jane/Drik/PM-triage, `.claude/design-coach-settings.json` for the coach):

@@ -400,14 +400,23 @@ jobs:
       # decrypted in this workflow. backlog-burn-deliver.yml holds it, pushes,
       # and opens the draft, which is what makes CI fire on the PR.
       # .claude/backlog-burn-settings.json denies `git push`, `gh pr create`,
-      # and commands that add `design-brief` or `autonomy-ok` (the #862
-      # steering vector), and explicitly allows the local branch/commit
-      # verbs the burn handoff needs (`git checkout -b claude/issue-*`,
-      # `git switch -c claude/issue-*`, add/commit/status — issue #962).
-      # The steps use dontAsk because a bypassPermissions step ignores its
-      # own denies. The allow-list stays the whole toolchain (Bash plus the
-      # file tools the skill edits with); `show_full_output` stays false so
-      # public logs never dump tool inputs — diag is the post-ship check.
+      # commands that add `design-brief` or `autonomy-ok` (the #862
+      # steering vector), and — issue #1022 — `gh issue comment`/`edit`/
+      # `close`/`reopen`, `gh label …`, GraphQL comment/issue/label
+      # mutations, non-GET `gh api`/`curl` writes to `issues/<n>` (and
+      # /comments|/labels), and `python3`/`python`. The token still has
+      # issues: write (comment scope); the deny backstop is what closes
+      # those verbs. Residual: reconstructed argv / other interpreters.
+      # Explicitly allows the local branch/commit verbs the burn handoff
+      # needs (`git checkout -b claude/issue-*`, `git switch -c
+      # claude/issue-*`, add/commit/status — issue #962). The steps use
+      # dontAsk because a bypassPermissions step ignores its own denies.
+      # The allow-list stays the whole toolchain (Bash plus the file tools
+      # the skill edits with); `show_full_output` stays false so public
+      # logs never dump tool inputs — diag is the post-ship check.
+      # scripts/backlog-burn-perms-check.sh (check.sh) loads the real
+      # settings and asserts those write probes are refused under the
+      # matcher.
       # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB drops inherited secrets from
       # subprocesses the agent spawns. sudo is disabled in the step above
       # these five; each step requires that disable to have succeeded.
