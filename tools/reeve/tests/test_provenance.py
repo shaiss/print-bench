@@ -28,6 +28,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TABLE = REPO_ROOT / "tools" / "provenance" / "tests" / "fixtures" / "continuity_cases.json"
 CASES = json.loads(TABLE.read_text(encoding="utf-8"))["cases"]
 NOW = "2026-08-16T06:00:00Z"
+# Fixed gather clock matching NOW — fixture artifacts default to 2026-08-16T05:30Z
+# and the conf horizon is 90 days; without this pin, wall-clock runs after
+# ~2026-11-14 stop paging and the runaway/off-API error paths go silent.
+GATHER_NOW = datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc)
 E_C, E_FORGED, S_C = "43" * 20, "46" * 20, "44" * 20
 
 
@@ -443,7 +447,7 @@ def test_gather_armed_reads_the_closed_set_of_endpoints(monkeypatch):
     seen: list[str] = []
     _patch(monkeypatch, _world(), seen)
     out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="TRUE",
-                            now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+                            now=GATHER_NOW)
     assert out["armed"] is True
     assert out["tips"] == {"provenance": E_FORGED, "provenance-site": S_C}
     assert out["marks"] == [mark(17, "tip", "provenance-site", S_C, 80, T0530),
@@ -486,7 +490,7 @@ def test_gather_walks_first_parents_for_a_declared_chain(monkeypatch):
     seen: list[str] = []
     _patch(monkeypatch, world, seen)
     out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
-                            now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+                            now=GATHER_NOW)
     assert out["parents"] == {died: E_C}
     assert provenance.foreign_tip(out) == []
     assert seen.count(_api(f"/git/commits/{died}")) == 1        # memoised: walk + tree share it
@@ -498,7 +502,7 @@ def test_gather_absent_refs_are_none_not_errors(monkeypatch):
     del world[_api("/git/ref/heads/provenance-site")]
     _patch(monkeypatch, world, [])
     out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
-                            now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+                            now=GATHER_NOW)
     assert out["tips"] == {"provenance": None, "provenance-site": None}
     assert out["state"] == {} and out["frozen_prs"] == []
     assert [f["verdict"] for f in provenance.foreign_tip(out)] == ["deleted", "deleted"]
@@ -531,7 +535,7 @@ def test_gather_rejects_marks_of_a_run_dispatched_on_a_tag_named_main(monkeypatc
         seen: list[str] = []
         _patch(monkeypatch, world(status), seen)
         out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
-                                now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+                                now=GATHER_NOW)
         return out, seen
 
     for status in ("diverged", "behind", None):
@@ -579,7 +583,7 @@ def test_gather_orders_marks_by_upload_time_across_an_id_inversion(monkeypatch):
 
     monkeypatch.setattr(github, "_get", fake)
     out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
-                            now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+                            now=GATHER_NOW)
     assert out["scan"]["pages"] == 2 and p3 not in seen
     assert [m["sha"] for m in out["marks"]][:2] == [S_C, E_C]
     assert out["ancestry"] == {f"{old_e}...{E_C}": True}
@@ -588,7 +592,7 @@ def test_gather_orders_marks_by_upload_time_across_an_id_inversion(monkeypatch):
     world[_api(f"/compare/{old_e}...{E_C}?per_page=1")] = {"status": "diverged"}
     seen.clear()
     out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true",
-                            now=datetime(2026, 8, 16, 6, 0, tzinfo=timezone.utc))
+                            now=GATHER_NOW)
     found = provenance.foreign_tip(out)
     assert [(f["ref"], f["verdict"]) for f in found] == [("provenance", "foreign")]
     assert "mark-order conflict" in found[0]["reason"]
@@ -603,9 +607,9 @@ def test_artifact_page_cap_is_derived_from_the_horizon():
     assert provenance.max_artifact_pages(30) == 90
 
 
-def _failed(monkeypatch, fake):
+def _failed(monkeypatch, fake, *, now=GATHER_NOW):
     monkeypatch.setattr(github, "_get", fake)
-    out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true")
+    out = provenance.gather("o/r", "tok", root=str(REPO_ROOT), variable="true", now=now)
     assert out["armed"] is True and set(out) == {"armed", "error"}
     return out
 
@@ -661,6 +665,45 @@ def test_gather_never_follows_a_next_link_off_the_api(monkeypatch):
 
     out = _failed(monkeypatch, fake)
     assert "off api.github.com" in out["error"]
+
+
+def test_failed_paths_still_fire_when_wall_clock_is_far_in_the_future(monkeypatch):
+    """Regression for the 2026-11-20 main red: _failed used to omit now=, so once
+    the real clock passed the fixture artifact's 90-day horizon the runaway and
+    off-API next-link cases stopped paging and returned a full gather. Pinning
+    GATHER_NOW is load-bearing — prove both error paths still fire under a
+    faked far-future today."""
+    class _FarFuture(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            frozen = datetime(2027, 6, 1, tzinfo=timezone.utc)
+            return frozen if tz is not None else frozen.replace(tzinfo=None)
+
+    monkeypatch.setattr(provenance, "datetime", _FarFuture)
+    world = _world()
+    page = {"artifacts": [_art(1, "telemetry-record", 1)]}
+    nxt = _api("/actions/artifacts?per_page=100&page=2")
+
+    def runaway(url, token):
+        if "/actions/artifacts" in url:
+            return copy.deepcopy(page), f'<{nxt}>; rel="next"'
+        if url in world:
+            return copy.deepcopy(world[url]), ""
+        raise _NotFound(url)
+
+    monkeypatch.setattr(provenance, "max_artifact_pages", lambda days: 3)
+    runaway_out = _failed(monkeypatch, runaway)
+    assert "more than 3 artifact pages before the 90-day horizon" in runaway_out["error"]
+
+    def off_api(url, token):
+        if "/actions/artifacts" in url:
+            return copy.deepcopy(page), '<https://evil.example/steal>; rel="next"'
+        if url in world:
+            return copy.deepcopy(world[url]), ""
+        raise AssertionError(f"followed {url}")
+
+    off_out = _failed(monkeypatch, off_api)
+    assert "off api.github.com" in off_out["error"]
 
 
 def test_cli_run_with_repo_hands_the_variable_to_the_gather(tmp_path, monkeypatch, capsys):
