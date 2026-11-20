@@ -639,7 +639,9 @@ module _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
     assert(tab_len > 0, str("cross-axis tab_len must be positive (got ", tab_len, ")"));
     assert(tab_w > 0, str("cross-axis tab_w must be positive (got ", tab_w, ")"));
     assert(tab_r >= 0, str("cross-axis tab_r must not be negative (got ", tab_r, ")"));
-    assert(2 * tab_r <= tab_len && 2 * tab_r <= tab_w,
+    // Strict <: offset(r) offset(delta=-r) collapses a rectangle to empty
+    // area when 2·r equals a side (Copilot on #1052) — equality is not a fit.
+    assert(2 * tab_r < tab_len && 2 * tab_r < tab_w,
            str("cross-axis tab_r = ", tab_r, " does not fit the tab (", tab_len, " x ", tab_w, ")"));
 }
 
@@ -648,9 +650,14 @@ module _cross_axis_rounded2d(len, wid, r)
     offset(r = r) offset(delta = -r) square([len, wid], center = true);
 
 // Annular band r_in..r_out over [-arc_half, +arc_half] —
-// cross-axis-flexure-pivot.scad:151-160, point for point.
+// cross-axis-flexure-pivot.scad:151-160. The harvest site used a fixed
+// `r_out + 10` wedge margin, which is enough at production (arc_half 70°,
+// r_out 20.5 → chord clearance 30.5 > need) but for a large accepted span
+// the straight wedge edges bow inside r_out and sever the ring (Copilot on
+// #1052: L=120, arc_wall=1.6 → need r_out/cos(arc_half/2)). Keep the +10
+// floor so production tessellation stays byte-identical to the harvest site.
 module _cross_axis_ring_arc_2d(r_in, r_out, arc_half) {
-    rb = r_out + 10;
+    rb = max(r_out + 10, r_out / cos(arc_half / 2));
     intersection() {
         difference() { circle(r_out); circle(r_in); }
         polygon([[0, 0],

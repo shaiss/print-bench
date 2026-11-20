@@ -149,6 +149,17 @@ translate([160, 55, 0])
     cross_axis_pivot(0.5, 28, 2.4, 0.3, alpha = 45, stop_angle = 40,
                      arc_wall = 6.5, E = 2000, h_pad = 0);
 
+// ---------------------------------------------------------------------------
+// Station 9: cross-axis wedge-mask clearance — Copilot #1052: a large
+// accepted span (L = 120, arc_wall = 1.6) used to sever the rigid arcs
+// because r_out+10 left the wedge chord inside the bore. Must render as a
+// single solid (the derived rb = r_out/cos(arc_half/2) keeps the mask clear).
+// ---------------------------------------------------------------------------
+translate([240, 0, 0])
+    cross_axis_pivot(0.8, 120, 2.4, 0.6, alpha = 45, stop_angle = 40,
+                     arc_wall = 1.6, E = 2000, h_pad = 0,
+                     tab_len = 10, tab_w = 22, tab_r = 4);
+
 echo(str("[compliant-demo] SLFP: K = ", small_length_pivot_K(sl_t, sl_L, sl_w),
          " N*mm/rad, sigma_doc = ", small_length_pivot_sigma(sl_t, sl_L, sl_theta),
          " MPa at theta = ", sl_theta * 180 / PI, " deg"));
