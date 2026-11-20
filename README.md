@@ -281,9 +281,10 @@ surfaces studies awaiting a read live in
   `print-in-place.scad` (print-in-place slide rails, tabs, end-stops,
   sacrificial membranes and a teardrop-bore hinge, extracted from the
   archived sushi-battleship),
-  `compliant.scad` (flexure primitives — the bistable snap-through arch and
-  weld-safe flexure-root fillets, harvested from the compliant designs;
-  issue #202 stage 1),
+  `compliant.scad` (flexure primitives — the bistable snap-through arch,
+  weld-safe flexure-root fillets, the small-length flexural pivot and the
+  cross-axis flexure pivot, harvested from the compliant designs; issue
+  #202 stage 2),
   `spaceframe.scad` (parametric space-frame trusses — warren/pratt/vierendeel
   topologies, cosine taper to needle ends, a separate core/web split for
   two-tone exports),
