@@ -1,21 +1,26 @@
-"""Cross-axis wedge-mask body-count proof (#1047 / Copilot+CodeRabbit #1052).
+"""Cross-axis wedge-mask body-count proof (#1047 / Copilot+CodeRabbit+Bugbot #1052).
 
 Demo station 9 renders a large accepted span (L=120, arc_wall=1.6) that the
 old fixed ``r_out+10`` wedge severs into disconnected arcs. ``check.sh``
 CGAL-renders the demo but fails it only on ERROR/WARNING, never on a volume
 count, so a regression that restored the fixed wedge would pass check.sh
-while the station split. This test closes that:
+while the station split. This test closes that with three renders:
 
-- render the fixture via the library (derived rb) and assert fusecheck
-  counts exactly 1 body;
-- render it with ``-D demo_fixed_wedge=true`` (the fixture's inline copy of
-  the old ``r_out+10`` wedge, frame+stage only) and assert MORE than 1 —
-  the negative control proving the count is measuring the wedge defect.
+- ``demo_mode="lib"``: full library pivot → fusecheck counts exactly 1 body;
+- ``demo_mode="arcs_ok"``: beam-free frame+stage with the derived rb →
+  exactly 2 bodies (frame and stage, intentionally disconnected so the
+  wedge is isolated from beam bridging);
+- ``demo_mode="arcs_broken"``: same beam-free geometry with the old
+  ``r_out+10`` wedge → more than 2 bodies (each arc severed).
+
+The arcs_ok / arcs_broken pair is the falsifiable negative control: without
+matching beam-free geometry the broken mode would read ``bodies > 1`` even
+with a correct wedge (frame≠stage), which is inert (Bugbot/CodeRabbit).
 
 Which CI job exercises it: ``printcheck unit tests`` (``printcheck-tests``
 in .github/workflows/ci.yml); the classifier forces that job on any
 ``lib/`` change (geo-infra). /preflight runs the same suite locally. Where
-``openscad`` or ``xvfb-run`` is absent the two tests SKIP (never error).
+``openscad`` or ``xvfb-run`` is absent the tests SKIP (never error).
 
 Honours OPENSCAD_BIN / OPENSCAD_ARGS like the repo scripts do, and sets
 OPENSCADPATH itself.
@@ -61,8 +66,8 @@ def _render(out: Path, *defines: str) -> Path:
 
 @needs_openscad
 def test_lib_wedge_keeps_one_body(tmp_path):
-    """Derived rb clears the bore: the large-span pivot is one separable body."""
-    stl = _render(tmp_path / "xafp-fixed.stl")
+    """Full library pivot at the large span: one separable body."""
+    stl = _render(tmp_path / "xafp-lib.stl", 'demo_mode="lib"')
     bodies, dropped = count_stl(str(stl), [])
     assert dropped == 0
     assert bodies == 1, (
@@ -71,11 +76,23 @@ def test_lib_wedge_keeps_one_body(tmp_path):
 
 
 @needs_openscad
-def test_old_fixed_wedge_severs_arcs(tmp_path):
-    """Negative control: the pre-fix ``r_out+10`` wedge severs frame from
-    stage (and each arc from itself), so the body count must climb above 1.
-    If this ever reads 1 the test above is not measuring the wedge defect."""
-    stl = _render(tmp_path / "xafp-broken.stl", "demo_fixed_wedge=true")
+def test_arcs_ok_is_exactly_two_bodies(tmp_path):
+    """Beam-free frame+stage with the derived rb: exactly two bodies.
+    Establishes the baseline the broken-wedge control must beat."""
+    stl = _render(tmp_path / "xafp-arcs-ok.stl", 'demo_mode="arcs_ok"')
     bodies, _ = count_stl(str(stl), [])
-    assert bodies > 1, (
-        "the old fixed r_out+10 wedge freed no arc — negative control is inert")
+    assert bodies == 2, (
+        f"beam-free derived-wedge fixture has {bodies} bodies, want exactly 2 "
+        "(frame + stage); a severed arc here means the 'ok' rb is wrong")
+
+
+@needs_openscad
+def test_arcs_broken_severs_past_two(tmp_path):
+    """Negative control: same beam-free geometry, old r_out+10 wedge.
+    Must climb above 2 — if it stays at 2 the control is not measuring the
+    wedge defect (Bugbot/CodeRabbit on the inert no-beams-only control)."""
+    stl = _render(tmp_path / "xafp-arcs-broken.stl", 'demo_mode="arcs_broken"')
+    bodies, _ = count_stl(str(stl), [])
+    assert bodies > 2, (
+        f"old fixed r_out+10 wedge left {bodies} bodies (want > 2) — "
+        "negative control is inert")

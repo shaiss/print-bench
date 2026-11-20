@@ -652,9 +652,19 @@ module _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
     assert((t / 2 + root_fillet) / cos(alpha) < r_in,
            str("cross-axis root fillet ", root_fillet,
                " bridges the stop gap along the cross bisector"));
-    // cross-axis-flexure-pivot.scad:126-127.
+    // cross-axis-flexure-pivot.scad:126-127 — harvest's fixed +6° land.
     assert(arc_half >= alpha + 6,
            str("arc half-width does not cover the beam roots — lower stop_angle or alpha"));
+    // Full beam-root footprint (half-thickness + root fillet) after rotation
+    // must still sit under the arc — otherwise the root protrudes into the
+    // stop gap and the moving arc contacts the fillet before the declared
+    // stop (CodeRabbit on #1052: t=4, L=14, f=2, stop_angle=78). Production
+    // (t=0.8, f=0.6, alpha=45, arc_half=70) clears by ~20°.
+    root_ang = atan2(r_in * sin(alpha) + (t / 2 + root_fillet) * cos(alpha),
+                     r_in * cos(alpha) - (t / 2 + root_fillet) * sin(alpha));
+    assert(arc_half >= root_ang + 1,
+           str("cross-axis beam-root footprint protrudes into the stop gap ",
+               "(root angle ", root_ang, " deg, arc_half ", arc_half, ")"));
     // cross-axis-flexure-pivot.scad:129-130.
     assert(pow(r_in + land, 2) + pow(t / 2, 2) < pow(r_out - 0.2, 2),
            "beam end pokes through the ring's outer face");
@@ -667,10 +677,12 @@ module _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
     // area when 2·r equals a side (Copilot on #1052) — equality is not a fit.
     assert(2 * tab_r < tab_len && 2 * tab_r < tab_w,
            str("cross-axis tab_r = ", tab_r, " does not fit the tab (", tab_len, " x ", tab_w, ")"));
-    // Arm far-circle inset is min(4, tab_len/2 - 1) (see cross_axis_pivot_2d):
-    // a tab shorter than that leaves inset <= 0 and the fixed harvest arm
-    // cannot meet the tab with a solid neck (CodeRabbit on #1052: tab_len=2).
-    assert(tab_len / 2 - 1 > 0,
+    // Arm far-circle (r=2) uses inset = min(4, tab_len/2 - 1). Require
+    // tab_len >= 8 so that inset stays >= 3: the circle then overlaps the
+    // tab with a solid neck AND does not poke past the outer edge
+    // (Bugbot on #1052: tab_len just above 2 with inset ≈ 0 overruns).
+    // Production tab_len = 10 → inset 4, harvest-identical.
+    assert(tab_len >= 8,
            str("cross-axis tab_len = ", tab_len,
                " too short for the arm to meet the tab with a solid neck"));
 }
