@@ -87,6 +87,10 @@
 //                     sigma_weld = 2·E·t·θ/L, sigma_leaf = E·t·θ/(2L).
 //                     Negative control: lib at alpha = 40 against the
 //                     design's alpha = 45 leaves a 776-facet difference.
+//                     Both pivot modules pin their harvest $fn inside the
+//                     module body (SLFP 96, cross-axis 64) so a caller's
+//                     quality preset cannot move the fit — same discipline
+//                     as nuggs-coupling.scad; issue #1047 "owns its sampling".
 //
 // ---------------------------------------------------------------------------
 // THE LOCAL FRAME (the reason this generator exists). An arch is built in its
@@ -544,6 +548,9 @@ module _small_length_pivot_guards(t, L, root_fillet) {
 // guards still go through _root_fillet_guards / root_fillet_2d's rule.
 module small_length_pivot_2d(t, L, root_fillet = undef) {
     _small_length_pivot_guards(t, L, root_fillet);
+    // Generator owns its sampling (issue #1047) — snap-cantilever-clip.scad:76.
+    // A caller's $fn must not move the fillet arc (parity is recorded at 96).
+    $fn = 96;
     translate([-t, -L]) square([t, L]);
     if (!is_undef(root_fillet)) {
         f = root_fillet;
@@ -628,6 +635,23 @@ module _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
     r_out = r_in + arc_wall;
     arc_half = (180 - stop_angle) / 2;
     land = arc_wall - 0.5;
+    // Free beam between the two ring-root fillets on a strip (arch's
+    // root_fillet < span/2 spirit). Production f = 0.6 on L = 28 clears.
+    assert(root_fillet < r_in,
+           str("cross-axis root fillet ", root_fillet,
+               " leaves no free beam between the ring roots (L ", L, ")"));
+    // Weld-fillet disc centers along each bisector must stay inside the
+    // bore — otherwise a large fillet overlaps both ring arcs across the
+    // stop gap (CodeRabbit on #1052: f = 100 on L = 28). Reach is
+    // (t/2 + f)/sin(alpha) on the beam bisector and /cos(alpha) on the
+    // cross bisector (cross-axis-flexure-pivot.scad:219-221's r_x / r_y
+    // plus notch d = f/sin(hw)).
+    assert((t / 2 + root_fillet) / sin(alpha) < r_in,
+           str("cross-axis root fillet ", root_fillet,
+               " bridges the stop gap along the beam bisector"));
+    assert((t / 2 + root_fillet) / cos(alpha) < r_in,
+           str("cross-axis root fillet ", root_fillet,
+               " bridges the stop gap along the cross bisector"));
     // cross-axis-flexure-pivot.scad:126-127.
     assert(arc_half >= alpha + 6,
            str("arc half-width does not cover the beam roots — lower stop_angle or alpha"));
@@ -643,6 +667,12 @@ module _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
     // area when 2·r equals a side (Copilot on #1052) — equality is not a fit.
     assert(2 * tab_r < tab_len && 2 * tab_r < tab_w,
            str("cross-axis tab_r = ", tab_r, " does not fit the tab (", tab_len, " x ", tab_w, ")"));
+    // Arm far-circle inset is min(4, tab_len/2 - 1) (see cross_axis_pivot_2d):
+    // a tab shorter than that leaves inset <= 0 and the fixed harvest arm
+    // cannot meet the tab with a solid neck (CodeRabbit on #1052: tab_len=2).
+    assert(tab_len / 2 - 1 > 0,
+           str("cross-axis tab_len = ", tab_len,
+               " too short for the arm to meet the tab with a solid neck"));
 }
 
 // Convex-corner-rounded rectangle — cross-axis-flexure-pivot.scad:145-146.
@@ -738,17 +768,26 @@ module cross_axis_pivot_2d(t, L, root_fillet, alpha = 45, stop_angle = 40,
                            arc_wall = 6.5, tab_len = 10, tab_w = 22, tab_r = 4) {
     _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
                              tab_len, tab_w, tab_r);
+    // Generator owns its sampling (issue #1047) — cross-axis-flexure-pivot.scad:80.
+    // A caller's $fn must not move the rings, arm, notch fillets or tab offsets
+    // (parity is recorded at 64).
+    $fn = 64;
     r_in     = L / 2;
     r_out    = r_in + arc_wall;
     arc_half = (180 - stop_angle) / 2;
     land     = arc_wall - 0.5;
     tab_cx   = r_out + tab_len / 2;
+    // Harvest site: far circle at tab_cx - 4 (production tab_len = 10 →
+    // inset 4). For a shorter accepted tab, pull the end into the tab so the
+    // r=2 circle still overlaps it with a solid neck; production inset is
+    // unchanged (min(4, 10/2 - 1) = 4).
+    arm_inset = min(4, tab_len / 2 - 1);
 
     module ring_arc() _cross_axis_ring_arc_2d(r_in, r_out, arc_half);
     module arm()
         hull() {
             translate([r_in + 3, 0]) circle(2);
-            translate([tab_cx - 4, 0]) circle(2);
+            translate([tab_cx - arm_inset, 0]) circle(2);
         }
     module frame()
         union() {
@@ -782,6 +821,10 @@ module cross_axis_pivot(t, L, w, root_fillet, alpha = 45, stop_angle = 40,
                         tab_len = 10, tab_w = 22, tab_r = 4) {
     _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
                              tab_len, tab_w, tab_r, w = w);
+    // Pad's rounded2d must share the 2D module's harvest resolution
+    // (cross_axis_pivot_2d pins $fn = 64 for the silhouette; the pad is a
+    // separate extrude that would otherwise inherit the caller's $fn).
+    $fn = 64;
     // Assert BEFORE prediction math — see small_length_pivot.
     assert(E > 0, str("cross-axis modulus E must be positive (got ", E, " MPa)"));
     assert(h_pad >= 0, str("cross-axis h_pad must not be negative (got ", h_pad, ")"));

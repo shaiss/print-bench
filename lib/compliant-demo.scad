@@ -154,6 +154,10 @@ translate([160, 55, 0])
 // accepted span (L = 120, arc_wall = 1.6) used to sever the rigid arcs
 // because r_out+10 left the wedge chord inside the bore. Must render as a
 // single solid (the derived rb = r_out/cos(arc_half/2) keeps the mask clear).
+// Body-count proof (check.sh only fails ERROR/WARNING, never a volume
+// count): tools/printcheck/tests/test_compliant_xafp_wedge.py renders this
+// geometry alone and asserts fusecheck counts exactly 1 body, with the
+// old fixed r_out+10 wedge as its negative control (severed → >1 bodies).
 // ---------------------------------------------------------------------------
 translate([240, 0, 0])
     cross_axis_pivot(0.8, 120, 2.4, 0.6, alpha = 45, stop_angle = 40,
