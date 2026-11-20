@@ -2,11 +2,11 @@
 // All dimensions in millimeters. Use from a design with:
 //   use <compliant.scad>
 //
-// Issue #202, STAGE 1 of 4 (harvest-first order, owner ruling): the bistable
-// arch and the flexure-root fillet — the two primitives four shipped designs
-// already re-derive inline. Pivots (small-length, cross-axis), the LET joint
-// and the stiffness coupon are later stages. The knowledge behind every
-// number here is docs/advanced-techniques.md, Domain 1.
+// Issue #202, STAGE 2 of 4 (harvest-first order, owner ruling; stage 1 was
+// the bistable arch + root fillet — #758). This stage adds the small-length
+// and cross-axis flexure pivots. The LET joint and the stiffness coupon are
+// later stages (#1048, #1049). The knowledge behind every number here is
+// docs/advanced-techniques.md, Domain 1.
 //
 // HARVESTED, NOT INVENTED. Every module below is lifted from a design that
 // already proves it on the gate; the guards are the asserts those designs
@@ -20,6 +20,8 @@
 //                                       czs-slider.scad:251-260)
 //   root_fillet_2d                     designs/snap-cantilever-clip/snap-cantilever-clip.scad:140-149
 //   rooted_2d                          designs/let-folding-panel/let-folding-panel.scad:72-76
+//   small_length_pivot_2d / _pivot     designs/snap-cantilever-clip/snap-cantilever-clip.scad:85-90,134-149
+//   cross_axis_pivot_2d / _pivot       designs/cross-axis-flexure-pivot/cross-axis-flexure-pivot.scad:151-265
 //
 // One-time parity evidence (recorded here because the designs are not
 // switched to this library — scratch fixtures that `use` each design and
@@ -58,6 +60,33 @@
 //                     the bare band, identical to it away from the roots,
 //                     nothing outside the documented root footprint; with
 //                     6 mm clamp posts, printcheck 100/100, 1 body, watertight.
+//
+// Stage-2 parity (OpenSCAD 2021.01 / CGAL, 2026-11-20) — scratch fixtures
+// only, nothing committed beyond this note:
+//   snap-cantilever-clip  free-length finger + root fillet in the library
+//                     local frame (t=1, L=12, f=0.6, $fn=96) — the design's
+//                     square+difference at the strap face, rewritten to y=0
+//                     as the root — vs small_length_pivot_2d(1, 12, 0.6):
+//                     linear_extrude(15) ASCII STL BYTE-IDENTICAL (sha256
+//                     02c141e1…cab252286, 108 facets); placed at
+//                     plate_depth=20 the 2D/CGAL difference against the
+//                     design's absolute-coord finger+fillet is EMPTY both
+//                     ways. Predictions bit-equal (OpenSCAD ==): K, I,
+//                     sigma_doc = E·t·θ/(2L) at the design's tip-load
+//                     θ = 1.5·δ/L. Negative control: lib at L = 11 against
+//                     L = 12 is not byte-identical.
+//   cross-axis-flexure-pivot  pivot_2d() at production (t=0.8, L=28, w=8,
+//                     root_fillet=0.6, alpha=45, stop_angle=40, arc_wall=6.5,
+//                     tab_len=10, tab_w=22, tab_r=4, $fn=64) vs
+//                     cross_axis_pivot_2d(...) at the same numbers: 2D
+//                     symmetric difference EMPTY both ways (1708 facets
+//                     each); STL facet order differs by CSG-tree child
+//                     ordering the way compliant-gripper's mirrored arch
+//                     did, so the proof is the empty difference, not
+//                     byte-identity. Predictions bit-equal: K = 8·E·I/L,
+//                     sigma_weld = 2·E·t·θ/L, sigma_leaf = E·t·θ/(2L).
+//                     Negative control: lib at alpha = 40 against the
+//                     design's alpha = 45 leaves a 776-facet difference.
 //
 // ---------------------------------------------------------------------------
 // THE LOCAL FRAME (the reason this generator exists). An arch is built in its
@@ -413,4 +442,370 @@ module root_fillet_2d(r, t, bite = 0) {
 module rooted_2d(r, t) {
     _root_fillet_guards(r, t);
     offset(r = -r) offset(r = r) children();
+}
+
+// ===========================================================================
+// Stage 2 — small-length flexural pivot (SLFP) and cross-axis flexure pivot
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Predictions — textually identical to the harvest sites' derived lines so a
+// design adopting them gets bit-identical numbers (OpenSCAD ==).
+// ---------------------------------------------------------------------------
+
+// Second moment of area of a rectangular beam section, mm^4.
+// snap-cantilever-clip.scad:85 / cross-axis-flexure-pivot.scad:90.
+function flexure_I(w, t) =
+    assert(w > 0, str("flexure_I: beam width w must be positive (got ", w, ")"))
+    assert(t > 0, str("flexure_I: beam thickness t must be positive (got ", t, ")"))
+    w * pow(t, 3) / 12;
+
+// SLFP stiffness K = E·I/L (N·mm/rad) — snap-cantilever-clip.scad:86;
+// docs/advanced-techniques.md "Governing relations".
+function small_length_pivot_K(t, L, w, E = 2000) =
+    assert(L > 0, str("small_length_pivot_K: free length L must be positive (got ", L, ")"))
+    assert(E > 0, str("small_length_pivot_K: modulus E must be positive (got ", E, " MPa)"))
+    E * flexure_I(w, t) / L;
+
+// Pure-moment root stress σ ≈ E·t·θ/(2L) (MPa) — the doc ideal
+// (snap-cantilever-clip.scad:90's sigma_doc). θ in radians.
+function small_length_pivot_sigma(t, L, theta, E = 2000) =
+    assert(t > 0, str("small_length_pivot_sigma: t must be positive (got ", t, ")"))
+    assert(L > 0, str("small_length_pivot_sigma: L must be positive (got ", L, ")"))
+    assert(theta >= 0, str("small_length_pivot_sigma: theta must not be negative (got ", theta, ")"))
+    assert(E > 0, str("small_length_pivot_sigma: E must be positive (got ", E, " MPa)"))
+    E * t * theta / (2 * L);
+
+// Tip-load root stress = 2× the pure-moment ideal (snap-cantilever-clip.scad:89).
+function small_length_pivot_sigma_tip(t, L, theta, E = 2000) =
+    2 * small_length_pivot_sigma(t, L, theta, E);
+
+// Cross-axis WELDED (pinned-crossing) stiffness K = 8·E·I/L (N·mm/rad) —
+// cross-axis-flexure-pivot.scad:93. Four half-beams of length L/2 in S-bend.
+function cross_axis_pivot_K(t, L, w, E = 2000) =
+    assert(L > 0, str("cross_axis_pivot_K: free span L must be positive (got ", L, ")"))
+    assert(E > 0, str("cross_axis_pivot_K: modulus E must be positive (got ", E, " MPa)"))
+    8 * E * flexure_I(w, t) / L;
+
+// Peak weld stress under the pinned S-bend, σ = 2·E·t·θ/L (MPa) —
+// cross-axis-flexure-pivot.scad:94. θ in radians.
+function cross_axis_pivot_sigma_weld(t, L, theta, E = 2000) =
+    assert(t > 0, str("cross_axis_pivot_sigma_weld: t must be positive (got ", t, ")"))
+    assert(L > 0, str("cross_axis_pivot_sigma_weld: L must be positive (got ", L, ")"))
+    assert(theta >= 0, str("cross_axis_pivot_sigma_weld: theta must not be negative (got ", theta, ")"))
+    assert(E > 0, str("cross_axis_pivot_sigma_weld: E must be positive (got ", E, " MPa)"))
+    2 * E * t * theta / L;
+
+// Unwelded leaf ideal σ = E·t·θ/(2L) — cross-axis-flexure-pivot.scad:95;
+// kept so a reader can see the ~4× gap against the welded model.
+function cross_axis_pivot_sigma_leaf(t, L, theta, E = 2000) =
+    small_length_pivot_sigma(t, L, theta, E);
+
+// ---------------------------------------------------------------------------
+// SLFP — local frame
+// ---------------------------------------------------------------------------
+//
+//       y                      rigid body (caller) occupies y >= 0
+//       ^
+//   ####|##################
+//   ####+-----------------------> x
+//       |  optional root fillet in the +x / −y quadrant
+//  beam |  (finger face at x = 0, thickness toward −x)
+// x∈[-t,0]
+//       |
+//       +  tip at y = −L
+//
+// Free length L along −Y from the root face at y = 0. Place with
+// translate/rotate/mirror — e.g. snap-cantilever-clip's finger at
+// plate_depth is just translate([0, plate_depth]) small_length_pivot_2d(...).
+// ---------------------------------------------------------------------------
+
+module _small_length_pivot_guards(t, L, root_fillet) {
+    // snap-cantilever-clip.scad:99 — two-perimeter floor.
+    assert(t >= 0.8, str("SLFP beam t = ", t, " under the two-perimeter floor (0.8 mm) — the flexure will not print"));
+    assert(L > 0, str("SLFP free length L must be positive (got ", L, ")"));
+    if (!is_undef(root_fillet)) {
+        _root_fillet_guards(root_fillet, t);
+        // Fillet must leave free beam past the root (same spirit as
+        // let-folding-panel.scad:138 / arch root_fillet < span/2).
+        assert(root_fillet < L,
+               str("SLFP root fillet ", root_fillet, " leaves no free beam (L ", L, ")"));
+    }
+}
+
+// 2D cantilever SLFP in the local frame above. root_fillet = undef → bare
+// root (sharp); a number ≥ 0.5·t places one weld-safe corner piece on the
+// channel side. Harvest site: snap-cantilever-clip.scad:134-149.
+//
+// The fillet is the design's difference() VERBATIM (square at [0,-f]×[f,f]
+// minus disc at (f,-f)), not `mirror([0,1]) root_fillet_2d(f,t)`: those two
+// are the same solid (stage-1 empty-symdiff proof) but a mirror re-samples
+// the arc and the STL is no longer byte-identical to the harvest site. The
+// guards still go through _root_fillet_guards / root_fillet_2d's rule.
+module small_length_pivot_2d(t, L, root_fillet = undef) {
+    _small_length_pivot_guards(t, L, root_fillet);
+    translate([-t, -L]) square([t, L]);
+    if (!is_undef(root_fillet)) {
+        f = root_fillet;
+        difference() {
+            translate([0, -f]) square([f, f]);
+            translate([f, -f]) circle(f);
+        }
+    }
+}
+
+// Extruded SLFP. Echoes predicted K and, when theta is given (radians), the
+// pure-moment root stress σ ≈ E·t·θ/(2L). E in MPa (PETG ≈ 2000 is the
+// harvest-site datum). tip_load = true echoes the tip-load bound (2×) too —
+// snap-cantilever-clip.scad:88-90's shape.
+module small_length_pivot(t, L, w, root_fillet = undef, E = 2000,
+                          theta = undef, tip_load = false) {
+    _small_length_pivot_guards(t, L, root_fillet);
+    // Assert BEFORE any prediction call: OpenSCAD evaluates assignments in
+    // dependency order inside a module, so `I = flexure_I(w,t)` would fire
+    // flexure_I's assert first and rename this refusal.
+    assert(w > 0, str("SLFP width w must be positive (got ", w, ") — it would extrude nothing"));
+    assert(E > 0, str("SLFP modulus E must be positive (got ", E, " MPa)"));
+    if (!is_undef(theta))
+        assert(theta >= 0, str("SLFP theta must not be negative (got ", theta, ")"));
+    // Inline (same expressions as flexure_I / small_length_pivot_K /
+    // small_length_pivot_sigma) so the echo cannot outrun the asserts above.
+    I = w * pow(t, 3) / 12;
+    K = E * I / L;
+    echo(str("[compliant] small_length_pivot: predicted K = ", K,
+             " N*mm/rad (I = ", I, " mm^4, E = ", E, " MPa, L = ", L,
+             ", t = ", t, ", w = ", w, ") — a prediction for the coupon to verify"));
+    if (!is_undef(theta)) {
+        sig = E * t * theta / (2 * L);
+        if (tip_load)
+            echo(str("[compliant] small_length_pivot: root stress at theta = ",
+                     theta * 180 / PI, " deg: ", 2 * sig, " MPa tip-load bound; ",
+                     sig, " MPa doc pure-moment ideal"));
+        else
+            echo(str("[compliant] small_length_pivot: root stress at theta = ",
+                     theta * 180 / PI, " deg: sigma ~= ", sig,
+                     " MPa (E*t*theta/(2L) pure-moment ideal)"));
+    }
+    linear_extrude(w) small_length_pivot_2d(t, L, root_fillet);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-axis flexure pivot — local frame
+// ---------------------------------------------------------------------------
+//
+// Virtual center at the origin. Two strips at ±alpha span free length L
+// between the rigid arcs' inner faces (r_in = L/2); both strips are the SAME
+// centered rectangle rotated, so the two blades cannot drift apart. The arcs'
+// end faces are the hard stops at ±stop_angle. Harvest site:
+// designs/cross-axis-flexure-pivot/ (beams_2d / root_fillets / weld_fillets /
+// ring_arc / pivot_2d).
+// ---------------------------------------------------------------------------
+
+// w = undef skips the three-perimeter check (2D path has no extrusion
+// height); the 3D module always passes a real w.
+module _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                                tab_len, tab_w, tab_r, w = undef) {
+    // cross-axis-flexure-pivot.scad:118 — extrusion floor (coupon may sit
+    // under the 0.8 production floor; the soft warn is the echo below).
+    assert(t >= 0.5, str("cross-axis beam t = ", t, " under 0.5 mm will not extrude at all"));
+    assert(L > 0, str("cross-axis free span L must be positive (got ", L, ")"));
+    // cross-axis-flexure-pivot.scad:119-120.
+    _root_fillet_guards(root_fillet, t);
+    // cross-axis-flexure-pivot.scad:121 — three perimeters (3D only).
+    if (!is_undef(w))
+        assert(w >= 2.4, str("cross-axis beam width w = ", w,
+                             " under 3 perimeters (2.4 mm) — one bad road kills the beam"));
+    // cross-axis-flexure-pivot.scad:122.
+    assert(alpha > 10 && alpha < 80,
+           str("crossing half-angle alpha = ", alpha, " outside 10-80 deg"));
+    // cross-axis-flexure-pivot.scad:123.
+    assert(stop_angle > 5 && stop_angle < 80,
+           str("hard-stop angle = ", stop_angle, " outside 5-80 deg"));
+    // cross-axis-flexure-pivot.scad:124.
+    assert(arc_wall >= 1.6, str("ring wall arc_wall = ", arc_wall,
+                                " under 1.6 mm — the arcs must be rigid, not a second flexure"));
+    r_in = L / 2;
+    r_out = r_in + arc_wall;
+    arc_half = (180 - stop_angle) / 2;
+    land = arc_wall - 0.5;
+    // cross-axis-flexure-pivot.scad:126-127.
+    assert(arc_half >= alpha + 6,
+           str("arc half-width does not cover the beam roots — lower stop_angle or alpha"));
+    // cross-axis-flexure-pivot.scad:129-130.
+    assert(pow(r_in + land, 2) + pow(t / 2, 2) < pow(r_out - 0.2, 2),
+           "beam end pokes through the ring's outer face");
+    // Tab furniture sign checks (API holes the inline copy never had as
+    // parameters — a zero tab still builds, a negative radius breaks offset).
+    assert(tab_len > 0, str("cross-axis tab_len must be positive (got ", tab_len, ")"));
+    assert(tab_w > 0, str("cross-axis tab_w must be positive (got ", tab_w, ")"));
+    assert(tab_r >= 0, str("cross-axis tab_r must not be negative (got ", tab_r, ")"));
+    assert(2 * tab_r <= tab_len && 2 * tab_r <= tab_w,
+           str("cross-axis tab_r = ", tab_r, " does not fit the tab (", tab_len, " x ", tab_w, ")"));
+}
+
+// Convex-corner-rounded rectangle — cross-axis-flexure-pivot.scad:145-146.
+module _cross_axis_rounded2d(len, wid, r)
+    offset(r = r) offset(delta = -r) square([len, wid], center = true);
+
+// Annular band r_in..r_out over [-arc_half, +arc_half] —
+// cross-axis-flexure-pivot.scad:151-160, point for point.
+module _cross_axis_ring_arc_2d(r_in, r_out, arc_half) {
+    rb = r_out + 10;
+    intersection() {
+        difference() { circle(r_out); circle(r_in); }
+        polygon([[0, 0],
+                 [rb * cos(-arc_half), rb * sin(-arc_half)],
+                 [rb, 0],
+                 [rb * cos(arc_half), rb * sin(arc_half)]]);
+    }
+}
+
+// Canonical cross-axis root-fillet orientation: rigid at x >= 0, beam at
+// y <= 0, piece in x∈[-f,0] × y∈[0,f] — cross-axis-flexure-pivot.scad:172-176
+// VERBATIM (same solid as `mirror([1,0]) root_fillet_2d(f,t)`, but the
+// harvest site's difference() keeps the arc tessellation byte-identical).
+// Guards already ran in _cross_axis_pivot_guards via _root_fillet_guards.
+module _cross_axis_root_fillet_2d(f, t)
+    difference() {
+        translate([-f, 0]) square([f, f]);
+        translate([-f, f]) circle(f);
+    }
+
+// Four corners of one strip — cross-axis-flexure-pivot.scad:184-190.
+// Nested single-axis mirrors (NOT mirror([1,1])): a combined mirror is a
+// reflection about y = -x, which the canonical piece is symmetric under, so
+// the double-flip corner silently got no fillet (measured: 6/8 corners).
+module _cross_axis_root_fillets_at_2d(span, tt, a, root_fillet) {
+    f = max(root_fillet, 0.5 * tt);
+    for (e = [1, -1], s = [1, -1])
+        rotate([0, 0, a])
+            translate([e * span, s * tt / 2])
+                mirror([e < 0 ? 1 : 0, 0])
+                    mirror([0, s < 0 ? 1 : 0])
+                        _cross_axis_root_fillet_2d(f, tt);
+}
+
+// One fillet filling a concave notch of air-angle `psi` (deg) —
+// cross-axis-flexure-pivot.scad:201-212. Local frame: corner at the origin,
+// notch bisector along +x, walls at ±psi/2 from +x.
+module _cross_axis_notch_fillet_2d(f, psi) {
+    assert(f > 0, str("notch fillet must be positive (got ", f, ")"));
+    assert(psi > 0 && psi < 180,
+           str("notch air-angle psi = ", psi, " must be in (0, 180) deg"));
+    hw = psi / 2;
+    d  = f / sin(hw);
+    tl = f / tan(hw);
+    difference() {
+        polygon([[0, 0],
+                 [tl * cos(hw), -tl * sin(hw)],
+                 [tl * cos(hw),  tl * sin(hw)]]);
+        translate([d, 0]) circle(f);
+    }
+}
+
+// Both crossed blades from ONE centered strip rotated ±alpha — the
+// male/female-cannot-drift rule (cross-axis-flexure-pivot.scad:163-165).
+module _cross_axis_beams_2d(r_in, land, t, alpha)
+    for (a = [alpha, -alpha])
+        rotate([0, 0, a]) square([2 * (r_in + land), t], center = true);
+
+// Four re-entrant weld corners — cross-axis-flexure-pivot.scad:218-230.
+module _cross_axis_weld_fillets_2d(t, alpha, root_fillet) {
+    f = max(root_fillet, 0.5 * t);
+    r_x = (t / 2) / sin(alpha);
+    r_y = (t / 2) / cos(alpha);
+    for (a = [0, 180])
+        rotate([0, 0, a])
+            translate([r_x, 0])
+                _cross_axis_notch_fillet_2d(f, 2 * alpha);
+    for (a = [90, 270])
+        rotate([0, 0, a])
+            translate([r_y, 0])
+                _cross_axis_notch_fillet_2d(f, 180 - 2 * alpha);
+}
+
+// 2D cross-axis pivot in the virtual-center frame. Both blades from one
+// profile. Tab furniture defaults match the harvest site's production
+// handle so a parity fixture against pivot_2d() can be byte-identical.
+module cross_axis_pivot_2d(t, L, root_fillet, alpha = 45, stop_angle = 40,
+                           arc_wall = 6.5, tab_len = 10, tab_w = 22, tab_r = 4) {
+    _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                             tab_len, tab_w, tab_r);
+    r_in     = L / 2;
+    r_out    = r_in + arc_wall;
+    arc_half = (180 - stop_angle) / 2;
+    land     = arc_wall - 0.5;
+    tab_cx   = r_out + tab_len / 2;
+
+    module ring_arc() _cross_axis_ring_arc_2d(r_in, r_out, arc_half);
+    module arm()
+        hull() {
+            translate([r_in + 3, 0]) circle(2);
+            translate([tab_cx - 4, 0]) circle(2);
+        }
+    module frame()
+        union() {
+            rotate([0, 0, 180]) ring_arc();
+            mirror([1, 0]) arm();
+            translate([-tab_cx, 0]) _cross_axis_rounded2d(tab_len, tab_w, tab_r);
+        }
+    module stage()
+        union() {
+            ring_arc();
+            arm();
+            translate([tab_cx, 0]) _cross_axis_rounded2d(tab_len, tab_w, tab_r);
+        }
+
+    union() {
+        frame();
+        _cross_axis_beams_2d(r_in, land, t, alpha);
+        for (a = [alpha, -alpha])
+            _cross_axis_root_fillets_at_2d(r_in, t, a, root_fillet);
+        _cross_axis_weld_fillets_2d(t, alpha, root_fillet);
+        stage();
+    }
+}
+
+// Extruded cross-axis pivot. Echoes predicted K (welded model) and the weld /
+// leaf stresses at ±stop_angle. Optional h_pad raises a finger pad on the
+// stage tab (cross-axis-flexure-pivot.scad:365). Soft-warns when t < 0.8
+// (production floor) while still accepting down to the 0.5 extrusion floor.
+module cross_axis_pivot(t, L, w, root_fillet, alpha = 45, stop_angle = 40,
+                        arc_wall = 6.5, E = 2000, h_pad = 0,
+                        tab_len = 10, tab_w = 22, tab_r = 4) {
+    _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                             tab_len, tab_w, tab_r, w = w);
+    // Assert BEFORE prediction math — see small_length_pivot.
+    assert(E > 0, str("cross-axis modulus E must be positive (got ", E, " MPa)"));
+    assert(h_pad >= 0, str("cross-axis h_pad must not be negative (got ", h_pad, ")"));
+    // Prefix is "soft-warn", not "WARNING": check.sh's demo CGAL pass fails
+    // closed on any stderr line matching WARNING (scripts/check.sh:156), and
+    // this is an advisory — the hard floor is still t >= 0.5 above.
+    if (t < 0.8)
+        echo(str("[compliant] soft-warn: cross_axis_pivot t = ", t,
+                 " is under the 0.8 mm production floor (2 extrusion widths) — ",
+                 "fine for a deliberate coupon row, not for the pivot"));
+    // Inline (same expressions as flexure_I / cross_axis_pivot_K /
+    // cross_axis_pivot_sigma_*), so echo cannot outrun the asserts above.
+    I = w * pow(t, 3) / 12;
+    K = 8 * E * I / L;
+    theta = stop_angle * PI / 180;
+    sig_w = 2 * E * t * theta / L;
+    sig_l = E * t * theta / (2 * L);
+    r_out = L / 2 + arc_wall;
+    tab_cx = r_out + tab_len / 2;
+    echo(str("[compliant] cross_axis_pivot: predicted K ~= ", K,
+             " N*mm/rad at +/-", stop_angle, " deg (welded / pinned-crossing: ",
+             "8*E*I/L, I = ", I, " mm^4, E = ", E, " MPa) — a prediction for ",
+             "the coupon to verify"));
+    echo(str("[compliant] cross_axis_pivot: weld stress at +/-", stop_angle,
+             " deg: ", sig_w, " MPa (pinned S-bend) — leaf ideal would be ",
+             sig_l, " MPa"));
+    linear_extrude(w)
+        cross_axis_pivot_2d(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                            tab_len, tab_w, tab_r);
+    if (h_pad > 0)
+        translate([0, 0, w])
+            linear_extrude(h_pad)
+                translate([tab_cx, 0]) _cross_axis_rounded2d(tab_len, tab_w, tab_r);
 }

@@ -113,3 +113,45 @@ echo(str("[compliant-demo] solve: rise = ", rise1, " mm, span = ", span1,
          bistable_arch_y(span1 / 2, span1, rise1), " mm"));
 echo(str("[compliant-demo] boundary arch: rise/t = ", 2.3 / 1, ", span/rise = ", 23 / 2.3,
          " — both exactly on their bars, accepted"));
+
+// ---------------------------------------------------------------------------
+// Station 7: small_length_pivot — snap-cantilever-clip's production SLFP
+// (t = 1.0, L = 12, w = 15, root_fillet = 0.6) hanging from a strap post,
+// placed in the library's local frame. Echoes K and tip-load root stress at
+// the design's θ = 1.5·δ/L with δ = 1.2. Beside it, the bare (unfilleted)
+// accepting boundary at t = 0.8.
+// ---------------------------------------------------------------------------
+sl_t = 1.0; sl_L = 12; sl_w = 15; sl_f = 0.6;
+sl_delta = 1.2;
+sl_theta = 1.5 * sl_delta / sl_L;
+translate([0, 70, 0]) {
+    // strap the beam hangs from (y >= 0 in the local frame)
+    translate([-6, 0, 0]) cube([12, 4, sl_w]);
+    small_length_pivot(sl_t, sl_L, sl_w, root_fillet = sl_f, E = 2000,
+                       theta = sl_theta, tip_load = true);
+}
+translate([20, 70, 0]) {
+    translate([-4, 0, 0]) cube([8, 3, 4]);
+    small_length_pivot(0.8, 10, 4, root_fillet = 0.4);
+}
+
+// ---------------------------------------------------------------------------
+// Station 8: cross_axis_pivot — production numbers from
+// cross-axis-flexure-pivot (t = 0.8, L = 28, w = 8, root_fillet = 0.6,
+// alpha = 45, stop_angle = 40, arc_wall = 6.5). Both blades from one profile;
+// echoes welded K and weld/leaf stresses. Beside it, the accepting boundary
+// at the extrusion floor t = 0.5 with w = 2.4 (3 perimeters) — soft-warns.
+// ---------------------------------------------------------------------------
+translate([160, 0, 0])
+    cross_axis_pivot(0.8, 28, 8, 0.6, alpha = 45, stop_angle = 40,
+                     arc_wall = 6.5, E = 2000, h_pad = 4);
+translate([160, 55, 0])
+    cross_axis_pivot(0.5, 28, 2.4, 0.3, alpha = 45, stop_angle = 40,
+                     arc_wall = 6.5, E = 2000, h_pad = 0);
+
+echo(str("[compliant-demo] SLFP: K = ", small_length_pivot_K(sl_t, sl_L, sl_w),
+         " N*mm/rad, sigma_doc = ", small_length_pivot_sigma(sl_t, sl_L, sl_theta),
+         " MPa at theta = ", sl_theta * 180 / PI, " deg"));
+echo(str("[compliant-demo] cross-axis: K = ", cross_axis_pivot_K(0.8, 28, 8),
+         " N*mm/rad, sigma_weld = ",
+         cross_axis_pivot_sigma_weld(0.8, 28, 40 * PI / 180), " MPa"));
