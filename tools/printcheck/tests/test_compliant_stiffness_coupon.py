@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from printcheck.analyzer import load_mesh
 from printcheck.fusecheck import count_stl
 
 REPO = Path(__file__).resolve().parents[3]
@@ -108,7 +109,26 @@ def test_production_twin_is_one_body(mode, tmp_path):
     stl = _render_body(tmp_path / f"{mode}.stl", mode)
     bodies, dropped = count_stl(str(stl), [])
     assert dropped == 0
+    mesh = load_mesh(str(stl))
+    assert mesh.is_watertight, f"{mode} production twin is not watertight"
     assert bodies == 1, (
         f"{mode} production twin split into {bodies} bodies — "
         "label glyphs must be debossed into the grip, not free solids"
+    )
+
+
+@needs_openscad
+def test_xafp_label_removes_material(tmp_path):
+    """Cross-axis label cutter sits in the +X tab and actually debosses it.
+
+    Without this, a cutter translated onto the empty Y axis still yields one
+    watertight body — the body-count test cannot see a missed label.
+    """
+    labeled = _render_body(tmp_path / "xafp_labeled.stl", "xafp")
+    unlabeled = _render_body(tmp_path / "xafp_nolabel.stl", "xafp_nolabel")
+    v_labeled = float(load_mesh(str(labeled)).volume)
+    v_unlabeled = float(load_mesh(str(unlabeled)).volume)
+    assert v_labeled < v_unlabeled, (
+        f"XAFP label did not remove material: labeled={v_labeled} "
+        f"unlabeled={v_unlabeled}"
     )

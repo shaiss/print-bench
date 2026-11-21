@@ -6,7 +6,9 @@
 //   designs/let-folding-panel/let-folding-panel-coupon.scad
 // — t-ladder (t is the t³-leverage knob) + identical production-t twins,
 // no overrides of harvest-site production values on the twins. Open this
-// file (or its demo) to print; override the ladder only to extend it, e.g.:
+// file to print (top-level plate call below; `use <>` consumers ignore it),
+// or open lib/compliant-coupon-demo.scad for the plate plus golden asserts.
+// Override the ladder only to extend it, e.g.:
 //   openscad -D 'coupon_ts_slfp=[0.9, 1.1]' lib/compliant-coupon.scad
 //
 use <compliant.scad>
@@ -25,9 +27,10 @@ use <compliant.scad>
 //      force × moment arm). Compare measured K to the echo. For the bistable
 //      arch, measure snap force f_s and centre travel u_tr instead.
 //   2. Cycles-to-failure at θ_max — swing to the specimen's design stop
-//      (arch: through snap and back; SLFP tip-load θ; cross-axis ±stop_angle;
-//      LET 90° fold), return, repeat. Whitening at a root is the warning; a
-//      crack is the verdict. Record the cycle count next to the label.
+//      (arch: through snap and back; SLFP tip-load δ=1.2 mm → θ=0.15 rad,
+//      matching lib/compliant-demo.scad; cross-axis ±stop_angle; LET 90°
+//      fold), return, repeat. Whitening at a root is the warning; a crack
+//      is the verdict. Record the cycle count next to the label.
 //
 // Material ranking (docs/advanced-techniques.md Domain 1 — a HEURISTIC, not
 // a universal law; real fatigue life shifts with grade, orientation, stress
@@ -143,20 +146,32 @@ module coupon_slfp_specimen(tt, label, pos, production = false) {
 module coupon_xafp_specimen(tt, label, pos, production = false) {
     // Ladder cells stay above every cross-axis guard floor (w ≥ 2.4,
     // tab_len ≥ 8, arc_wall ≥ 1.6); only L shrinks for plate density.
-    // Twins keep the harvest-site numbers exactly.
+    // Twins keep the harvest-site numbers exactly — including xa_f_prod.
     L = production ? xa_L_prod : 20;
     w = production ? xa_w_prod : 2.4;
-    f = max(0.5 * tt, 0.3);
+    f = production ? xa_f_prod : max(0.5 * tt, 0.3);
     aw = production ? xa_arc : 1.6;
     tlen = production ? 10 : 8;
     tw = production ? 22 : 12;
     tr = production ? 4 : 2;
-    translate(pos) difference() {
-        cross_axis_pivot(tt, L, w, f, alpha = xa_alpha, stop_angle = xa_stop,
-                         arc_wall = aw, E = 2000, h_pad = production ? 4 : 0,
-                         tab_len = tlen, tab_w = tw, tab_r = tr);
-        translate([0, L / 2 + tlen / 2, w])
-            _coupon_label_cut(label, size = min(2.2, 8 / max(1, len(label))));
+    hpad = production ? 4 : 0;
+    // Tabs sit on ±X at tab_cx = L/2 + arc_wall + tab_len/2; the raised
+    // production pad is on the +X stage tab (z ∈ [w, w+hpad]).
+    tab_cx = L / 2 + aw + tlen / 2;
+    translate(pos) {
+        if (label == "") {
+            // Empty label: no cutter — used by the volume-delta test that
+            // proves a non-empty label actually removes material.
+            cross_axis_pivot(tt, L, w, f, alpha = xa_alpha, stop_angle = xa_stop,
+                             arc_wall = aw, E = 2000, h_pad = hpad,
+                             tab_len = tlen, tab_w = tw, tab_r = tr);
+        } else difference() {
+            cross_axis_pivot(tt, L, w, f, alpha = xa_alpha, stop_angle = xa_stop,
+                             arc_wall = aw, E = 2000, h_pad = hpad,
+                             tab_len = tlen, tab_w = tw, tab_r = tr);
+            translate([tab_cx, 0, w + hpad])
+                _coupon_label_cut(label, size = min(2.2, 8 / max(1, len(label))));
+        }
     }
 }
 
@@ -264,3 +279,7 @@ module compliant_coupon_plate() {
     coupon_xafp_strip([0, 140, 0]);
     coupon_let_strip([0, 280, 0]);
 }
+
+// Print entrypoint — opening this file yields the plate. `use <>` ignores
+// top-level calls, so consumers (the demo, fixtures) stay module-only.
+compliant_coupon_plate();

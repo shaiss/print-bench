@@ -8,17 +8,31 @@ use <compliant-coupon.scad>
 
 // ---------------------------------------------------------------------------
 // Golden harvest-site predictions (OpenSCAD 2021.01 echoes, 2026-11-21).
+// Independently recorded span/rise (lib/compliant.scad parity header:
+// production span 82.0289, rise 2.0202) — NOT solved from the inverse, so a
+// drifted _ARCH_FS_CONST / _ARCH_TRAVEL_CONST fails the forward asserts
+// instead of rewriting the inputs. Inverse round-trips are additional checks.
 // If a constant or formula in compliant.scad moves these, the assert fires
 // and check.sh goes red — that is the point.
 // ---------------------------------------------------------------------------
-arch_rise_g = bistable_arch_rise_for(4);
-arch_span_g = bistable_arch_span_for(3, arch_rise_g, 0.82, 6);
+arch_rise_g = 2.020202020202;   // 4 / 1.98 — recorded production rise
+arch_span_g = 82.0288876896;    // recorded production span at f_s=3, t=0.82, w=6
+
 assert(abs(bistable_arch_fs(arch_span_g, arch_rise_g, 0.82, 6) - 3) < 1e-6,
        str("arch f_s golden drifted: got ",
            bistable_arch_fs(arch_span_g, arch_rise_g, 0.82, 6), " want 3"));
 assert(abs(bistable_arch_travel(arch_rise_g) - 4) < 1e-6,
        str("arch u_tr golden drifted: got ",
            bistable_arch_travel(arch_rise_g), " want 4"));
+
+// Inverse round trips (additional — not the prediction pin above).
+assert(abs(bistable_arch_rise_for(4) - arch_rise_g) < 1e-9,
+       str("arch rise_for round-trip drifted: got ",
+           bistable_arch_rise_for(4), " want ", arch_rise_g));
+assert(abs(bistable_arch_span_for(3, arch_rise_g, 0.82, 6) - arch_span_g) < 1e-6,
+       str("arch span_for round-trip drifted: got ",
+           bistable_arch_span_for(3, arch_rise_g, 0.82, 6),
+           " want ", arch_span_g));
 
 assert(abs(small_length_pivot_K(1.0, 12, 15) - 208.333333333) < 1e-3,
        str("SLFP K golden drifted: got ", small_length_pivot_K(1.0, 12, 15),
