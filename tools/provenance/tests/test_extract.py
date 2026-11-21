@@ -314,6 +314,36 @@ def test_brief_after_settle_and_delivery(standins):
     assert build()["design_name"] == "wall-mounted"
 
 
+def test_brief_burn_cooldown(standins):
+    """routine-lock-cleanup's picker cooldown (#924) is one brief.cooldown event (its design_name always
+    null: the comment names none) — after
+    its dead-run notice, or alone when the run held no lock — and its marker is not counted unknown."""
+    bot = {"login": "github-actions[bot]", "type": "Bot"}
+    cooldown = (digest.COOLDOWN_LINE + "\n\n<!-- burn-cooldown:v1 -->\n\n- routine: backlog-burn\n"
+                "- run: https://github.com/shaiss/print-bench/actions/runs/1\n")
+    notice = digest.DEATH_PREFIX + " (backlog-burn) — no PR, no decline\n\n<!-- design-run-ship-lock:v1 -->\n"
+
+    def comment(cid, body, at):
+        return {"app": None, "body": digest.body_digest(body), "created_at": at, "id": cid, "updated_at": at,
+                "user": bot}
+
+    def build(*comments):
+        raw = raw_brief(592)
+        raw["comments"] = list(comments)
+        return extract.extract_brief(raw, fixture_ctx())
+
+    rec = build(comment(1, notice, "2026-10-25T06:39:00Z"), comment(2, cooldown, "2026-10-25T06:39:01Z"))
+    assert [e["kind"] for e in rec["events"] if e["kind"] in ("brief.withdrawn", "brief.cooldown")] == [
+        "brief.withdrawn", "brief.cooldown"]
+    (cool,) = events_of(rec, "brief.cooldown")
+    assert (cool["fields"], cool["trust"], cool["signals"]["login"], cool["issue"]) == (
+        {"design_name": None}, "login", "github-actions[bot]", 592)
+    assert events_of(rec, "brief.withdrawn")[0]["fields"]["death"] is True
+    alone = build(comment(3, cooldown, "2026-10-25T07:39:00Z"))
+    assert [e["id"] for e in events_of(alone, "brief.cooldown")] == ["issuecomment:3"]
+    assert contract.validate("record@1:brief", alone, DELTA_CONTRACT) == []
+
+
 def test_release_record(standins):
     """The release names the LONGEST design prefixing each asset; one release event on its publication day."""
     rec = release_record()

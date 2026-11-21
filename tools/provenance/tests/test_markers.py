@@ -144,6 +144,12 @@ def test_unknown_family_counted_only_for_our_identities():
     assert markers.unknown_families("github-actions[bot]", OWNER_LOGIN, [settle]) == []
     assert markers.unknown_families("github-actions[bot]", OWNER_LOGIN, ["<!-- design-run-ship-lock:v1x -->"]) == [
         "design-run-ship-lock:v1x"]
+    # the picker cooldown's marker (#924), pinned to scripts/routine-lock-cleanup.sh's literal
+    cleanup = (REPO / "scripts" / "routine-lock-cleanup.sh").read_text(encoding="utf-8")
+    cooldown = re.search(r"^COOLDOWN_HTML_MARKER='([^']*)'$", cleanup, re.M).group(1)
+    assert markers.unknown_families("github-actions[bot]", OWNER_LOGIN, [cooldown]) == []
+    assert markers.unknown_families("github-actions[bot]", OWNER_LOGIN, ["<!-- burn-cooldown -->"]) == [
+        "burn-cooldown"]
     # over the committed fixtures: CodeRabbit's and qodo's markers are never counted, ours are
     counts = collections.Counter()
     for n in (316, 343, 371, 397, 634, 636):
