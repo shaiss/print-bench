@@ -212,3 +212,17 @@ echo(str("[compliant-demo] LET J swap-invariant: J(w,t) = ",
          let_joint_J(let_w, let_t), ", J(t,w) = ",
          let_joint_J(let_t, let_w),
          " — equal = ", let_joint_J(let_w, let_t) == let_joint_J(let_t, let_w)));
+
+// ---------------------------------------------------------------------------
+// Station 11: stiffness coupon lives in lib/compliant-coupon.scad and is
+// CGAL-rendered by lib/compliant-coupon-demo.scad (issue #1049). The demo
+// here only records that the goldens the coupon protocol compares against
+// still match the harvest-site echoes — a formula drift fails check.sh via
+// the coupon-demo asserts and the printcheck golden suite.
+// ---------------------------------------------------------------------------
+echo(str("[compliant-demo] stiffness-coupon goldens: arch f_s=",
+         bistable_arch_fs(span1, rise1, t1, w1),
+         " SLFP K=", small_length_pivot_K(sl_t, sl_L, sl_w),
+         " XAFP K=", cross_axis_pivot_K(0.8, 28, 8),
+         " LET K=", let_joint_K(let_ns, let_np, let_w, let_t, let_L),
+         " — see lib/compliant-coupon.scad for the printable plate"));
