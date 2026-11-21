@@ -1,7 +1,8 @@
 // tape-strip-rack — a blade-free multi-strip tape station: two rolls on a
-// drop-in spindle, a row of thin fins, and a hold-down gate that lays both
-// tapes onto every fin top in one pull. Snip mid-gap with scissors and every
-// strip is left stuck by its middle to one fin, both ends free to grab.
+// drop-in spindle, a hold-down gate both tapes pass under, and a row of thin
+// fins. Pull both tapes along the rack, lower them, press them onto the fin
+// tops and snip mid-gap with scissors: every strip is left stuck by its
+// middle to one fin, both ends free to grab.
 // Requirements and decisions: see NOTES.md next to this file.
 // All dimensions in millimeters.
 //
@@ -13,23 +14,25 @@
 /* [Part] */
 // What to render: the assembled preview, one of the four printable parts,
 // the print-this-first joint coupon, a boolean fit proof (ci.fitchecks —
-// never printed), or the cutaway section.
-part = "assembly"; // [assembly, cradle, spindle, rack, end-cap, joint-coupon, joint-fit, joint-fit-ctrl, spindle-fit, spindle-fit-ctrl, roll-fit, roll-fit-ctrl, cutaway]
+// never printed), or a preview-only pose.
+part = "assembly"; // [assembly, cradle, spindle, rack, end-cap, joint-coupon, joint-fit, joint-fit-ctrl, joint-pull, joint-lift, joint-drop, spindle-fit, spindle-fit-ctrl, roll-fit, roll-fit-ctrl, nest-fit, nest-fit-ctrl, nested, cutaway]
 
 /* [Tape — what it must hold] */
-// Tape width (mm). 19 = 3/4 in desk tape. The lane formula takes 12 to 25.
+// Tape width (mm). 19 = 3/4 in desk tape. The lane formula takes 12 to 25;
+// a narrower tape wants its own render, not a 19 mm print.
 tape_w = 19;
 // Inner diameter of the roll's core (mm). 25.4 = the common 1 in core.
 // Caliper your own roll before printing the spindle.
 core_id = 25.4;
 // Largest roll outer diameter the cradle clears (mm).
 roll_od_max = 62;
-// Rolls side by side (count). Each gets its own lane.
+// Rolls side by side (count). Each gets its own lane. One lane needs a
+// narrower joint: -D joint_neck=6 -D joint_tip=13.
 lanes = 2;
 
 /* [Strips] */
-// Strip length = fin pitch (mm). 40 is about 1.5 in; 50 gives 2 in strips
-// (set fins_per_rack = 4 to keep a segment on a 220 mm bed).
+// Strip length = fin pitch (mm), 36 to 60. 40 is about 1.5 in; 50 gives 2 in
+// strips (set fins_per_rack = 4 to keep a segment on a 220 mm bed).
 strip_len = 40;
 // Fins on one rack segment (count). 5 x 40 mm fits a 220 mm bed.
 fins_per_rack = 5;
@@ -72,12 +75,18 @@ joint_tip = 24;
 // Dovetail key: how far it projects from the end face (mm).
 joint_depth = 7;
 // Draft of the joint (degrees from vertical). The key is wider at the bed
-// than at the top, so a socket part can only be lowered onto it — and
-// lifting the key part carries the socket part with it.
-joint_draft = 10;
+// than at the top, so a socket part can only be lowered onto it, and a
+// straight lift of the key part catches the socket part. A part hanging off
+// a lifted key is then held by friction on this taper — shallower holds
+// better, steeper catches sooner.
+joint_draft = 8;
 // Clearance between key and socket, each face (mm). THE tuned fit: print
 // the joint coupon and adjust in 0.05 steps (see NOTES.md).
 joint_clear = 0.2;
+// First-layer relief on the joint (mm): the key is drawn in and the socket
+// flared by this much over the bottom half millimetre, so bed squish is not
+// the tight spot. Raise it if the joint binds only for the last millimetre.
+joint_ef = 0.4;
 // Gap between the end faces of two joined parts (mm).
 joint_gap = 0.3;
 
@@ -91,19 +100,25 @@ roll_floor_clear = 3;
 hub_clear = 0.8;
 // Diametral clearance between the spindle ends and their saddle pockets (mm).
 saddle_clear = 0.6;
-// Lean of the saddle slots, back from vertical (degrees). The tape always
-// pulls the spindle forward and down, into the seat.
+// Lean of the saddle slots, back from vertical (degrees). The tape pulls
+// the spindle forward and down, into the seat.
 saddle_lean = 25;
 // Depth of the blind saddle pockets in each wall (mm). The skin left
 // outside stops the spindle sliding out sideways.
 saddle_pocket = 2.8;
 // How far above the tape plane the hold-down gate sits (mm). The tapes
-// pass under it, so a level pull clears every fin and the tape only touches
-// down when you lower it — and no pull can lift the spindle.
+// pass under it, so a level pull clears every fin and the sticky side only
+// touches down when the tape is lowered and pressed.
 gate_rise = 3;
-// Clear distance between the largest roll and the gate (mm) — finger room
-// for threading.
-gate_roll_clear = 8;
+// Clear distance between the largest roll and the gate (mm): the slot a
+// finger reaches into to thread a tape under the gate.
+gate_roll_clear = 20;
+// Length of the palm pad behind the rolls (mm): where the steadying hand
+// presses while the other pulls. 0 removes it.
+heel_l = 30;
+// Radius of the outer corners at the two free ends — the back of the palm
+// pad and the end of the end cap (mm). Rounded corners lift off the bed less.
+corner_r = 4;
 
 /* [End cap] */
 // Length of the tail ledge along the tape (mm).
@@ -120,24 +135,26 @@ preview_roll_od = 50;
 explode = 0;
 
 /* [Quality] */
-// Curve resolution. Only the spindle and the saddle slots are round, so the
-// production value costs nothing: 96.
+// Curve resolution. Only the spindle, the saddle slots and four corners are
+// round, so the production value costs nothing: 96.
 $fn = 96;
 
+/* [Hidden] */
 // ---------------------------------------------------------------------------
 // Derived
 // ---------------------------------------------------------------------------
 eps = 0.01;
-ov = 0.4;                       // union overlap: nothing meets face-to-face
+ov = 0.4;                       // union overlap: pieces overlap by volume, never just touch
 bed_ch = 0.5;                   // bed-edge chamfer, horizontal leg
 bed_ch_h = 0.6;                 // bed-edge chamfer, vertical leg (50 deg)
-z_in = 1.2;                     // where the cradle's upper pieces start, inside the floor
-joint_ef = 0.4;                 // first-layer relief on key and socket
-joint_ef_h = 0.5;
+z_in = floor_t / 2;             // where the cradle's upper pieces start, inside the floor
+joint_ef_h = 0.5;               // height of the joint's first-layer relief
 joint_tip_cut = 0.8;            // key tip corners cut back (corner relief)
 mouth_relief = 1.6;             // how far each socket lip is squared back
-joint_flank = atan((joint_tip - joint_neck) / 2 / (joint_depth + ov));   // flank angle off the X axis
 joint_lead = 0.5;               // lead-in chamfer round the socket rim
+joint_flank = atan((joint_tip - joint_neck) / 2 / (joint_depth + ov));   // flank angle off the X axis
+// how far an offset of 1 pushes the dovetail's acute tip corner sideways
+joint_mitre = tan(joint_flank) + 1 / cos(joint_flank);
 
 lane_w = tape_w + 2 * lane_clear;                    // 22
 W = lanes * lane_w + (lanes + 1) * post_w;           // 57.2
@@ -156,56 +173,93 @@ lintel_ch_h = (lintel_w - lintel_flat) / 2 * tan(50);    // 2.26
 z_gate_top = z_gate + lintel_ch_h + 2.2;             // 41.46
 nose_l = 12;                                         // full-height block that carries the key
 x_gate = -nose_l / 2;                                // -6
-x_axis = x_gate - lintel_w / 2 - gate_roll_clear - roll_od_max / 2;   // -47.9
+x_axis = x_gate - lintel_w / 2 - gate_roll_clear - roll_od_max / 2;   // -59.9
 back_t = 3;
 back_inset = 0.8;               // the back wall sits this far inside the wall ends
-plinth = 0.4;                   // the floor runs this far past the wall ends, so no two faces share a plane
-cradle_l = -x_axis + roll_od_max / 2 + 3 + back_t + back_inset + plinth;   // 86.1
+cradle_l = -x_axis + roll_od_max / 2 + 3 + back_t + back_inset;   // 97.7: nose face to wall ends
+// the floor always runs a little past the wall ends, so their end faces
+// never share a plane with the floor's; with a palm pad it runs on further
+heel_ext = max(heel_l, 0.4);
+heel_round = heel_l >= corner_r + 2;                 // enough pad to round its corners
 z_wall_top = z_axis + r_s + 9;                       // 58
 cradle_in_w = W - 2 * post_w;                        // 48.4
-spindle_play = 0.8;                                  // axial float of the spindle, total
-spindle_l = cradle_in_w + 2 * saddle_pocket - spindle_play;   // 53.2
+spindle_play = 1.6;                                  // axial float of the spindle, total
+spindle_l = cradle_in_w + 2 * saddle_pocket - spindle_play;   // 52.4
 flange_d = core_id + 3.6;                            // 29
 flange_flat = 1.2;
 flange_cone = (flange_d - hub_d) / 2 / tan(40);      // 2.62: a 40-deg-from-vertical shoulder
-cap_l = strip_len / 2 + ledge_l / 2 + 5;             // 31
+cap_post_root_l = ledge_l + 2 + (post_root_l - fin_root_l);   // 16: the end cap's posts at their root
+cap_l = strip_len / 2 + cap_post_root_l / 2 + corner_r + 1;   // 33
 
 function lane_y0(k) = post_w + k * (lane_w + post_w);
 function lane_c(k) = lane_y0(k) + lane_w / 2;
 function post_y0(j) = j * (lane_w + post_w);
 function fin_x(i) = strip_len / 2 + i * strip_len;
 function draft_run(z) = (base_h - z) * tan(joint_draft);
-// outline of the socket at the bed: the widest the joint ever gets
-joint_bed_w = joint_tip + 2 * (draft_run(0) + joint_clear + joint_ef);
-// widest the squared mouth gets
-mouth_bed_w = joint_neck + 2 * (mouth_relief + draft_run(0) + joint_clear);
+// The socket at the bed: the widest and the deepest the joint ever gets.
+joint_bed_w = joint_tip + 2 * (draft_run(0) + joint_clear + joint_ef) * joint_mitre;   // 29.8
+mouth_bed_w = joint_neck + 2 * (mouth_relief + draft_run(0) + joint_clear);            // 21.8
+joint_reach = joint_depth + draft_run(0) + joint_clear + joint_ef;                     // 8.72
+// What stops the joint pulling apart along the tape: how far the key's tip
+// overlaps the socket's squared mouth, each side.
+joint_hold = (joint_tip - joint_neck) / 2 - mouth_relief - joint_clear
+           - joint_tip_cut * sin(joint_flank);                                         // 1.82
+// Elevation of the tape from a roll of diameter od to the gate, in degrees;
+// negative = running downhill to the gate.
+function tape_elev(od) =
+    let(px = x_gate - lintel_w / 2, pz = z_gate + lintel_ch_h,
+        dx = x_axis - px, dz = z_axis - pz, d = sqrt(dx * dx + dz * dz),
+        a = atan2(dz, dx) - asin(od / 2 / d) - 180)
+    a < -180 ? a + 360 : a;
+// The roll actually drawn: the preview size, kept between core and maximum.
+roll_od_shown = min(max(preview_roll_od, core_id + 4), roll_od_max);
+rib_inset = 1.2;                // outermost land rib to the tape edge
+rib_gap = land_ribs > 1 ? (tape_w - 2 * rib_inset - land_ribs * land_rib_w) / (land_ribs - 1) : tape_w;
 
 // Guards: the brief's numbers and the print floors as render failures.
 assert(lanes >= 1 && lanes == floor(lanes), "lanes must be a whole number, 1 or more");
+assert(fins_per_rack >= 1 && fins_per_rack == floor(fins_per_rack), "fins_per_rack must be a whole number, 1 or more");
+assert(racks >= 1 && racks == floor(racks), "racks must be a whole number, 1 or more");
+assert(land_ribs >= 0 && land_ribs == floor(land_ribs), "land_ribs must be a whole number, 0 or more");
 assert(tape_w >= 12 && tape_w <= 25, str("tape_w ", tape_w, " is outside the 12-25 mm the lane formula was sized for"));
-assert(hub_d > 0 && hub_clear >= 0.4, "hub_clear under 0.4 mm will bind on a real roll core");
+assert(hub_d >= 10, str("core_id ", core_id, " leaves a ", hub_d, " mm hub — too small to print standing"));
+assert(hub_clear >= 0.4, "hub_clear under 0.4 mm will bind on a real roll core");
+assert(roll_od_max >= core_id + 6, "roll_od_max must be at least 6 mm more than core_id");
 assert(land_l >= 1.2 && fin_root_l >= land_l, str("fin ", land_l, " -> ", fin_root_l, " mm: the land must be at least 1.2 and the root no thinner than the land"));
 assert(post_tip >= 0.8 && post_tip <= post_w, "post_tip must be between 0.8 mm and post_w");
-assert(land_ribs == 0 || (land_rib_w >= 0.8 && land_ribs * land_rib_w <= tape_w - 2.4),
+assert(land_ribs == 0 || (land_rib_w >= 0.8 && land_ribs * land_rib_w <= tape_w - 2 * rib_inset),
        str(land_ribs, " ribs of ", land_rib_w, " mm do not fit under a ", tape_w, " mm tape"));
+assert(land_ribs < 2 || rib_gap >= 0.8,
+       str("only ", rib_gap, " mm between land ribs — under the 0.8 mm a nozzle can clear. Use fewer or narrower ribs."));
 assert(fin_h >= 25, str("fin_h ", fin_h, " leaves less than the brief's 25 mm of scissor room under a strip"));
 assert(strip_len - post_root_l >= 28,
        str("only ", strip_len - post_root_l, " mm between fins — under the brief's 28 mm for scissors and a thumb. Raise strip_len."));
 assert(rack_l + joint_depth + draft_run(0) <= 210,
        str("a rack segment is ", rack_l + joint_depth + draft_run(0), " mm long — over the brief's 210 mm. Lower fins_per_rack."));
 assert(z_wall_top <= 200, "the cradle is over the 200 mm the test-slice allows");
-assert((W - joint_bed_w) / 2 >= 6,
-       str("only ", (W - joint_bed_w) / 2, " mm of base beside the socket — under 6 mm. Narrow the joint or widen the lanes."));
-assert(joint_clear > 0 || part == "joint-fit-ctrl", "joint_clear must be positive: zero clearance prints as a weld");
-assert(joint_draft >= 5 && joint_draft <= 20, "joint_draft outside 5-20 deg: too little to carry the chain, or too much to print");
-assert(joint_gap + joint_depth + draft_run(0) + joint_clear + 3 <= strip_len / 2 - post_root_l / 2,
+assert(floor_t >= 1.2, str("floor_t ", floor_t, " is under 1.2 mm: the cradle's walls would have nothing to stand in"));
+assert((W - max(joint_bed_w, mouth_bed_w)) / 2 >= 6,
+       str("only ", (W - max(joint_bed_w, mouth_bed_w)) / 2, " mm of base beside the socket — under 6 mm.",
+           " Narrow the joint (one lane: joint_neck = 6, joint_tip = 13) or widen the lanes."));
+assert(joint_hold >= 0.8,
+       str("the key's tip overlaps the socket mouth by only ", joint_hold, " mm a side — under 0.8 mm the joint",
+           " pulls apart along the tape. Widen joint_tip or narrow joint_neck."));
+assert(joint_clear > 0, "joint_clear must be positive: zero clearance prints as a weld");
+assert(joint_ef >= 0 && joint_ef <= 0.8, "joint_ef outside 0-0.8 mm");
+assert(joint_draft >= 5 && joint_draft <= 20, "joint_draft outside 5-20 deg: too little to catch a lift, or too much to hold by friction");
+assert(joint_reach + 3 <= strip_len / 2 - post_root_l / 2,
        "the socket runs into the first fin — lower joint_depth or raise strip_len");
+assert(joint_reach + 3 <= strip_len / 2 - cap_post_root_l / 2,
+       str("the socket runs under the end cap's ledge — lower ledge_l (now ", ledge_l, ") or joint_depth"));
 assert(post_w - saddle_pocket >= 1.2, str("only ", post_w - saddle_pocket, " mm of wall outside the saddle pocket — under 1.2 mm"));
 assert(lane_w <= 30, str("the gate bridges ", lane_w, " mm per lane — over 30 mm it will sag without support"));
 assert(z_gate - base_h >= 15, "the threading window under the gate is under 15 mm tall");
+assert(max(tape_elev(core_id + 4), tape_elev(roll_od_max)) <= saddle_lean - 5,
+       str("the tape climbs ", max(tape_elev(core_id + 4), tape_elev(roll_od_max)), " deg to the gate, within 5 deg of the",
+           " saddle lean (", saddle_lean, "): a pull could lift the spindle out. Lower gate_rise or fin_h, or raise saddle_lean."));
 assert(post_w + 2 * lane_clear - flange_flat - 2 * flange_cone >= 0.4,
        "the spindle flange does not fit between two rolls — widen post_w or lane_clear");
-assert(preview_roll_od <= roll_od_max && preview_roll_od > core_id + 4, "preview_roll_od must sit between the core and roll_od_max");
+assert(heel_l >= 0 && corner_r > bed_ch, "heel_l must be 0 or more, and corner_r more than the 0.5 mm bed chamfer");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -216,15 +270,29 @@ module y_extrude(w, y0 = 0) {
 }
 
 // A box on the bed with its bed edge chamfered at 50 degrees. An end that
-// carries a joint keeps a square edge (cx0 / cx1 = false): the joint has its
-// own first-layer relief, and a chamfer there would leave feather edges.
-module bed_box(x0, x1, y0, y1, h, cx0 = true, cx1 = true) {
-    a = cx0 ? bed_ch : 0;
-    b = cx1 ? bed_ch : 0;
+// carries a joint keeps a square, unchamfered edge (cx0 / cx1 = false): the
+// dovetail has its own first-layer relief, and a chamfer there would leave
+// feather edges. r0 / r1 round the two outer corners of that end.
+module bed_box(x0, x1, y0, y1, h, cx0 = true, cx1 = true, r0 = 0, r1 = 0) {
+    // one corner of the footprint: a square corner, or a rounded one
+    module corner(x, y, sx, sy, r, cx) {
+        if (r > 0) {
+            translate([x + sx * r, y + sy * r, 0]) {
+                cylinder(r = r - bed_ch, h = eps, $fn = 48);
+                translate([0, 0, bed_ch_h]) cylinder(r = r, h = h - bed_ch_h, $fn = 48);
+            }
+        } else {
+            translate([x + sx * cx - (sx < 0 ? eps : 0), y + sy * bed_ch - (sy < 0 ? eps : 0), 0])
+                cube([eps, eps, eps]);
+            translate([x - (sx < 0 ? eps : 0), y - (sy < 0 ? eps : 0), bed_ch_h])
+                cube([eps, eps, h - bed_ch_h]);
+        }
+    }
     hull() {
-        translate([x0 + a, y0 + bed_ch, 0])
-            cube([x1 - x0 - a - b, y1 - y0 - 2 * bed_ch, eps]);
-        translate([x0, y0, bed_ch_h]) cube([x1 - x0, y1 - y0, h - bed_ch_h]);
+        corner(x0, y0, 1, 1, r0, cx0 ? bed_ch : 0);
+        corner(x0, y1, 1, -1, r0, cx0 ? bed_ch : 0);
+        corner(x1, y0, -1, 1, r1, cx1 ? bed_ch : 0);
+        corner(x1, y1, -1, -1, r1, cx1 ? bed_ch : 0);
     }
 }
 
@@ -261,17 +329,21 @@ module joint_profile(tip_cut = 0) {
     polygon(concat([for (q = half) [q[0], -q[1]]],
                    [for (i = [len(half) - 1 : -1 : 0]) half[i]]));
 }
-// The socket's mouth, squared off so its two lips end in a 2 mm flat, not a
-// 60-degree knife edge.
+// The socket's mouth, squared off so its two lips end in a flat, not a
+// 60-degree knife edge. Long enough to end inside the dovetail at every
+// height, so no sliver of base is left between the mouth and the flank.
 module mouth_profile() {
-    // long enough to end inside the dovetail at every height, so no sliver
-    // of base is left between the mouth and the flank
     translate([-ov - 1, -joint_neck / 2 - mouth_relief])
         square([ov + 1 + joint_gap + mouth_relief / tan(joint_flank) + 0.4,
                 joint_neck + 2 * mouth_relief]);
 }
-module joint_slab(z, d, tip_cut = 0) {
-    translate([0, 0, z]) linear_extrude(eps) offset(delta = d) joint_profile(tip_cut);
+// A thin slab of the dovetail (or, with mouth = true, of the squared mouth)
+// at height z, grown by d. `chamfer` clips the offset's acute corners.
+module joint_slab(z, d, tip_cut = 0, mouth = false, chamfer = false) {
+    translate([0, 0, z]) linear_extrude(eps) offset(delta = d, chamfer = chamfer) {
+        if (mouth) mouth_profile();
+        else joint_profile(tip_cut);
+    }
 }
 // The key: widest half a millimetre above the bed, drawn in below that so
 // first-layer squish cannot make it the tight spot.
@@ -282,35 +354,44 @@ module key_solid() {
         joint_slab(base_h - eps, 0, joint_tip_cut);
     }
 }
-// The socket cutter: the key's loft grown by `clear` on every face and run
-// past both ends of the base, with a squared mouth following the same
-// draft, a relief flare at the bed and a lead-in chamfer round the rim.
-// Each extra piece starts just inside the main loft, so the surfaces cross
-// cleanly instead of meeting edge-on.
-module socket_cut(clear = joint_clear) {
+// The socket cutter, in five pieces: the key's loft grown by `clear` on
+// every face and run past both ends of the base; a squared mouth following
+// the same draft; a relief flare at the bed; and a lead-in chamfer round the
+// rim of each. The flare and the lead-ins take chamfered offset corners and
+// start at different heights, so no two pieces' corner edges pass through
+// one point — the Manifold backend exports such a crossing as edges shared
+// by four triangles.
+module socket_main(clear) {
     hull() {
         joint_slab(-1, draft_run(-1) + clear);
         joint_slab(base_h + 1, draft_run(base_h + 1) + clear);
     }
+}
+module socket_mouth(clear) {
     hull() {
-        translate([0, 0, -1]) linear_extrude(eps)
-            offset(delta = draft_run(-1) + clear) mouth_profile();
-        translate([0, 0, base_h + 1]) linear_extrude(eps)
-            offset(delta = draft_run(base_h + 1) + clear) mouth_profile();
+        joint_slab(-1, draft_run(-1) + clear, mouth = true);
+        joint_slab(base_h + 1, draft_run(base_h + 1) + clear, mouth = true);
     }
+}
+module socket_flare(clear) {
     hull() {
-        joint_slab(-eps, draft_run(0) + clear + joint_ef);
-        joint_slab(joint_ef_h, draft_run(joint_ef_h) + clear - 0.02);
+        joint_slab(-eps, draft_run(0) + clear + joint_ef, chamfer = true);
+        joint_slab(joint_ef_h, draft_run(joint_ef_h) + clear - 0.02, chamfer = true);
     }
-    for (q = [0, 1])
-        hull() {
-            translate([0, 0, base_h - joint_lead]) linear_extrude(eps)
-                offset(delta = draft_run(base_h - joint_lead) + clear - 0.02)
-                    if (q == 0) joint_profile(); else mouth_profile();
-            translate([0, 0, base_h]) linear_extrude(eps)
-                offset(delta = clear + joint_lead)
-                    if (q == 0) joint_profile(); else mouth_profile();
-        }
+}
+module socket_lead(clear, mouth = false) {
+    z0 = base_h - joint_lead - (mouth ? 0.2 : 0);
+    hull() {
+        joint_slab(z0, draft_run(z0) + clear - 0.02, mouth = mouth, chamfer = true);
+        joint_slab(base_h, clear + joint_lead, mouth = mouth, chamfer = true);
+    }
+}
+module socket_cut(clear = joint_clear) {
+    socket_main(clear);
+    socket_mouth(clear);
+    socket_flare(clear);
+    socket_lead(clear);
+    socket_lead(clear, mouth = true);
 }
 
 // ---------------------------------------------------------------------------
@@ -330,10 +411,9 @@ module post(xc, j, root_l, mid_l) {
 
 // The reliefs between the land ribs of lane k, as one cutter per gap.
 module land_reliefs(xc, k, cut_l) {
-    inset = 1.2;
     y_tape = lane_c(k) - tape_w / 2;
-    pitch = land_ribs > 1 ? (tape_w - 2 * inset - land_rib_w) / (land_ribs - 1) : 0;
-    function rib_y(i) = land_ribs > 1 ? y_tape + inset + i * pitch : lane_c(k) - land_rib_w / 2;
+    pitch = land_ribs > 1 ? land_rib_w + rib_gap : 0;
+    function rib_y(i) = land_ribs > 1 ? y_tape + rib_inset + i * pitch : lane_c(k) - land_rib_w / 2;
     edges = concat([lane_y0(k) - eps],
                    [for (i = [0 : land_ribs - 1]) each [rib_y(i), rib_y(i) + land_rib_w]],
                    [lane_y0(k) + lane_w + eps]);
@@ -373,14 +453,16 @@ module rack() {
     }
 }
 
-// The end cap: a socket, and one wide fin whose flat top is the ledge the
-// tape tails are stuck to. It sits one pitch past the last fin, so the last
-// fin still yields a full-length strip.
+// The end cap: a socket, and one wide fin whose top is the ledge the tape
+// tails are stuck to. It sits one pitch past the last fin, so the last fin
+// still yields a full-length strip. The ledge is ribbed like the fins: the
+// cap is the lightest part, and a flat ledge would hold the tails harder
+// than the cap's own weight holds it down.
 module end_cap() {
     difference() {
         union() {
-            bed_box(joint_gap, cap_l, 0, W, base_h, cx0 = false);
-            fin(strip_len / 2, land = ledge_l, root = ledge_l + 2, ribs = 0);
+            bed_box(joint_gap, cap_l, 0, W, base_h, cx0 = false, r1 = corner_r);
+            fin(strip_len / 2, land = ledge_l, root = ledge_l + 2);
         }
         translate([0, W / 2, 0]) socket_cut();
     }
@@ -388,17 +470,15 @@ module end_cap() {
 
 // Cradle side-wall profile in (x, z): tall round the saddle, sloping down
 // to the gate. It starts inside the floor (z_in), which carries the bed
-// chamfer; every piece of the cradle overlaps its neighbours instead of
-// meeting them on a shared edge.
+// chamfer, and stops at the wall ends, short of the floor's back edge.
 module cradle_wall_2d() {
     // top of the hook in front of the saddle slot, 6 mm clear of the slot
     x_slot_top = x_axis + r_s * cos(saddle_lean)
                - (z_wall_top - z_axis - r_s * sin(saddle_lean)) * tan(saddle_lean);
-    xb = -cradle_l + plinth;      // the walls stop just short of the floor's back edge
-    polygon([[xb, z_in], [0, z_in], [0, z_gate_top],
+    polygon([[-cradle_l, z_in], [0, z_in], [0, z_gate_top],
              [x_gate - lintel_w / 2 - 0.5, z_gate_top],
              [x_slot_top + 6, z_wall_top],
-             [xb + 5, z_wall_top], [xb, z_wall_top - 5]]);
+             [-cradle_l + 5, z_wall_top], [-cradle_l, z_wall_top - 5]]);
 }
 // The saddle slot in (x, z): the spindle seat, open up-and-back.
 module saddle_2d() {
@@ -415,33 +495,66 @@ module lintel_2d() {
              [x_gate - lintel_w / 2, z_gate_top], [x_gate - lintel_w / 2, z_gate + lintel_ch_h]]);
 }
 
+// The cradle's pieces. Each overlaps its neighbours by volume; where two
+// outer faces share a plane, one piece's face covers the other's edge.
+// The floor, running on behind the wall ends as the palm pad.
+module cradle_floor() {
+    bed_box(-cradle_l - heel_ext, 0, 0, W, floor_t, cx1 = false,
+            r0 = heel_round ? corner_r : 0);
+}
+// Grip ribs across the palm pad.
+module cradle_heel_ribs() {
+    n = floor((heel_l - 12) / 6) + 1;
+    if (heel_l >= 14)
+        for (i = [0 : n - 1])
+            translate([-cradle_l - heel_l + 7 + 6 * i, corner_r + 2, floor_t - ov])
+                cube([2, W - 2 * corner_r - 4, 1.2 + ov]);
+}
+// Nose block: full joint height, carries the key and the gate.
+module cradle_nose() {
+    translate([-nose_l, post_w - ov, z_in]) cube([nose_l, cradle_in_w + 2 * ov, base_h - z_in]);
+}
+// Low back wall, set in from the wall ends.
+module cradle_back() {
+    translate([-cradle_l + back_inset, post_w - ov, z_in])
+        cube([back_t, cradle_in_w + 2 * ov, 14 - z_in]);
+}
+// A side wall (side 0 or 1); its nose end is an outer gate post.
+module cradle_wall(side) {
+    y_extrude(post_w, side == 0 ? 0 : W - post_w) cradle_wall_2d();
+}
+// Inner gate posts, one between each pair of lanes; each ends inside the lintel.
+module cradle_gate_posts() {
+    if (lanes > 1)
+        for (j = [1 : lanes - 1])
+            translate([x_gate - lintel_w / 2 + 0.3, post_y0(j), base_h - ov])
+                cube([lintel_w - 0.6, post_w, z_gate + lintel_ch_h + 1 - base_h + ov]);
+}
+// The lintel, bridging each lane from post to post.
+module cradle_lintel() {
+    y_extrude(cradle_in_w + 2 * ov, post_w - ov) lintel_2d();
+}
+// A blind saddle pocket, cut into the inner face of a wall.
+module cradle_pocket(side) {
+    y_extrude(saddle_pocket + eps, side == 0 ? post_w - saddle_pocket : W - post_w - eps) saddle_2d();
+}
+
 // The cradle. Downstream face at x = 0, the key projecting beyond it.
 module cradle() {
     difference() {
         union() {
-            bed_box(-cradle_l, 0, 0, W, floor_t, cx1 = false);
-            // nose block: full joint height, carries the key and the gate
-            translate([-nose_l, post_w - ov, z_in])
-                cube([nose_l, cradle_in_w + 2 * ov, base_h - z_in]);
-            // low back wall, set in from the wall ends
-            translate([-cradle_l + plinth + back_inset, post_w - ov, z_in])
-                cube([back_t, cradle_in_w + 2 * ov, 14 - z_in]);
-            // side walls; their nose ends are the outer gate posts
-            y_extrude(post_w, 0) cradle_wall_2d();
-            y_extrude(post_w, W - post_w) cradle_wall_2d();
-            // inner gate posts, one between each pair of lanes; each ends
-            // inside the lintel
-            if (lanes > 1)
-                for (j = [1 : lanes - 1])
-                    translate([x_gate - lintel_w / 2 + 0.3, post_y0(j), base_h - ov])
-                        cube([lintel_w - 0.6, post_w, z_gate + lintel_ch_h + 1 - base_h + ov]);
-            // the lintel, bridging each lane from post to post
-            y_extrude(cradle_in_w + 2 * ov, post_w - ov) lintel_2d();
+            cradle_floor();
+            cradle_heel_ribs();
+            cradle_nose();
+            cradle_back();
+            cradle_wall(0);
+            cradle_wall(1);
+            cradle_gate_posts();
+            cradle_lintel();
             translate([0, W / 2, 0]) key_solid();
         }
-        // blind saddle pockets, cut into the inner face of each wall
-        y_extrude(saddle_pocket + eps, post_w - saddle_pocket) saddle_2d();
-        y_extrude(saddle_pocket + eps, W - post_w - eps) saddle_2d();
+        cradle_pocket(0);
+        cradle_pocket(1);
     }
 }
 
@@ -472,7 +585,7 @@ module spindle_use(grow = 0) {
 // ---------------------------------------------------------------------------
 // Payload (preview and fit proofs only — never printed)
 // ---------------------------------------------------------------------------
-module rolls(od = preview_roll_od) {
+module rolls(od = roll_od_shown) {
     for (k = [0 : lanes - 1])
         translate([x_axis, lane_c(k) - tape_w / 2, z_axis]) rotate([-90, 0, 0])
             difference() {
@@ -483,26 +596,30 @@ module rolls(od = preview_roll_od) {
 
 // The tape after the cuts: the feed from the roll under the gate to its
 // parked tail past fin 0, one strip centred on every later fin, and the
-// tails on the end-cap ledge.
-module tape(od = preview_roll_od) {
+// tails on the end cap's ledge. Drawn just under the lintel and a hair
+// above the lands, so it touches neither.
+module tape(od = roll_od_shown) {
     t = 0.3;
+    lift = 0.02;
     n = racks * fins_per_rack;
     px = x_gate - lintel_w / 2;  pz = z_gate + lintel_ch_h;   // where the tape meets the gate
     dx = x_axis - px;  dz = z_axis - pz;
     d = sqrt(dx * dx + dz * dz);
     th = atan2(dz, dx) - asin(od / 2 / d);                    // upper tangent off the roll
     tl = sqrt(d * d - od * od / 4);
-    path = [[px + tl * cos(th), pz + tl * sin(th)], [px, pz],
-            [x_gate - lintel_flat / 2, z_gate], [x_gate + lintel_flat / 2, z_gate],
-            [fin_x(0), z_land], [fin_x(0) + strip_len / 2 - 1, z_land]];
+    // [x, z of the tape's underside]
+    path = [[px + tl * cos(th), pz + tl * sin(th)], [px - 0.2, pz - t - 0.1],
+            [x_gate - lintel_flat / 2, z_gate - t - lift], [x_gate + lintel_flat / 2, z_gate - t - lift],
+            [fin_x(0), z_land + lift], [fin_x(0) + strip_len / 2 - 1, z_land + lift]];
     for (k = [0 : lanes - 1]) {
         for (s = [0 : len(path) - 2])
             hull() for (p = [path[s], path[s + 1]])
                 translate([p[0], lane_c(k) - tape_w / 2, p[1]]) cube([eps, tape_w, t]);
-        for (i = [1 : n - 1])
-            translate([fin_x(i) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land])
-                cube([strip_len - 2, tape_w, t]);
-        translate([fin_x(n) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land])
+        if (n > 1)
+            for (i = [1 : n - 1])
+                translate([fin_x(i) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land + lift])
+                    cube([strip_len - 2, tape_w, t]);
+        translate([fin_x(n) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land + lift])
             cube([strip_len / 2 - 1 + ledge_l / 2 + 8, tape_w, t]);
     }
 }
@@ -528,18 +645,39 @@ module assembly() {
 module cutaway() {
     difference() {
         assembly();
-        translate([-cradle_l - 20, -1, -1]) cube([cradle_l + racks * rack_l + cap_l + 40, lane_c(0) + 1, 120]);
+        color("#5a5a5a") translate([-cradle_l - heel_ext - 20, -1, -1])
+            cube([cradle_l + heel_ext + racks * rack_l + cap_l + 40, lane_c(0) + 1, 120]);
     }
 }
 
-// Short stubs carrying the production key and the production socket.
-module key_stub(w) {
-    bed_box(-18, 0, -w / 2, w / 2, base_h, cx1 = false);
+// Two rack segments nested for storage: the second turned over and shifted
+// half a pitch, its fins in the first one's gaps, 0.2 mm of air between
+// them. `shift` exists for the fit proof's control.
+module nested_pair(shift = strip_len / 2) {
+    rack();
+    translate([shift, W, 2 * base_h + fin_h + post_rise + 0.2]) rotate([180, 0, 0]) children();
+}
+module nested() {
+    color("#c0343c") nested_pair() rack();
+}
+module nest_fit(shift = strip_len / 2) {
+    intersection() {
+        rack();
+        translate([shift, W, 2 * base_h + fin_h + post_rise + 0.2]) rotate([180, 0, 0]) rack();
+    }
+}
+
+// Short stubs carrying the production key and the production socket, as
+// wide as the socket's arms are on a real rack — a narrower stub would be
+// springier than the joint it stands in for.
+coupon_w = joint_bed_w + 26;
+module key_stub() {
+    bed_box(-18, 0, -coupon_w / 2, coupon_w / 2, base_h, cx1 = false);
     key_solid();
 }
-module socket_stub(w, clear = joint_clear) {
+module socket_stub(clear = joint_clear) {
     difference() {
-        bed_box(joint_gap, joint_gap + 18, -w / 2, w / 2, base_h, cx0 = false);
+        bed_box(joint_gap, joint_gap + 18, -coupon_w / 2, coupon_w / 2, base_h, cx0 = false);
         socket_cut(clear);
     }
 }
@@ -548,16 +686,28 @@ module socket_stub(w, clear = joint_clear) {
 // loose stubs, side by side on the bed. Lower the socket stub onto the key
 // stub and tune joint_clear before printing a rack.
 module joint_coupon() {
-    w = joint_bed_w + 12;
-    translate([18, w / 2, 0]) key_stub(w);
-    translate([18 + joint_depth + draft_run(0) + 6, w / 2, 0]) socket_stub(w);
+    translate([18, coupon_w / 2, 0]) key_stub();
+    translate([18 + joint_reach + 6, coupon_w / 2, 0]) socket_stub();
 }
 
-// Fit proof: key in socket, posed exactly as joined. Empty at the production
-// clearance; a negative clearance is the control that must interfere.
+// Fit proofs for the joint, on the two stubs posed as joined.
+// As joined: empty at the production clearance; a negative clearance is the
+// control that must interfere.
 module joint_fit(clear = joint_clear) {
-    w = joint_bed_w + 12;
-    intersection() { key_stub(w); socket_stub(w, clear); }
+    intersection() { key_stub(); socket_stub(clear); }
+}
+// Pulled 3 mm apart along the tape: must interfere — the joint holds.
+module joint_pull() {
+    intersection() { key_stub(); translate([3, 0, 0]) socket_stub(); }
+}
+// Key part lifted 3 mm with the socket part left behind: must interfere —
+// a straight lift of the key part catches the socket part.
+module joint_lift() {
+    intersection() { translate([0, 0, 3]) key_stub(); socket_stub(); }
+}
+// Socket part lifted 3 mm: must be empty — that is how it comes apart.
+module joint_drop() {
+    intersection() { key_stub(); translate([0, 0, 3]) socket_stub(); }
 }
 // Fit proof: the spindle in its saddle pockets and between the walls.
 module spindle_fit(grow = 0) {
@@ -579,10 +729,16 @@ else if (part == "end-cap") end_cap();
 else if (part == "joint-coupon") joint_coupon();
 else if (part == "joint-fit") joint_fit();
 else if (part == "joint-fit-ctrl") joint_fit(-0.15);
+else if (part == "joint-pull") joint_pull();
+else if (part == "joint-lift") joint_lift();
+else if (part == "joint-drop") joint_drop();
 else if (part == "spindle-fit") spindle_fit();
 else if (part == "spindle-fit-ctrl") spindle_fit(saddle_clear + 0.6);
 else if (part == "roll-fit") roll_fit();
 else if (part == "roll-fit-ctrl") roll_fit(2 * roll_floor_clear + 2);
+else if (part == "nest-fit") nest_fit();
+else if (part == "nest-fit-ctrl") nest_fit(shift = 0);
+else if (part == "nested") nested();
 else if (part == "cutaway") cutaway();
 else if (part == "assembly") assembly();
 else assert(false, str("unknown part: ", part));
