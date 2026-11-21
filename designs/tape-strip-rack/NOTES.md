@@ -22,7 +22,9 @@ Brief: issue #1062, filed from a product photo the owner supplied. Built in the 
 | Tallest printed part | 58 mm (brief: ≤ 200) | derived | `cradle` |
 | Assembled length | 561 mm (brief: about 500) | derived | palm pad + cradle + 2 racks + end cap |
 
-None of these was measured from a real roll or a real print. `core_id`, `tape_w` and `roll_od_max` are the three to caliper before printing. The assembly is 61 mm longer than the brief's estimate: 30 mm is the palm pad and 12 mm is threading room at the gate, both added after review.
+None of these was measured from a real roll or a real print. `core_id`, `tape_w` and `roll_od_max` are the three to caliper before printing. The assembly is 61 mm longer than the brief's estimate: 30 mm is the palm pad (the owner's refinement request), 12 mm is threading room at the gate (added after review), and the other 19 mm is the brief's round "about 500" against a build that was already 519.
+
+The brief gave the strip length as a parameter from 30 to 60 mm. As built it is 40 to 60 (36 with `ledge_l = 8`): under 35.2 mm the gap between fins drops below the brief's own 28 mm, and under 39.5 mm the socket would run under the end cap's ledge. Both stop the render with a message.
 
 ## Multi-part layout
 
@@ -68,13 +70,13 @@ Details that exist for a reason:
 
 **D10 — A palm pad behind the rolls, rounded at the back.** The rack with rolls weighs about 3.3 N and two tapes pull at 2–8 N, so it slides unless it is held, and a hand pressed on top of the cradle lands on the rolls. The floor runs on 30 mm behind the back wall with four grip ribs (`heel_l`; 0 removes it). The two free ends, the pad and the end cap, have 4 mm corners (`corner_r`): a rounded corner lifts off the bed less than a square one.
 
-**D11 — Style `none`; chamfers at 50°, not 45°.** As the brief decided. Bed chamfers and the lintel flare are 50° from horizontal because printcheck treats exactly 45° as a float coin-flip.
+**D11 — Style `none`, as the brief decided; chamfers at 50°, not the brief's 45° habit.** Bed chamfers and the lintel flare are 50° from horizontal because printcheck treats exactly 45° as a float coin-flip.
 
 **D12 — No feet modelled; the underside is flat.** A recess for a stick-on foot is a ceiling over the bed, which printcheck counts as overhang. A flat underside takes 2 mm bumper dots anywhere. Feet help; they do not replace the steadying hand.
 
 **D13 — `lanes = 1` needs a narrower joint.** The default key is 24 mm at its tip and a one-lane base is 30.8 mm wide. The render stops with an assert that says so; `-D joint_neck=6 -D joint_tip=13` fits, with 1.4 mm of pull-apart hold a side against the default 1.8.
 
-**D14 — Print cost is at its floor; the slicer is the lever.** Measured with the gate's test-slice on a rack segment: thinner fins save nothing (6 h 11 m, 75.3 g against 6 h 03 m, 75.5 g — the fins are all perimeter already); a 6 mm base saves 9 % and shortens the joint; two perimeters and 15 % infill save 18 % with no geometry change.
+**D14 — Print cost is near its floor; the slicer is the lever.** Measured with the gate's test-slice on a rack segment (6 h 02 m, 75.5 g): slightly thinner fins save nothing (2.6 mm land, 4.0 mm root: 6 h 11 m, 75.3 g — the fins are almost all perimeter already), and only fins near the 1.6 mm floor save filament (about 12 %), at the cost of the stiffness D5 is for. A 6 mm base saves 9 % of the filament and 5 % of the time, and shortens the joint. Two perimeters and 15 % infill save 18 % of the filament and 13 % of the time on the ten-fin set (198 g, 17 h 10 m) with no geometry change.
 
 ## Print orientations
 
@@ -93,12 +95,12 @@ Details that exist for a reason:
 - **Supports:** none. The gate lintel is meant to be bridged.
 - **Bed:** the rack is 207.8 mm long. On a 220 mm bed it leaves 6 mm at each end, so use a skirt distance of 2 mm, or no skirt, or turn the rack 45°.
 - **Order:** the joint coupon first, then the plate.
-- **Slicer estimate** (PrusaSlicer bare defaults, the gate's test-slice: 3 perimeters, 20 % infill): cradle 5 h 22 m / 60 g, spindle 48 m / 12 g, rack 6 h 02 m / 75 g each, end cap 1 h 24 m / 18 g, coupon 43 m / 10 g. Ten-fin set: about 242 g and 19 h 40 m at those settings.
+- **Slicer estimate** (PrusaSlicer bare defaults, the gate's test-slice: 3 perimeters, 20 % infill): cradle 5 h 21 m / 60 g, spindle 48 m / 12 g, rack 6 h 02 m / 75 g each, end cap 1 h 24 m / 18 g, coupon 44 m / 10 g. Ten-fin set: about 242 g and 19 h 40 m at those settings.
 - The end cap printed alone has only three post tips on its last layers; print it on the plate with the rack so the layers have time to cool.
 
 ## Print this first
 
-`tape-strip-rack-coupon.scad` prints the production key and the production socket as two loose stubs (43 minutes, 10 g). The stubs are as wide as a rack, so the socket's arms are as stiff as the real ones. `gate.sh` renders and gates the coupon automatically.
+`tape-strip-rack-coupon.scad` prints the production key and the production socket as two loose stubs (44 minutes, 10 g). The stubs are as wide as a rack, so the socket's arms are as stiff as the real ones. `gate.sh` renders and gates the coupon automatically.
 
 Lower the socket stub onto the key stub. It should drop on under light finger pressure. Then, with both flat on the table, push and pull the socket stub along the joint: about 0.6 mm of play is right at the default.
 
@@ -109,7 +111,7 @@ Lower the socket stub onto the key stub. It should drop on under light finger pr
 
 `./scripts/render.sh tape-strip-rack --sweep joint_clear=0.10:0.30:0.05` prints the ladder in one go.
 
-The coupon cannot show whether a hanging rack stays on a lifted cradle: its socket stub's mass centre is 3 mm from the joint, a rack's is 94 mm. That is a field test (below).
+The coupon cannot show whether a hanging rack stays on a lifted cradle: its socket stub's mass centre is 2 mm past the key's tip, a rack's is 94 mm. That is a field test (below).
 
 The spindle is a loose running fit, not a tuned one, but roll cores vary: measure yours and set `core_id` before printing it.
 
@@ -125,17 +127,17 @@ The spindle is a loose running fit, not a tuned one, but roll cores vary: measur
 
 ## Gate evidence (2026-11-21, OpenSCAD 2021.01, PrusaSlicer 2.7)
 
-`./scripts/gate.sh --slice tape-strip-rack` exits 0 in 18 s.
+`./scripts/gate.sh --slice tape-strip-rack` exits 0 in 17 s.
 
 | Part | printcheck | Test-slice |
 |---|---|---|
-| `cradle` | 100/100 | 5 h 22 m, 60.3 g |
+| `cradle` | 100/100 | 5 h 21 m, 60.3 g |
 | `spindle` | 100/100 | 48 m, 12.2 g |
 | `rack` | 100/100 | 6 h 02 m, 75.5 g |
 | `end-cap` | 100/100 | 1 h 24 m, 18.1 g |
-| `tape-strip-rack-coupon` | 100/100 (2 bodies, intended) | 43 m, 9.7 g |
+| `tape-strip-rack-coupon` | 100/100 (2 bodies, intended) | 44 m, 9.9 g |
 
-Eleven fit proofs pass: five `empty`, six `interferes`. Plate: `build/tape-strip-rack-plate.3mf`, 4 separate objects for 4 declared parts. As merged the plate is spread over about 300 mm; pressing Arrange in the slicer packs it onto a 220 mm bed.
+Eleven fit proofs pass: five `empty`, six `interferes`. Plate: `build/tape-strip-rack-plate.3mf`, 4 separate objects for 4 declared parts. As merged the plate is spread over about 370 × 155 mm, mostly off a 220 mm bed; pressing Arrange in the slicer packs it onto one.
 
 `./scripts/check.sh` (whole tree) exits 0.
 
@@ -157,6 +159,9 @@ Sections and bounding boxes taken from the gated STLs with trimesh.
 | Roll Ø 62 max | must clear the cradle | `roll-fit` empty; floor 3.0 mm, gate 20.1 mm, walls 1.5 mm each side |
 | Largest part | ≤ 210 long, ≤ 200 tall | rack 207.75 × 57.20 × 42.00; cradle 58.00 tall |
 | Assembled length | about 500 | 30 + 97.7 + 200 + 200 + 33 = 560.7 |
+| Strip length a parameter, 30–60 | 30–60 | 40–60 as shipped, 36 with `ledge_l = 8`; under 35.2 breaks the brief's own 28 mm gap |
+| "A taut tape lies on every fin top in one pull" | lies on the fins | not met, by design: it hovers 2.8 mm over the first fin and 0.3 mm over the last until pressed (D4) |
+| "Snug enough to carry the chain when lifted" | carries the chain | a straight lift catches at 1.4 mm; a hanging rack is held by friction only, untested (D3) |
 
 Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. The fin nearest the rolls keeps the feed parked; each of the other nine fins holds one 40 mm strip per lane; the ledge keeps a tail of about 26 mm plus whatever was in the fingers. Nine strips a lane, eighteen a pull. The plate as shipped, with one rack, gives four a lane, eight a pull.
 
@@ -167,7 +172,7 @@ Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. 
 - **Feather edges at the socket mouth.** A bed chamfer on the joint's end face met the socket's flare and left slivers 0.05 mm thick; squaring the lips first left a second sliver between the mouth and the flank. Joint end faces now have no bed chamfer and the squared mouth runs past the flank at every height.
 - **Socket cutter corner edges crossing at a point.** The cutter's loft, flare and lead-ins were hulls of one profile with different offset laws, so their mitred corner edges passed through single points. OpenSCAD 2021.01 exported that as vertex pairs 0.00001 mm apart and still scored 100/100; an emulation of CI's Manifold kernel (manifold3d over the same operands, not the nightly itself) exported the rack and end cap non-watertight. Caught by code review. Fixed by chamfering the offset corners of the flare and lead-ins and starting the two lead-ins at different heights; the same emulation is now watertight for every part in both union orders, and the gated meshes have no vertex pair closer than 0.001 mm.
 - **The carry claim.** "Pick it up by the cradle" was written from the straight-lift proof. Two reviewers independently found the pivot path a hanging rack can take. The claim is now what D3 says.
-- **A flat end-cap ledge** on the lightest, lift-free part (D6), **8 mm of threading room** (D9), and **a coupon narrower than the joint it stands in for** (its socket arms were 4 mm against 13 mm on a rack) — all caught by review, all fixed.
+- **A flat end-cap ledge** on the lightest, lift-free part (D6), **8 mm of threading room** (D9), and **a coupon narrower than the joint it stands in for** (its socket arms were 4 mm against 14 mm on a rack) — all caught by review, all fixed.
 
 ## Session-resume context
 

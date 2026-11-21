@@ -31,8 +31,9 @@ roll_od_max = 62;
 lanes = 2;
 
 /* [Strips] */
-// Strip length = fin pitch (mm), 36 to 60. 40 is about 1.5 in; 50 gives 2 in
-// strips (set fins_per_rack = 4 to keep a segment on a 220 mm bed).
+// Strip length = fin pitch (mm), 40 to 60 (36 with ledge_l = 8). 40 is about
+// 1.5 in; 50 gives 2 in strips and needs fins_per_rack = 4 to keep a segment
+// on a 220 mm bed, 60 needs fins_per_rack = 3.
 strip_len = 40;
 // Fins on one rack segment (count). 5 x 40 mm fits a 220 mm bed.
 fins_per_rack = 5;
@@ -668,9 +669,9 @@ module nest_fit(shift = strip_len / 2) {
 }
 
 // Short stubs carrying the production key and the production socket, as
-// wide as the socket's arms are on a real rack — a narrower stub would be
-// springier than the joint it stands in for.
-coupon_w = joint_bed_w + 26;
+// wide as the rack itself — a narrower stub would have springier socket
+// arms than the joint it stands in for.
+coupon_w = W;
 module key_stub() {
     bed_box(-18, 0, -coupon_w / 2, coupon_w / 2, base_h, cx1 = false);
     key_solid();

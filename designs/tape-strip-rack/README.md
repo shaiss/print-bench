@@ -12,13 +12,13 @@ A desk rack for wrapping a pile of gifts. Pull two tapes once along a row of fin
 - `spindle` — one hub for two rolls on a 1 in (25.4 mm) core (Ø 29 × 52 mm)
 - `rack` — five fins at a 40 mm pitch; print it twice for ten fins (208 × 57 × 42 mm)
 - `end-cap` — closes the last joint and gives the two tape tails a ledge to stick to (33 × 57 × 42 mm)
-- `tape-strip-rack-coupon` — the print-this-first joint coupon (43 minutes, 10 g)
+- `tape-strip-rack-coupon` — the print-this-first joint coupon (44 minutes, 10 g)
 
 The parts print separately. The file to slice is the multi-object plate, `build/tape-strip-rack-plate.3mf`: four separate objects, each already in its print orientation. Press **Arrange** after opening it; the four then fit a 220 mm bed.
 
 The plate holds one rack, which makes a complete five-fin rack: four strips a lane, eight a pull. Print `rack` a second time for the ten fins shown here.
 
-![The as-printed four-view: every part prints as it stands](previews/contact-sheet.png)
+![The assembled four-view: cradle, racks and end cap as they print; the spindle prints on end, and the rolls and tape are not printed](previews/contact-sheet.png)
 
 ## Print settings
 
@@ -29,7 +29,7 @@ The plate holds one rack, which makes a complete five-fin rack: four strips a la
 - **Supports:** none, and leave them off. The gate on the cradle is two 22 mm bridges, which is what it is meant to be
 - **Orientation:** as exported. Cradle, rack and end cap sit on their bases; the spindle stands on end
 - **Bed:** every part fits 220 × 220 mm, but the rack is 208 mm long and leaves 6 mm at each end. On a 220 mm bed set the skirt distance to 2 mm (or print without one), or turn the rack 45°
-- **Filament and time:** about 242 g and 19½ hours for the ten-fin set on PrusaSlicer's own slow defaults (3 perimeters, 20 % infill); a rack segment alone is 75 g and 6 hours. Two perimeters and 15 % infill take about 18 % off. Thinner fins would not: they are already all perimeter
+- **Filament and time:** about 242 g and 19 h 40 m for the ten-fin set on PrusaSlicer's own slow defaults (3 perimeters, 20 % infill); a rack segment alone is 75 g and 6 hours. Two perimeters and 15 % infill take about 18 % off the filament and 13 % off the time (198 g, 17 h 10 m). Slightly thinner fins would not help: they are already almost all perimeter
 - **Print the joint coupon first** (below)
 
 Nothing here has been printed yet. The geometry passes the repo's printability gate and a test-slice, and was checked layer by layer for anything that starts in mid-air. The fits are calculated, not field-tested.
@@ -52,7 +52,7 @@ Measure the core of your own tape roll as well. `core_id` assumes 25.4 mm.
 
 | Parameter | Default | What it does |
 |---|---|---|
-| `strip_len` | 40 mm | strip length, which is the fin pitch; 36 to 60. 50 gives 2 in strips; set `fins_per_rack = 4` with it to stay on a 220 mm bed |
+| `strip_len` | 40 mm | strip length, which is the fin pitch; 40 to 60 as shipped (36 with `ledge_l = 8`; the render stops and says so). 50 gives 2 in strips and needs `fins_per_rack = 4` to stay on a 220 mm bed; 60 needs `fins_per_rack = 3` |
 | `fins_per_rack` | 5 | fins on one rack segment |
 | `tape_w` | 19 mm | tape width, 12 to 25. Narrower tape wants its own render, not a 19 mm print |
 | `core_id` | 25.4 mm | inner diameter of the roll's core |
@@ -63,11 +63,11 @@ Measure the core of your own tape roll as well. `core_id` assumes 25.4 mm.
 | `heel_l` | 30 mm | length of the palm pad behind the rolls; 0 removes it |
 | `lanes` | 2 | rolls side by side. One lane needs a narrower joint (`joint_neck=6`, `joint_tip=13`); the render stops and says so |
 
-All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer sections; override on the command line with `-D 'strip_len=50'`. The fit proofs and the cutaway are selected with `part`.
+All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer sections; override on the command line, for example `-D strip_len=50 -D fins_per_rack=4`. The fit proofs and the cutaway are selected with `part`.
 
 ## Assembly & use
 
-![The parts lifted apart to show the drop-in joint](previews/joint.png)
+![The cradle's drafted dovetail key on the table, under a rack lifted off it](previews/joint.png)
 
 **Assemble, in order.** Stand the cradle on the table first. Lower a rack onto the cradle's key, a second rack onto the first, and the end cap onto the last. A part that will not go on is usually being put on in the wrong order: the key must already be on the table and the socket lowered over it. To take it apart, lift the end cap straight up, then each rack.
 
@@ -97,4 +97,4 @@ All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer s
 
 ![Two rack segments nested for storage](previews/nested.png)
 
-**What it will not do.** It does not cut. It weighs about 240 g plus the rolls, less than the pull of two tapes, so it slides unless you hold the palm pad; stick-on bumper feet on the flat underside help but do not replace the hand. Changing one roll lifts both. It takes tape on a 1 in core up to 62 mm across; packing tape and 3 in cores do not fit.
+**What it will not do.** It does not cut. With rolls it weighs about as much as two tapes pull (roughly 3 N against 2–8 N), so it slides unless you hold the palm pad; stick-on bumper feet on the flat underside help but do not replace the hand. Changing one roll lifts both. It takes tape on a 1 in core up to 62 mm across; packing tape and 3 in cores do not fit.

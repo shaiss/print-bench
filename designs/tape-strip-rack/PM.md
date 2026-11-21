@@ -11,10 +11,10 @@ A desk rack that turns one pull of tape into a row of equal strips, for someone 
 | N1 | Blade-free. The page never says or implies it cuts tape | 0 printed cutters; "scissors" on the page | brief #1062; D1 in NOTES | a field-tested tear edge exists (B1) |
 | N2 | Every part prints upright and without supports | 4 parts, 0 supports; the only bridge is the 22 mm gate lintel | brief #1062 | never |
 | N3 | Every part fits a 220 mm bed, and the page says how tight the rack is | longest part 207.8 mm; `printcheck.args` holds 220 × 220 | brief #1062; print review | the owner names a smaller bed |
-| N4 | The joint is a parameter with a print-this-first coupon | `joint_clear` 0.2 mm; coupon 43 min, 10 g | repo convention | never — it is the design's one tuned fit |
+| N4 | The joint is a parameter with a print-this-first coupon | `joint_clear` 0.2 mm; coupon 44 min, 10 g | repo convention | never — it is the design's one tuned fit |
 | N5 | The deliverable is the multi-object plate, never the assembled render | 4 objects in `build/tape-strip-rack-plate.3mf` | the multi-part-fuse field test | never |
 | N6 | The page claims only what was measured: it needs scissors, a steadying hand and a 1 in core; a hanging rack is held by friction; the tape must be pressed down | stated in Print settings and Assembly & use | reviews for #1062 | a field test supports a stronger claim |
-| N7 | No name, logo or dimension taken from the commercial reference | 0 | brief #1062, Open questions | never |
+| N7 | No name or logo, and no measured dimension, taken from the commercial reference. The fin count (10) and the pitch (40 mm, about twice the tape width) are estimates read off the owner's photo; every other number is a stated default | 0 names, 0 logos, 0 measurements; 2 photo estimates | brief #1062, Open questions | never |
 
 ## Out of scope
 
@@ -38,7 +38,7 @@ A desk rack that turns one pull of tape into a row of equal strips, for someone 
 
 **Page promise.** Pull once, press, snip, and eighteen strips are waiting — and it says plainly which of those steps are yours.
 
-**Mechanism honesty.** Nothing folds, snaps or prints in place, and every part is shown as it prints: the assembled hero is also the print orientation of three of the four parts. The design ships `ci.fitchecks`, so `readme-gate.sh` requirement 12 applies and the as-printed `contact-sheet` is embedded. The `joint` shot shows the parts lifted apart, so the page cannot hide how they go together.
+**Mechanism honesty.** Nothing folds, snaps or prints in place, and every part but the spindle is shown as it prints: the assembled hero is also the print orientation of three of the four parts, and the spindle prints on end. The design ships `ci.fitchecks`, so `readme-gate.sh` requirement 12 applies and the `contact-sheet` is embedded. The `joint` shot shows the parts lifted apart, so the page cannot hide how they go together.
 
 **Shot list — tier 1 (real renders).**
 
@@ -46,13 +46,14 @@ A desk rack that turns one pull of tape into a row of equal strips, for someone 
 |---|---|---|---|---|
 | product-hero | the whole rack as an object you would want on the table | 3/4 from the roll end | red, satin | `show_payload=false` |
 | hero | what one pull leaves behind: two tapes, eighteen strips | 3/4 | preview colours | default |
-| cradle | rolls, spindle, the gate the tapes pass under, the palm pad | close 3/4 | preview colours | default |
+| cradle | rolls, spindle and the gate the tapes pass under | close 3/4 | preview colours | default |
+| pad | the palm pad the steadying hand presses | from behind and above the rolls | preview colours | default |
 | section | the tape path: roll, under the gate, onto the fins | side, orthographic | preview colours | `part="cutaway"` |
 | fins | ribbed lands and guide posts | close 3/4 | preview colours | `show_payload=false` |
-| joint | the drop-in dovetail, parts lifted apart | close 3/4 | preview colours | `explode=16 show_payload=false` |
+| joint | the drafted dovetail key, under a rack lifted off it | low, from the side | preview colours | `explode=16 show_payload=false` |
 | nested | two rack segments stored fin-into-gap | 3/4 | preview colours | `part="nested"` |
 | coupon | what to print first | 3/4 | plain | coupon wrapper |
-| contact-sheet | the as-printed four-view | standard | plain | default |
+| contact-sheet | the assembled four-view; three of the four parts as they print | standard | preview colours | default |
 
 **AI tiers.** None: no `product-still.conf`, `lifestyle.conf` or `motion.conf`.
 
