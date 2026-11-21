@@ -194,6 +194,77 @@ def test_lock_leak_silent_with_pr_head_branch():          # negative control
     assert detectors.lock_leak([locked(281)], prs, [], NOW, CFG.lock_leak_hours) == []
 
 
+def test_lock_leak_silent_with_refs_linked_open_pr():     # #768 → #914
+    # A draft that uses Refs (not Closes) still corroborates the claim.
+    prs = [{"number": 914, "headRefName": "cursor/ovodyo-geodesic-ball-768-e6b6",
+            "title": "ovodyo: fix chamfer normals", "body": "Refs #768"}]
+    assert detectors.lock_leak([locked(768)], prs, [], NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_silent_with_refs_in_pr_title():
+    prs = [{"number": 914, "headRefName": "feature",
+            "title": "ovodyo fix (Refs #768)", "body": "no closing keyword here"}]
+    assert detectors.lock_leak([locked(768)], prs, [], NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_silent_with_cursor_branch_issue_token():  # #768
+    # cursor/* with the issue number as a delimited token corroborates.
+    assert detectors.lock_leak(
+        [locked(768)], [], ["cursor/ovodyo-geodesic-ball-768-e6b6"],
+        NOW, CFG.lock_leak_hours) == []
+    assert detectors.lock_leak(
+        [locked(768)], [], ["cursor/work-ending-768"],
+        NOW, CFG.lock_leak_hours) == []
+
+
+def test_lock_leak_cursor_branch_without_issue_token_does_not_corroborate():
+    # A bare cursor/* prefix (no issue-number token) never corroborates.
+    found = detectors.lock_leak(
+        [locked(768)], [], ["cursor/unrelated-work-e6b6"],
+        NOW, CFG.lock_leak_hours)
+    assert [f["number"] for f in found] == [768]
+
+
+def test_lock_leak_cursor_token_requires_hyphen_or_slash_delimiter():
+    # Non-digit boundaries alone are too loose (Bugbot / CodeRabbit on #952):
+    # a hex fragment, version fragment, or glued form must not corroborate.
+    cases = (
+        ("cursor/task768draft", 768),
+        ("cursor/abc768def", 768),
+        ("cursor/work-e6b6-only", 6),
+        ("cursor/v1.6.release", 6),
+    )
+    for branch, number in cases:
+        found = detectors.lock_leak(
+            [locked(number)], [], [branch], NOW, CFG.lock_leak_hours)
+        assert [f["number"] for f in found] == [number], (
+            f"{branch} must not corroborate #{number}"
+        )
+    # Positive controls: -768- mid-name and trailing -768 still clear.
+    assert detectors.lock_leak(
+        [locked(768)], [], ["cursor/ovodyo-geodesic-ball-768-e6b6"],
+        NOW, CFG.lock_leak_hours) == []
+    assert detectors.lock_leak(
+        [locked(768)], [], ["cursor/work-ending-768"],
+        NOW, CFG.lock_leak_hours) == []
+    # Hex suffix after a real -768- token must not also clear issue 6.
+    found = detectors.lock_leak(
+        [locked(6)], [], ["cursor/ovodyo-geodesic-ball-768-e6b6"],
+        NOW, CFG.lock_leak_hours)
+    assert [f["number"] for f in found] == [6]
+
+
+def test_lock_leak_refs_and_cursor_token_are_whole_number_safe():
+    # #76 must not match Refs #768 or a ...-768-... branch.
+    found = detectors.lock_leak(
+        [locked(76)],
+        [{"number": 914, "headRefName": "cursor/ovodyo-geodesic-ball-768-e6b6",
+          "title": "x", "body": "Refs #768"}],
+        ["cursor/ovodyo-geodesic-ball-768-e6b6"],
+        NOW, CFG.lock_leak_hours)
+    assert [f["number"] for f in found] == [76]
+
+
 def test_lock_leak_silent_under_age_threshold():          # negative control
     fresh = locked(281, locked_at="2026-08-16T05:30:00Z")  # 0.5h < 2h
     assert detectors.lock_leak([fresh], [], [], NOW, CFG.lock_leak_hours) == []
