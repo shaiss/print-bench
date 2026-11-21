@@ -186,6 +186,10 @@ translate([0, 110, 0])
     let_joint(let_ns, let_np, let_w, let_t, let_L, let_g,
               finger_w = let_fw, root_fillet = let_r, E = 2000,
               theta = let_theta);
+// Boundary cell: t and w sit exactly ON their floors (0.8 / 1.2) with
+// root_fillet = 0.5·t — proves the guards accept their own floors. Not an
+// endorsement to print at the floor; the harvest site's bar_w = 2.0 / r = 0.8
+// is the number you print (Jane/PM on #1057).
 translate([80, 110, 0])
     let_joint(1, 2, 1.2, 0.8, 14, 6, finger_w = 3.5, root_fillet = 0.4,
               E = 2000, theta = let_theta);

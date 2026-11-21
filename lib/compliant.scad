@@ -997,9 +997,13 @@ module _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
                              " under the 0.8 mm minimum feature"));
     // let-folding-panel.scad:136 via _root_fillet_guards — r > 0 and ≥ 0.5·t.
     _root_fillet_guards(root_fillet, bar_t);
-    // let-folding-panel.scad:137 — three perimeters.
+    // let-folding-panel.scad:137 — harvest floor 1.2 mm. The message does
+    // NOT claim "3 perimeters": at a stock 0.4 mm nozzle (0.42–0.45 mm lines)
+    // 1.2 mm is two walls + a gap-fill sliver, not three full lines (Jane on
+    // #1057). Keep the floor; say what the plastic actually gets.
     assert(bar_w >= 1.2, str("LET torsion bar w = ", bar_w,
-                             " under 3 perimeters — it will tear"));
+                             " under the 1.2 mm floor (harvest site; ~2 walls ",
+                             "at a 0.4 mm nozzle) — it will tear"));
     // let-folding-panel.scad:138 — free torsion span after the root fillets.
     assert(bar_L > 2 * root_fillet,
            str("LET no free torsion span left after the root fillets (L=",
@@ -1053,6 +1057,7 @@ module _let_joint_row_2d(n_parallel, bar_w, bar_t, bar_L, gap, finger_w,
 // 2D LET joint in the local frame above. Generator owns its sampling
 // (issue #1048) — let-folding-panel.scad:61 pins $fn = 48; a caller's
 // quality preset must not move the rooted closing (parity is at 48).
+// root_fillet = undef → 0.5·bar_t (the N3 floor, not the harvest's 0.8).
 module let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
                     finger_w = 3.5, root_fillet = undef, embed = 1) {
     rf = is_undef(root_fillet) ? 0.5 * bar_t : root_fillet;
@@ -1072,6 +1077,15 @@ module let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
 // is given (radians), the doc bending upper-bound root stress and the
 // torsion surface shear (the design stress). E in MPa (PETG ≈ 2000),
 // ν = 0.4 — the harvest-site datum.
+//
+// Defaults & adoption (Jane/PM on #1057):
+//   * root_fillet = undef → 0.5·bar_t, the N3 / docs floor — NOT the harvest
+//     site's proven 0.8. Despec deliberately for cycle life.
+//   * Echoes assume the *printed* bar_t. Pin layer height so the slicer
+//     realises that t (harvest pins 0.2 mm), or coupon-tune after the fact.
+//   * An adopting design's README carries the material and bed lines the
+//     harvest site already states (not PLA — live flexures crack; PETG on
+//     smooth PEI welds a large flat sheet) — see designs/let-folding-panel/.
 module let_joint(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
                  finger_w = 3.5, root_fillet = undef, embed = 1,
                  E = 2000, nu = 0.4, theta = undef) {
