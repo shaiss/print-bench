@@ -326,10 +326,12 @@ exports (`rod_d = 25.4` or your measured barrel) and the same `thread_tol` on
    out to its boss, and thread it on. Measure **wall-to-wall**, then cut the
    rod ≈ **40 mm shorter** (38–42 mm is the safe band; between sizes, cut
    long toward 38 and trim). The boss tips sit 18 mm in from each wall, so
-   push one end in until it bottoms, then push the other end in; it sits
-   2–6 mm short of its boss tip, and that gap is the install slack (its
-   witness slot reads short by design). The hard stop is wall-to-wall −
-   **36 mm**, the only length that bottoms both ends.
+   the rod bottoms only one end at a time: slide it toward one wall until
+   that end bottoms, and the other end then sits 2–6 mm short of its boss
+   tip (that gap is the install slack, and that end's witness slot reads
+   short by design; sliding the rod moves the gap to the other end). The
+   hard stop is wall-to-wall − **36 mm**, the only length that bottoms
+   both ends.
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
    thread) and lift the rod out. **Grooved bosses** (`anti_rotate` on, a
    source print): the wall-face lands resist that unthread torque on a
