@@ -93,4 +93,4 @@ view. (No fusecheck here: it is one elastic piece, not a print-in-place pair.)
 | 2026-08-24 | t = 1.2 mm default (floor is 0.8) | headroom in the t³ stiffness budget; sweep tunes it per printer |
 | 2026-08-24 | v1 folds but does not hold | a torsional flexure is elastic by nature; a hold is a second mechanism (B1) |
 | 2026-08-24 | No `lib/` changes this PR | #202 candidates recorded in NOTES.md; extraction waits for a second consumer |
-| 2026-11-21 | B3 closed-by-#1057 (LET half) | `let_joint` harvested into `lib/compliant.scad` (#1048); design keeps its inline copy; per-design adoption deferred |
+| 2026-11-21 | B3 closed-by-#1057 (LET half) | Owner harvest-first ruling on #202: extract and verify the library primitive now (parity-locked), then defer per-design adoption to a follow-up — so B3 closes before a second consumer lands. `let_joint` harvested into `lib/compliant.scad` (#1048); design keeps its inline copy |

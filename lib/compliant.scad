@@ -900,8 +900,10 @@ module cross_axis_pivot(t, L, w, root_fillet, alpha = 45, stop_angle = 40,
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// Predictions — textually identical to let-folding-panel.scad:113-131 so a
-// design adopting them gets bit-identical numbers (OpenSCAD ==).
+// Predictions — match let-folding-panel.scad:113-131 at the recorded
+// production harvest settings (OpenSCAD ==). The library normalizes the
+// long/short sides in J (max/min); the inline design uses t/w directly, so
+// a swapped (bar_t > bar_w) call is NOT bit-identical to the inline copy.
 // ---------------------------------------------------------------------------
 
 // St-Venant torsion constant of a rectangular bar, mm^4 —
@@ -941,6 +943,7 @@ function let_joint_K(n_series, n_parallel, bar_w, bar_t, bar_L, E = 2000, nu = 0
 // let-folding-panel.scad:122-123. L_bend = gap − bar_w/2. θ in radians.
 function let_joint_sigma(bar_t, bar_w, gap, theta, E = 2000) =
     assert(bar_t > 0, str("let_joint_sigma: bar_t must be positive (got ", bar_t, ")"))
+    assert(bar_w > 0, str("let_joint_sigma: bar_w must be positive (got ", bar_w, ")"))
     assert(gap > bar_w / 2, str("let_joint_sigma: gap must exceed bar_w/2 (got gap=", gap, ", bar_w=", bar_w, ")"))
     assert(theta >= 0, str("let_joint_sigma: theta must not be negative (got ", theta, ")"))
     assert(E > 0, str("let_joint_sigma: E must be positive (got ", E, " MPa)"))
@@ -949,6 +952,8 @@ function let_joint_sigma(bar_t, bar_w, gap, theta, E = 2000) =
 // Torsion surface shear τ = G·θ·r_c/L (MPa) — the design stress when torsion
 // dominates (let-folding-panel.scad:124-125). θ in radians.
 function let_joint_tau(bar_w, bar_t, bar_L, theta, E = 2000, nu = 0.4) =
+    assert(bar_w > 0, str("let_joint_tau: bar_w must be positive (got ", bar_w, ")"))
+    assert(bar_t > 0, str("let_joint_tau: bar_t must be positive (got ", bar_t, ")"))
     assert(bar_L > 0, str("let_joint_tau: bar_L must be positive (got ", bar_L, ")"))
     assert(theta >= 0, str("let_joint_tau: theta must not be negative (got ", theta, ")"))
     let_joint_G(E, nu) * theta * sqrt(pow(bar_w / 2, 2) + pow(bar_t / 2, 2)) / bar_L;
@@ -959,8 +964,11 @@ function let_joint_tau(bar_w, bar_t, bar_L, theta, E = 2000, nu = 0.4) =
 //
 // Fold line along X at y = 0. One torsion bar (or n_series bars stacked along
 // Y) with interdigitated fingers: A-side at even pitches toward −Y, B-side at
-// odd pitches toward +Y. Free torsion span between adjacent fingers is exactly
-// bar_L (pitch = finger_w + bar_L). Strip starts at x = 0.
+// odd pitches toward +Y. bar_L is the nominal, unfilleted free span between
+// adjacent fingers (pitch = finger_w + bar_L); root fillets eat into that
+// span, so the measurable straight length after filleting is shorter. The
+// harvested prediction model still uses this nominal bar_L. Strip starts at
+// x = 0.
 //
 //       y
 //       ^        B fingers (odd) → panel / next series row at +gap
@@ -1019,6 +1027,15 @@ module _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
     assert(n_series >= 1, str("LET n_series must be >= 1 (got ", n_series, ")"));
     assert(finger_w > 0, str("LET finger_w must be positive (got ", finger_w, ")"));
     assert(embed >= 0, str("LET embed must not be negative (got ", embed, ")"));
+    // Multi-row: a finger tip at gap+embed must not reach the opposite outer
+    // panel face at (2·n_series−1)·gap, or every row bridges both panels and
+    // the series K prediction (÷ n_series) is off by ~n_series² (CodeRabbit
+    // on #1057). Threshold embed < 2·gap − bar_w/2; n_series=1 keeps the
+    // harvest site's unbounded embed into its one pair of panels.
+    assert(n_series == 1 || embed < 2 * gap - bar_w / 2,
+           str("LET embed = ", embed, " lets a series row reach the opposite ",
+               "panel face (need embed < 2*gap - bar_w/2 = ",
+               2 * gap - bar_w / 2, ")"));
 }
 
 // One series-row silhouette: A-half ∪ B-half, each rooted separately —
@@ -1112,15 +1129,21 @@ module let_joint(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
              " / ", n_series, " series rows; J = ", J, " mm^4, E = ", E,
              " MPa, nu = ", nu, ") — a prediction for the coupon to verify"));
     if (!is_undef(theta)) {
+        // Series model: each row takes ~theta/n_series. tau_bar uses the
+        // per-row angle so multi-row stress matches K_tot. sigma_root stays
+        // the full-fold doc upper bound (explicitly labeled) — Bugbot/#1057
+        // asked to split both; CodeRabbit keeps sigma as the full-fold bound.
+        theta_row = theta / n_series;
         L_bend = gap - bar_w / 2;
         sig = E * bar_t * theta / (2 * L_bend);
         r_c = sqrt(pow(bar_w / 2, 2) + pow(bar_t / 2, 2));
-        tau = Gs * theta * r_c / bar_L;
+        tau = Gs * theta_row * r_c / bar_L;
         echo(str("[compliant] let_joint: at theta = ", theta * 180 / PI,
                  " deg: sigma_root = ", sig,
                  " MPa (doc upper bound if a root took the full fold), ",
                  "tau_bar = ", tau,
-                 " MPa (the design stress here — torsion dominates)"));
+                 " MPa (per-row twist theta/", n_series,
+                 " — the design stress here; torsion dominates)"));
     }
     linear_extrude(bar_t)
         let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
