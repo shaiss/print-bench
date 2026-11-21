@@ -16,6 +16,11 @@ once reviewed — add a line, never reframe one.
   eye on ±x so the cut normal is along the view): male thread on the boss
   neck, female groove in the collar, rod bore above, countersunk screw hole
   through the boss. The internal-fit evidence shot.
+- **cutaway-wide** — orthographic diametral section (the +y half removed)
+  face-on from +y: full flange-to-flange width in frame, printed thread
+  engaged on both sides of the bore (the black notches at the flange floor
+  are the anti-rotation grooves in section). Complements
+  `cutaway` / `cutaway-section` without moving those frozen cameras.
 - **collar-print** — the collar alone in its print orientation, rod mouth
   down: shows the tube that lands on the bed, the 45° flare up to the grip
   band, and that the internal thread sits at the top of the print.
