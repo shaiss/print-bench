@@ -282,9 +282,9 @@ surfaces studies awaiting a read live in
   sacrificial membranes and a teardrop-bore hinge, extracted from the
   archived sushi-battleship),
   `compliant.scad` (flexure primitives — the bistable snap-through arch,
-  weld-safe flexure-root fillets, the small-length flexural pivot and the
-  cross-axis flexure pivot, harvested from the compliant designs; issue
-  #202 stage 2),
+  weld-safe flexure-root fillets, the small-length flexural pivot, the
+  cross-axis flexure pivot and the LET joint, harvested from the compliant
+  designs; issue #202 stage 3),
   `spaceframe.scad` (parametric space-frame trusses — warren/pratt/vierendeel
   topologies, cosine taper to needle ends, a separate core/web split for
   two-tone exports),

@@ -170,3 +170,29 @@ echo(str("[compliant-demo] SLFP: K = ", small_length_pivot_K(sl_t, sl_L, sl_w),
 echo(str("[compliant-demo] cross-axis: K = ", cross_axis_pivot_K(0.8, 28, 8),
          " N*mm/rad, sigma_weld = ",
          cross_axis_pivot_sigma_weld(0.8, 28, 40 * PI / 180), " MPa"));
+
+// ---------------------------------------------------------------------------
+// Station 10: let_joint — let-folding-panel's production LET
+// (n_series=1, n_parallel=3 ↔ fingers=4, bar_w=2.0, bar_t=1.2, bar_L=14,
+// gap=6, finger_w=3.5, root_fillet=0.8). Echoes torsion-dominated K and
+// root σ / τ at theta_max = 90°. Beside it, the accepting boundary at
+// bar_t = 0.8 with root_fillet = 0.4 and n_parallel = 2 (fingers = 3).
+// ---------------------------------------------------------------------------
+let_ns = 1; let_np = 3;
+let_w = 2.0; let_t = 1.2; let_L = 14; let_g = 6;
+let_fw = 3.5; let_r = 0.8;
+let_theta = 90 * PI / 180;
+translate([0, 110, 0])
+    let_joint(let_ns, let_np, let_w, let_t, let_L, let_g,
+              finger_w = let_fw, root_fillet = let_r, E = 2000,
+              theta = let_theta);
+translate([80, 110, 0])
+    let_joint(1, 2, 1.2, 0.8, 14, 6, finger_w = 3.5, root_fillet = 0.4,
+              E = 2000, theta = let_theta);
+
+echo(str("[compliant-demo] LET: K = ",
+         let_joint_K(let_ns, let_np, let_w, let_t, let_L),
+         " N*mm/rad, sigma_root = ",
+         let_joint_sigma(let_t, let_w, let_g, let_theta),
+         " MPa, tau_bar = ",
+         let_joint_tau(let_w, let_t, let_L, let_theta), " MPa"));

@@ -2,10 +2,11 @@
 // All dimensions in millimeters. Use from a design with:
 //   use <compliant.scad>
 //
-// Issue #202, STAGE 2 of 4 (harvest-first order, owner ruling; stage 1 was
-// the bistable arch + root fillet — #758). This stage adds the small-length
-// and cross-axis flexure pivots. The LET joint and the stiffness coupon are
-// later stages (#1048, #1049). The knowledge behind every number here is
+// Issue #202, STAGE 3 of 4 (harvest-first order, owner ruling; stage 1 was
+// the bistable arch + root fillet — #758; stage 2 the small-length and
+// cross-axis flexure pivots — #1047/#1052). This stage adds the LET
+// (lamina-emergent torsional) joint. The stiffness coupon is the remaining
+// stage (#1049). The knowledge behind every number here is
 // docs/advanced-techniques.md, Domain 1.
 //
 // HARVESTED, NOT INVENTED. Every module below is lifted from a design that
@@ -22,6 +23,7 @@
 //   rooted_2d                          designs/let-folding-panel/let-folding-panel.scad:72-76
 //   small_length_pivot_2d / _pivot     designs/snap-cantilever-clip/snap-cantilever-clip.scad:85-90,134-149
 //   cross_axis_pivot_2d / _pivot       designs/cross-axis-flexure-pivot/cross-axis-flexure-pivot.scad:151-265
+//   let_joint_2d / let_joint           designs/let-folding-panel/let-folding-panel.scad:85-152
 //
 // One-time parity evidence (recorded here because the designs are not
 // switched to this library — scratch fixtures that `use` each design and
@@ -91,6 +93,27 @@
 //                     module body (SLFP 96, cross-axis 64) so a caller's
 //                     quality preset cannot move the fit — same discipline
 //                     as nuggs-coupling.scad; issue #1047 "owns its sampling".
+//
+// Stage-3 parity (OpenSCAD 2021.01 / CGAL, 2026-11-20) — scratch fixtures
+// only, nothing committed beyond this note:
+//   let-folding-panel  hinge_A_2d() ∪ hinge_B_2d() at production
+//                     (t=1.2, L=14, w=2.0, r=0.8, fingers=4, finger_w=3.5,
+//                     finger_reach=6, embed=1, $fn=48) vs
+//                     let_joint_2d(n_series=1, n_parallel=3, bar_w=2.0,
+//                     bar_t=1.2, bar_L=14, gap=6, finger_w=3.5,
+//                     root_fillet=0.8): linear_extrude(t) ASCII STL
+//                     BYTE-IDENTICAL (sha256 e42fca31…414a01a, 596
+//                     facets); 2D/CGAL symmetric difference EMPTY both ways.
+//                     Predictions bit-equal (OpenSCAD ==): K_joint =
+//                     n_spans·G·J/L, sigma_root = E·t·θ/(2·L_bend),
+//                     tau_bar = G·θ·r_c/L at theta_max=90°. Negative
+//                     control: lib at n_parallel=2 (fingers=3) against the
+//                     design's fingers=4 leaves a non-empty difference.
+//                     let_joint pins $fn = 48 inside the module body
+//                     (let-folding-panel.scad:61) so a caller's quality
+//                     preset cannot move the rooted closing — same
+//                     discipline as the pivots; issue #1048 "owns its
+//                     sampling".
 //
 // ---------------------------------------------------------------------------
 // THE LOCAL FRAME (the reason this generator exists). An arch is built in its
@@ -870,4 +893,198 @@ module cross_axis_pivot(t, L, w, root_fillet, alpha = 45, stop_angle = 40,
         translate([0, 0, w])
             linear_extrude(h_pad)
                 translate([tab_cx, 0]) _cross_axis_rounded2d(tab_len, tab_w, tab_r);
+}
+
+// ===========================================================================
+// Stage 3 — LET (lamina-emergent torsional) joint
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Predictions — textually identical to let-folding-panel.scad:113-131 so a
+// design adopting them gets bit-identical numbers (OpenSCAD ==).
+// ---------------------------------------------------------------------------
+
+// St-Venant torsion constant of a w × t rectangular bar, mm^4 —
+// let-folding-panel.scad:119. Assumes w ≥ t (bar wider than thick); the
+// harvest site always does (w=2, t=1.2).
+function let_joint_J(bar_w, bar_t) =
+    assert(bar_w > 0, str("let_joint_J: bar_w must be positive (got ", bar_w, ")"))
+    assert(bar_t > 0, str("let_joint_J: bar_t must be positive (got ", bar_t, ")"))
+    bar_w * pow(bar_t, 3) / 3
+        * (1 - 0.63 * (bar_t / bar_w) + 0.052 * pow(bar_t / bar_w, 5));
+
+// Shear modulus from E and ν — let-folding-panel.scad:116 (ν = 0.4 default).
+function let_joint_G(E = 2000, nu = 0.4) =
+    assert(E > 0, str("let_joint_G: modulus E must be positive (got ", E, " MPa)"))
+    assert(nu > -1 && nu < 0.5, str("let_joint_G: Poisson ratio nu must be in (-1, 0.5) (got ", nu, ")"))
+    E / (2 * (1 + nu));
+
+// Torsion-dominated joint stiffness K (N·mm/rad) —
+// let-folding-panel.scad:120-121. Spans act in parallel across X; series
+// rows divide (docs/advanced-techniques.md: series softens, parallel stiffens).
+function let_joint_K(n_series, n_parallel, bar_w, bar_t, bar_L, E = 2000, nu = 0.4) =
+    assert(n_series >= 1, str("let_joint_K: n_series must be >= 1 (got ", n_series, ")"))
+    assert(n_parallel >= 2, str("let_joint_K: n_parallel must be >= 2 (got ", n_parallel, ")"))
+    assert(bar_L > 0, str("let_joint_K: bar_L must be positive (got ", bar_L, ")"))
+    n_parallel * let_joint_G(E, nu) * let_joint_J(bar_w, bar_t) / bar_L / n_series;
+
+// Doc bending upper-bound root stress σ ≈ E·t·θ/(2·L_bend) (MPa) —
+// let-folding-panel.scad:122-123. L_bend = gap − bar_w/2. θ in radians.
+function let_joint_sigma(bar_t, bar_w, gap, theta, E = 2000) =
+    assert(bar_t > 0, str("let_joint_sigma: bar_t must be positive (got ", bar_t, ")"))
+    assert(gap > bar_w / 2, str("let_joint_sigma: gap must exceed bar_w/2 (got gap=", gap, ", bar_w=", bar_w, ")"))
+    assert(theta >= 0, str("let_joint_sigma: theta must not be negative (got ", theta, ")"))
+    assert(E > 0, str("let_joint_sigma: E must be positive (got ", E, " MPa)"))
+    E * bar_t * theta / (2 * (gap - bar_w / 2));
+
+// Torsion surface shear τ = G·θ·r_c/L (MPa) — the design stress when torsion
+// dominates (let-folding-panel.scad:124-125). θ in radians.
+function let_joint_tau(bar_w, bar_t, bar_L, theta, E = 2000, nu = 0.4) =
+    assert(bar_L > 0, str("let_joint_tau: bar_L must be positive (got ", bar_L, ")"))
+    assert(theta >= 0, str("let_joint_tau: theta must not be negative (got ", theta, ")"))
+    let_joint_G(E, nu) * theta * sqrt(pow(bar_w / 2, 2) + pow(bar_t / 2, 2)) / bar_L;
+
+// ---------------------------------------------------------------------------
+// LET joint — local frame
+// ---------------------------------------------------------------------------
+//
+// Fold line along X at y = 0. One torsion bar (or n_series bars stacked along
+// Y) with interdigitated fingers: A-side at even pitches toward −Y, B-side at
+// odd pitches toward +Y. Free torsion span between adjacent fingers is exactly
+// bar_L (pitch = finger_w + bar_L). Strip starts at x = 0.
+//
+//       y
+//       ^        B fingers (odd) → panel / next series row at +gap
+//       |    ┌───┐     ┌───┐
+//   ####|====┘   └=====┘   └====  ← torsion bar(s), width bar_w
+//       |  ┌───┐     ┌───┐
+//       |  └───┘     └───┘        A fingers (even) → panel at −gap
+//       +-----------------------------------------------> x
+//       0
+//
+// n_parallel = number of torsion spans (= fingers − 1). n_series = number of
+// bar rows along Y (series softens); row centres sit 2·gap apart so a finger
+// of length gap from row s meets the near face of row s±1. Harvest site is
+// n_series = 1, n_parallel = 3 (fingers = 4). Place with translate/rotate/
+// mirror — attach panels at the outer finger tips (y ≤ −gap and y ≥
+// +(2·(n_series−1)·gap + gap), with the harvest's 1 mm embed past those
+// faces for a robust union).
+// ---------------------------------------------------------------------------
+
+module _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                         finger_w, root_fillet, embed) {
+    // let-folding-panel.scad:135 — two-perimeter floor.
+    assert(bar_t >= 0.8, str("LET torsion bar t = ", bar_t,
+                             " under the 0.8 mm minimum feature"));
+    // let-folding-panel.scad:136 via _root_fillet_guards — r > 0 and ≥ 0.5·t.
+    _root_fillet_guards(root_fillet, bar_t);
+    // let-folding-panel.scad:137 — three perimeters.
+    assert(bar_w >= 1.2, str("LET torsion bar w = ", bar_w,
+                             " under 3 perimeters — it will tear"));
+    // let-folding-panel.scad:138 — free torsion span after the root fillets.
+    assert(bar_L > 2 * root_fillet,
+           str("LET no free torsion span left after the root fillets (L=",
+               bar_L, ", 2r=", 2 * root_fillet, ")"));
+    // let-folding-panel.scad:139 — fingers >= 3 ↔ n_parallel >= 2.
+    assert(n_parallel >= 2, str("LET n_parallel = ", n_parallel,
+                                " — a LET needs at least 2 fingers on one side ",
+                                "(n_parallel >= 2, fingers = n_parallel + 1)"));
+    // let-folding-panel.scad:140 — fingers too short to bridge the panels.
+    assert(gap > bar_w / 2 + 2, str("LET fingers too short to bridge the panels ",
+                                    "(gap=", gap, ", need > ", bar_w / 2 + 2, ")"));
+    // API holes the inline copy never had as parameters.
+    assert(n_series >= 1, str("LET n_series must be >= 1 (got ", n_series, ")"));
+    assert(finger_w > 0, str("LET finger_w must be positive (got ", finger_w, ")"));
+    assert(embed >= 0, str("LET embed must not be negative (got ", embed, ")"));
+}
+
+// One series-row silhouette: A-half ∪ B-half, each rooted separately —
+// let-folding-panel.scad:85-109 VERBATIM (the harvest splits the bar so each
+// half carries its own root fillets; a single closing of the union is the
+// same solid but re-samples the offsets and is no longer byte-identical).
+// For n_series = 1 this is hinge_A_2d ∪ hinge_B_2d.
+module _let_joint_row_2d(n_parallel, bar_w, bar_t, bar_L, gap, finger_w,
+                         root_fillet, embed) {
+    fingers = n_parallel + 1;
+    pitch = finger_w + bar_L;
+    strip_len = fingers * pitch;
+    // A-side — let-folding-panel.scad:87-96.
+    rooted_2d(root_fillet, bar_t) {
+        translate([0, -bar_w / 2]) square([strip_len, bar_w / 2]);
+        for (i = [0 : fingers - 1])
+            if (i % 2 == 0) {
+                x0 = i * pitch + (pitch - finger_w) / 2;
+                translate([x0, -gap - embed])
+                    square([finger_w, gap + embed + bar_w / 2]);
+            }
+    }
+    // B-side — let-folding-panel.scad:100-109.
+    rooted_2d(root_fillet, bar_t) {
+        translate([0, 0]) square([strip_len, bar_w / 2]);
+        for (i = [0 : fingers - 1])
+            if (i % 2 == 1) {
+                x0 = i * pitch + (pitch - finger_w) / 2;
+                translate([x0, -bar_w / 2])
+                    square([finger_w, bar_w / 2 + gap + embed]);
+            }
+    }
+}
+
+// 2D LET joint in the local frame above. Generator owns its sampling
+// (issue #1048) — let-folding-panel.scad:61 pins $fn = 48; a caller's
+// quality preset must not move the rooted closing (parity is at 48).
+module let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                    finger_w = 3.5, root_fillet = undef, embed = 1) {
+    rf = is_undef(root_fillet) ? 0.5 * bar_t : root_fillet;
+    _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                      finger_w, rf, embed);
+    $fn = 48;
+    // Series rows along Y: centres 2·gap apart so a gap-long finger from
+    // row s meets the near edge of row s±1. n_series = 1 is the harvest site.
+    for (s = [0 : n_series - 1])
+        translate([0, s * 2 * gap])
+            _let_joint_row_2d(n_parallel, bar_w, bar_t, bar_L, gap, finger_w,
+                              rf, embed);
+}
+
+// Extruded LET joint. Echoes torsion-dominated predicted K and, when theta
+// is given (radians), the doc bending upper-bound root stress and the
+// torsion surface shear (the design stress). E in MPa (PETG ≈ 2000),
+// ν = 0.4 — the harvest-site datum.
+module let_joint(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                 finger_w = 3.5, root_fillet = undef, embed = 1,
+                 E = 2000, nu = 0.4, theta = undef) {
+    rf = is_undef(root_fillet) ? 0.5 * bar_t : root_fillet;
+    _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                      finger_w, rf, embed);
+    // Assert BEFORE prediction math — see small_length_pivot.
+    assert(E > 0, str("LET modulus E must be positive (got ", E, " MPa)"));
+    assert(nu > -1 && nu < 0.5, str("LET Poisson ratio nu must be in (-1, 0.5) (got ", nu, ")"));
+    if (!is_undef(theta))
+        assert(theta >= 0, str("LET theta must not be negative (got ", theta, ")"));
+    // Inline (same expressions as let_joint_J / _G / _K / _sigma / _tau) so
+    // the echo cannot outrun the asserts above.
+    Gs = E / (2 * (1 + nu));
+    J = bar_w * pow(bar_t, 3) / 3
+        * (1 - 0.63 * (bar_t / bar_w) + 0.052 * pow(bar_t / bar_w, 5));
+    K_bar = Gs * J / bar_L;
+    K_tot = n_parallel * K_bar / n_series;
+    echo(str("[compliant] let_joint: predicted K = ", K_tot,
+             " N*mm/rad (", n_parallel, " parallel spans x ", K_bar,
+             " / ", n_series, " series rows; J = ", J, " mm^4, E = ", E,
+             " MPa, nu = ", nu, ") — a prediction for the coupon to verify"));
+    if (!is_undef(theta)) {
+        L_bend = gap - bar_w / 2;
+        sig = E * bar_t * theta / (2 * L_bend);
+        r_c = sqrt(pow(bar_w / 2, 2) + pow(bar_t / 2, 2));
+        tau = Gs * theta * r_c / bar_L;
+        echo(str("[compliant] let_joint: at theta = ", theta * 180 / PI,
+                 " deg: sigma_root = ", sig,
+                 " MPa (doc upper bound if a root took the full fold), ",
+                 "tau_bar = ", tau,
+                 " MPa (the design stress here — torsion dominates)"));
+    }
+    linear_extrude(bar_t)
+        let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                     finger_w, rf, embed);
 }
