@@ -23,8 +23,9 @@ must read as a *teachable* LET, not just a working one.
 ## Out of scope
 
 **Deferred** (backlog below): a fold-*hold* mechanism (detent / over-center
-lock — the joint is elastic and springs back); `lib/compliant.scad` extraction
-(#202 — stays in the design file this PR); an `animations.conf` fold animation.
+lock — the joint is elastic and springs back); an `animations.conf` fold
+animation. (`lib/compliant.scad` LET extraction is closed-by-#1057 — the
+design keeps its inline copy; adoption is a later per-design follow-up.)
 
 **Never:** printing it in PLA as a live flexure (doc fatigue ranking — it
 cracks); a posed `demo_fold ≠ 0` model as the deliverable (a folded model is
@@ -75,7 +76,7 @@ view. (No fusecheck here: it is one elastic piece, not a print-in-place pair.)
 |---|---|---|---|
 | B1 | Fold-hold mechanism (detent / over-center) | the most common real need — a fold that stays folded | a second small feature + coupon re-tune |
 | B2 | `animations.conf` fold GIF | the mechanism sells itself in motion; page currently static | one manifest entry |
-| B3 | `lib/compliant.scad` extraction (#202) | only pays when a second design needs it | lib file + demo + guards/mates confs |
+| B3 | ~~`lib/compliant.scad` extraction (#202)~~ | **closed-by-#1057** for the LET half — design keeps its inline copy per the harvest deferral; adoption is a later per-design follow-up | — |
 | B4 | Panel-size presets (A6/electronics enclosure) | sizing is already parametric; presets are convenience | trivial |
 
 ## Open decisions
@@ -92,3 +93,4 @@ view. (No fusecheck here: it is one elastic piece, not a print-in-place pair.)
 | 2026-08-24 | t = 1.2 mm default (floor is 0.8) | headroom in the t³ stiffness budget; sweep tunes it per printer |
 | 2026-08-24 | v1 folds but does not hold | a torsional flexure is elastic by nature; a hold is a second mechanism (B1) |
 | 2026-08-24 | No `lib/` changes this PR | #202 candidates recorded in NOTES.md; extraction waits for a second consumer |
+| 2026-11-21 | B3 closed-by-#1057 (LET half) | `let_joint` harvested into `lib/compliant.scad` (#1048); design keeps its inline copy; per-design adoption deferred |
