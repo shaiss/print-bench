@@ -189,6 +189,14 @@ translate([0, 110, 0])
 translate([80, 110, 0])
     let_joint(1, 2, 1.2, 0.8, 14, 6, finger_w = 3.5, root_fillet = 0.4,
               E = 2000, theta = let_theta);
+// Two-row series (Copilot #1057): odd row flips finger parity so facing
+// fingers share an X pitch and union into ONE body. Body-count proof is
+// tools/printcheck/tests/test_compliant_let_series.py (fusecheck == 1),
+// with the unflipped stack as its negative control (bodies > 1).
+translate([160, 110, 0])
+    let_joint(2, let_np, let_w, let_t, let_L, let_g,
+              finger_w = let_fw, root_fillet = let_r, E = 2000,
+              theta = let_theta);
 
 echo(str("[compliant-demo] LET: K = ",
          let_joint_K(let_ns, let_np, let_w, let_t, let_L),
@@ -196,3 +204,7 @@ echo(str("[compliant-demo] LET: K = ",
          let_joint_sigma(let_t, let_w, let_g, let_theta),
          " MPa, tau_bar = ",
          let_joint_tau(let_w, let_t, let_L, let_theta), " MPa"));
+echo(str("[compliant-demo] LET J swap-invariant: J(w,t) = ",
+         let_joint_J(let_w, let_t), ", J(t,w) = ",
+         let_joint_J(let_t, let_w),
+         " — equal = ", let_joint_J(let_w, let_t) == let_joint_J(let_t, let_w)));

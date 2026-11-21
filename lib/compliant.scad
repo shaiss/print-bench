@@ -904,14 +904,19 @@ module cross_axis_pivot(t, L, w, root_fillet, alpha = 45, stop_angle = 40,
 // design adopting them gets bit-identical numbers (OpenSCAD ==).
 // ---------------------------------------------------------------------------
 
-// St-Venant torsion constant of a w × t rectangular bar, mm^4 —
-// let-folding-panel.scad:119. Assumes w ≥ t (bar wider than thick); the
-// harvest site always does (w=2, t=1.2).
+// St-Venant torsion constant of a rectangular bar, mm^4 —
+// let-folding-panel.scad:119. The approximation needs the LONG side as `a`
+// and the SHORT as `b` (a ≥ b); normalize with max/min so a swapped
+// (bar_t > bar_w) call returns the same J as the axis-exchanged rectangle
+// (Copilot on #1057). Harvest site is w=2 ≥ t=1.2.
 function let_joint_J(bar_w, bar_t) =
     assert(bar_w > 0, str("let_joint_J: bar_w must be positive (got ", bar_w, ")"))
     assert(bar_t > 0, str("let_joint_J: bar_t must be positive (got ", bar_t, ")"))
-    bar_w * pow(bar_t, 3) / 3
-        * (1 - 0.63 * (bar_t / bar_w) + 0.052 * pow(bar_t / bar_w, 5));
+    let (
+        a = max(bar_w, bar_t),
+        b = min(bar_w, bar_t)
+    ) a * pow(b, 3) / 3
+        * (1 - 0.63 * (b / a) + 0.052 * pow(b / a, 5));
 
 // Shear modulus from E and ν — let-folding-panel.scad:116 (ν = 0.4 default).
 function let_joint_G(E = 2000, nu = 0.4) =
@@ -923,7 +928,11 @@ function let_joint_G(E = 2000, nu = 0.4) =
 // let-folding-panel.scad:120-121. Spans act in parallel across X; series
 // rows divide (docs/advanced-techniques.md: series softens, parallel stiffens).
 function let_joint_K(n_series, n_parallel, bar_w, bar_t, bar_L, E = 2000, nu = 0.4) =
+    assert(n_series == floor(n_series),
+           str("let_joint_K: n_series must be an integer (got ", n_series, ")"))
     assert(n_series >= 1, str("let_joint_K: n_series must be >= 1 (got ", n_series, ")"))
+    assert(n_parallel == floor(n_parallel),
+           str("let_joint_K: n_parallel must be an integer (got ", n_parallel, ")"))
     assert(n_parallel >= 2, str("let_joint_K: n_parallel must be >= 2 (got ", n_parallel, ")"))
     assert(bar_L > 0, str("let_joint_K: bar_L must be positive (got ", bar_L, ")"))
     n_parallel * let_joint_G(E, nu) * let_joint_J(bar_w, bar_t) / bar_L / n_series;
@@ -963,16 +972,26 @@ function let_joint_tau(bar_w, bar_t, bar_L, theta, E = 2000, nu = 0.4) =
 //       0
 //
 // n_parallel = number of torsion spans (= fingers − 1). n_series = number of
-// bar rows along Y (series softens); row centres sit 2·gap apart so a finger
-// of length gap from row s meets the near face of row s±1. Harvest site is
-// n_series = 1, n_parallel = 3 (fingers = 4). Place with translate/rotate/
-// mirror — attach panels at the outer finger tips (y ≤ −gap and y ≥
-// +(2·(n_series−1)·gap + gap), with the harvest's 1 mm embed past those
-// faces for a robust union).
+// bar rows along Y (series softens); row centres sit 2·gap apart. Odd rows
+// FLIP their A/B finger parity so facing fingers share an X pitch and union
+// across the mid-plane (Copilot on #1057: same-parity stacking left adjacent
+// rows disconnected). Harvest site is n_series = 1, n_parallel = 3
+// (fingers = 4). Place with translate/rotate/mirror — attach panels at the
+// outer finger tips (y ≤ −gap and y ≥ +(2·(n_series−1)·gap + gap), with the
+// harvest's 1 mm embed past those faces for a robust union).
 // ---------------------------------------------------------------------------
 
 module _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
                          finger_w, root_fillet, embed) {
+    // Integer counts first (Copilot on #1057): a fractional n_series emits
+    // floor(n) rows via `for (s = [0:n-1])` while K divides by the fraction;
+    // a fractional n_parallel emits floor(n)+1 fingers while K uses the
+    // fraction. Refuse before any geometry assert so the named message is
+    // the diagnosis.
+    assert(n_series == floor(n_series),
+           str("LET n_series must be an integer (got ", n_series, ")"));
+    assert(n_parallel == floor(n_parallel),
+           str("LET n_parallel must be an integer (got ", n_parallel, ")"));
     // let-folding-panel.scad:135 — two-perimeter floor.
     assert(bar_t >= 0.8, str("LET torsion bar t = ", bar_t,
                              " under the 0.8 mm minimum feature"));
@@ -999,30 +1018,31 @@ module _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
 }
 
 // One series-row silhouette: A-half ∪ B-half, each rooted separately —
-// let-folding-panel.scad:85-109 VERBATIM (the harvest splits the bar so each
-// half carries its own root fillets; a single closing of the union is the
-// same solid but re-samples the offsets and is no longer byte-identical).
-// For n_series = 1 this is hinge_A_2d ∪ hinge_B_2d.
+// let-folding-panel.scad:85-109 VERBATIM when flip = false (the harvest
+// splits the bar so each half carries its own root fillets; a single closing
+// of the union is the same solid but re-samples the offsets and is no longer
+// byte-identical). flip = true swaps A/B finger parity so an odd series row
+// meets its neighbour on the same X pitches.
 module _let_joint_row_2d(n_parallel, bar_w, bar_t, bar_L, gap, finger_w,
-                         root_fillet, embed) {
+                         root_fillet, embed, flip = false) {
     fingers = n_parallel + 1;
     pitch = finger_w + bar_L;
     strip_len = fingers * pitch;
-    // A-side — let-folding-panel.scad:87-96.
+    // Toward −Y: even pitches when !flip (harvest A), odd when flip.
     rooted_2d(root_fillet, bar_t) {
         translate([0, -bar_w / 2]) square([strip_len, bar_w / 2]);
         for (i = [0 : fingers - 1])
-            if (i % 2 == 0) {
+            if ((i % 2 == 0) != flip) {
                 x0 = i * pitch + (pitch - finger_w) / 2;
                 translate([x0, -gap - embed])
                     square([finger_w, gap + embed + bar_w / 2]);
             }
     }
-    // B-side — let-folding-panel.scad:100-109.
+    // Toward +Y: odd pitches when !flip (harvest B), even when flip.
     rooted_2d(root_fillet, bar_t) {
         translate([0, 0]) square([strip_len, bar_w / 2]);
         for (i = [0 : fingers - 1])
-            if (i % 2 == 1) {
+            if ((i % 2 == 1) != flip) {
                 x0 = i * pitch + (pitch - finger_w) / 2;
                 translate([x0, -bar_w / 2])
                     square([finger_w, bar_w / 2 + gap + embed]);
@@ -1039,12 +1059,13 @@ module let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
     _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
                       finger_w, rf, embed);
     $fn = 48;
-    // Series rows along Y: centres 2·gap apart so a gap-long finger from
-    // row s meets the near edge of row s±1. n_series = 1 is the harvest site.
+    // Series rows along Y: centres 2·gap apart. Odd rows flip finger parity
+    // so facing fingers share an X pitch and union (embed overlap) into one
+    // body — n_series = 1 is the harvest site (flip = false, byte-identical).
     for (s = [0 : n_series - 1])
         translate([0, s * 2 * gap])
             _let_joint_row_2d(n_parallel, bar_w, bar_t, bar_L, gap, finger_w,
-                              rf, embed);
+                              rf, embed, flip = (s % 2 == 1));
 }
 
 // Extruded LET joint. Echoes torsion-dominated predicted K and, when theta
@@ -1063,10 +1084,13 @@ module let_joint(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
     if (!is_undef(theta))
         assert(theta >= 0, str("LET theta must not be negative (got ", theta, ")"));
     // Inline (same expressions as let_joint_J / _G / _K / _sigma / _tau) so
-    // the echo cannot outrun the asserts above.
+    // the echo cannot outrun the asserts above. J normalizes a=max, b=min
+    // (Copilot on #1057 — swapped bar_t > bar_w must not inflate J).
     Gs = E / (2 * (1 + nu));
-    J = bar_w * pow(bar_t, 3) / 3
-        * (1 - 0.63 * (bar_t / bar_w) + 0.052 * pow(bar_t / bar_w, 5));
+    a = max(bar_w, bar_t);
+    b = min(bar_w, bar_t);
+    J = a * pow(b, 3) / 3
+        * (1 - 0.63 * (b / a) + 0.052 * pow(b / a, 5));
     K_bar = Gs * J / bar_L;
     K_tot = n_parallel * K_bar / n_series;
     echo(str("[compliant] let_joint: predicted K = ", K_tot,
