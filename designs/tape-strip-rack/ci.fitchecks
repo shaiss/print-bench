@@ -1,0 +1,23 @@
+# Boolean fit checks — rendered by gate.sh, never printed or sliced.
+# Each `empty` proof is real volume clearance, not a surface kiss, and each
+# has a control that must interfere or the proof is proving nothing.
+#
+# joint-fit: the production key inside the production socket, posed as
+#   joined (end faces joint_gap apart). Zero facets = joint_clear (0.2 mm per
+#   face) of air all round the drafted dovetail.
+# joint-fit-ctrl: the same pair with the socket cut at -0.15 mm clearance —
+#   0.15 mm of interference on every flank.
+joint-fit         empty
+joint-fit-ctrl    interferes
+# spindle-fit: the spindle laid in its saddle pockets, against the whole
+#   cradle. Zero facets = it seats (0.3 mm radial, 0.4 mm at each end).
+# spindle-fit-ctrl: the hub grown 1.2 mm on diameter — twice the saddle
+#   clearance — must jam in the pockets.
+spindle-fit       empty
+spindle-fit-ctrl  interferes
+# roll-fit: two rolls at the brief's maximum (62 mm outer, 25.4 mm core,
+#   19 mm wide) on the spindle in the cradle. Zero facets = they clear the
+#   floor, both walls, the gate and the spindle flange.
+# roll-fit-ctrl: rolls 8 mm larger, which must hit the floor.
+roll-fit          empty
+roll-fit-ctrl     interferes
