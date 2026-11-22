@@ -1,0 +1,5 @@
+# Printable parts (gate.sh renders each as build/nuggs-probe-cap-<part>.stl).
+# cap = the sealed end-cap: port + shell + sealing plate + both grips, printed
+# port-down on the sector tips as rendered. The coupon (the fit tab) is
+# discovered from nuggs-probe-cap-coupon.scad and gated separately.
+cap
