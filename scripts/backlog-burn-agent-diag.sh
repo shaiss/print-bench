@@ -193,6 +193,50 @@ PY
     echo "FAIL  selftest: string-denial tool token"; cat "$tmp/str_token/diag.json"; fails=$((fails + 1))
   fi
 
+  # Parsed log with empty denials + prose mentioning a tool must emit none.
+  run_case prose_denied '{"type":"result","permission_denials":[],"result":"No request was denied for Read"}'
+  if expect_tools "$tmp/prose_denied/diag.json" '[]'; then
+    echo "ok    selftest: parsed empty denials ignore assistant prose"
+  else
+    echo "FAIL  selftest: prose treated as denial"; cat "$tmp/prose_denied/diag.json"; fails=$((fails + 1))
+  fi
+
+  # Last nonempty assistant wins when the result envelope is empty.
+  run_case last_asst "$(python3 -I -c 'import json; print(json.dumps([
+    {"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}},
+    {"type":"assistant","message":{"content":[{"type":"text","text":"second-final"}]}},
+    {"type":"result","permission_denials":[],"result":""},
+  ]))')"
+  python3 -I - "$tmp/last_asst/diag.json" <<'PY' || fails=$((fails + 1))
+import hashlib, json, sys
+obj = json.load(open(sys.argv[1], encoding="utf-8"))
+expect = "second-final"
+ok = (
+    obj["final_assistant_message_len"] == len(expect)
+    and obj["final_assistant_message_sha256"]
+    == hashlib.sha256(expect.encode()).hexdigest()
+)
+print("ok    selftest: last assistant used when result empty" if ok else "FAIL  selftest: last assistant")
+if not ok:
+    print(obj)
+    sys.exit(1)
+PY
+
+  # Missing execution log note must not echo the path (may be secret-shaped).
+  mkdir -p -- "$tmp/missing_log"
+  if bash -- "$0" --provenance-src "$prov_src" \
+      --execution-log "$tmp/ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.missing" \
+      --out-dir "$tmp/missing_log" --summary "$tmp/missing_log.summary.md" \
+      >"$tmp/missing_log.stdout" 2>"$tmp/missing_log.stderr"; then
+    if grep -q 'ghp_' "$tmp/missing_log/diag.json" "$tmp/missing_log.summary.md" 2>/dev/null; then
+      echo "FAIL  selftest: missing-log path leaked into diag"; fails=$((fails + 1))
+    else
+      echo "ok    selftest: missing-log note does not embed the path"
+    fi
+  else
+    echo "FAIL  selftest: missing-log case exited non-zero"; fails=$((fails + 1))
+  fi
+
   if [ "$fails" -ne 0 ]; then
     echo "backlog-burn-agent-diag --selftest: $fails failure(s)" >&2
     return 1
@@ -332,16 +376,21 @@ def R(text: str) -> str:
 
 denials = []
 final_msg = ""
+last_assistant = ""
 raw = ""
 log_note = ""
+parsed_ok = False
+had_denial_field = False
 
 if log_path and Path(log_path).is_file():
     try:
         raw = Path(log_path).read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        log_note = f"execution-log unreadable ({e})"
+        log_note = f"execution-log unreadable ({type(e).__name__})"
 else:
-    log_note = f"execution-log not found{(' at ' + log_path) if log_path else ''}"
+    # Never embed the missing path — it may carry a secret-shaped fragment
+    # when a standalone caller passes a crafted --execution-log (CodeRabbit).
+    log_note = "execution-log-missing"
 
 objs = []
 if raw:
@@ -351,11 +400,13 @@ if raw:
             parsed = json.loads(raw_s)
             if isinstance(parsed, list):
                 objs = parsed
+                parsed_ok = True
         except json.JSONDecodeError:
             objs = []
     elif raw_s.startswith("{"):
         try:
             objs = [json.loads(raw_s)]
+            parsed_ok = True
         except json.JSONDecodeError:
             objs = []
     if not objs:
@@ -372,21 +423,28 @@ if raw:
                 break
             objs.append(obj)
             idx = end
+        if objs:
+            parsed_ok = True
 
 for obj in objs:
     if not isinstance(obj, dict):
         continue
     for key in ("permission_denials", "permissionDenials"):
+        if key in obj:
+            had_denial_field = True
         dens = obj.get(key)
         if isinstance(dens, list):
             denials.extend(dens)
-    # Final assistant text: prefer the result envelope, else last assistant msg.
+    # Final assistant text: prefer the result envelope; track assistants
+    # separately so an empty later result does not keep the first message
+    # (CodeRabbit on #953).
     if obj.get("type") == "result":
         res = obj.get("result") or ""
         if isinstance(res, str) and res.strip():
             final_msg = res.strip()
-    if not final_msg and obj.get("type") == "assistant":
+    if obj.get("type") == "assistant":
         msg = obj.get("message") or obj.get("content") or ""
+        cand = ""
         if isinstance(msg, list):
             bits = []
             for part in msg:
@@ -395,22 +453,23 @@ for obj in objs:
                 elif isinstance(part, str):
                     bits.append(part)
             cand = "".join(bits).strip()
-            if cand:
-                final_msg = cand
         elif isinstance(msg, str) and msg.strip():
-            final_msg = msg.strip()
+            cand = msg.strip()
         elif isinstance(msg, dict):
             content = msg.get("content")
             if isinstance(content, str) and content.strip():
-                final_msg = content.strip()
+                cand = content.strip()
             elif isinstance(content, list):
                 bits = []
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
                         bits.append(str(part.get("text") or ""))
                 cand = "".join(bits).strip()
-                if cand:
-                    final_msg = cand
+        if cand:
+            last_assistant = cand
+
+if not final_msg:
+    final_msg = last_assistant
 
 # Tool names ONLY — never reason / tool_input / command text / raw dumps.
 # MED-A (#953): exact allowlist or mcp__<ns>__<tool>; else literal "(other)".
@@ -508,9 +567,11 @@ for d in denials:
             if norm is not None:
                 names.append(norm)
 
-# Fallback: name-only scrape when structured permission_denials are absent
-# (show_full_output stays false). Never capture surrounding context.
-if not names and raw:
+# Fallback: name-only scrape only when the log did not parse into structured
+# objects (show_full_output stays false). A successful parse with an empty
+# denial list must report none — never treat assistant prose like
+# "No request was denied for Read" as a denial (CodeRabbit on #953).
+if not names and raw and not parsed_ok:
     _KNOWN_ALT = "|".join(
         sorted((re.escape(t) for t in KNOWN_TOOLS), key=len, reverse=True)
     )
@@ -522,6 +583,9 @@ if not names and raw:
         norm = canonicalize_tool_token(m.group(1))
         if norm is not None:
             names.append(norm)
+elif not names and parsed_ok and had_denial_field:
+    # Structured empty denials — trust them; leave names empty.
+    pass
 
 # De-dupe preserving order; cap at 12; count omitted uniques.
 seen = set()
@@ -537,13 +601,25 @@ for name in names:
         extra += 1
 
 # MED-1 / MED-C: never emit message text — length + sha256 of the raw
-# body only (matches backlog-burn-ship-check.sh).
+# body only (matches backlog-burn-ship-check.sh). Keep denial metadata if
+# the message cannot encode as strict UTF-8 (lone surrogates) by hashing
+# a replace-encoded form (CodeRabbit on #953).
 msg_len = len(final_msg)
-msg_sha = hashlib.sha256(final_msg.encode("utf-8")).hexdigest()
+try:
+    msg_sha = hashlib.sha256(final_msg.encode("utf-8")).hexdigest()
+except UnicodeEncodeError:
+    msg_sha = hashlib.sha256(
+        final_msg.encode("utf-8", errors="replace")
+    ).hexdigest()
+
+# Scrub label/note before serialization so a secret-shaped path in a
+# standalone --execution-log never lands in diag.json (CodeRabbit on #953).
+label_s = R(label)[:200]
+log_note_s = R(log_note)[:300]
 
 payload = {
-    "label": label,
-    "log_note": log_note,
+    "label": label_s,
+    "log_note": log_note_s,
     "denied_tools": uniq,
     "denied_tools_extra": extra,
     "final_assistant_message_len": msg_len,
@@ -553,9 +629,9 @@ payload = {
 out_path = Path(out_dir) / "diag.json"
 out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-lines = [f"### {label}", ""]
-if log_note:
-    lines.append(f"- {log_note}")
+lines = [f"### {label_s}", ""]
+if log_note_s:
+    lines.append(f"- {log_note_s}")
 if uniq:
     lines.append("- denied tools (names only, allowlisted):")
     for row in uniq:

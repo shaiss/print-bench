@@ -58,56 +58,141 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --- restore pinned diag script into mktemp (no predictable path) -----------
-diag_blob="$(mktemp "${RUNNER_TEMP}/backlog-burn-agent-diag.XXXXXX")"
-cleanup_paths+=("$diag_blob")
-if ! git_show "${START_SHA}:scripts/backlog-burn-agent-diag.sh" > "$diag_blob"; then
-  echo "::error::could not restore backlog-burn-agent-diag.sh from ${START_SHA}" >&2
-  exit 1
-fi
-got="$(sha256sum "$diag_blob" | awk '{print $1}')"
-if [ "$got" != "$DIAG_SHA256" ]; then
-  echo "::error::restored backlog-burn-agent-diag.sh sha256 does not match the pre-agent pin" >&2
-  exit 1
-fi
-chmod +x "$diag_blob"
-
-# --- restore pinned provenance redactor -------------------------------------
-arch="$(mktemp "${RUNNER_TEMP}/provenance-src.tar.XXXXXX")"
-cleanup_paths+=("$arch")
-if ! git_archive "$START_SHA" tools/provenance/src > "$arch"; then
-  echo "::error::could not archive tools/provenance/src from ${START_SHA}" >&2
-  exit 1
-fi
-got_arch="$(sha256sum "$arch" | awk '{print $1}')"
-if [ "$got_arch" != "$PROV_ARCHIVE_SHA256" ]; then
-  echo "::error::restored tools/provenance/src archive sha256 does not match the pre-agent pin" >&2
-  exit 1
-fi
-prov_root="$(mktemp -d "${RUNNER_TEMP}/pinned-provenance.XXXXXX")"
-cleanup_paths+=("$prov_root")
-tar -x -f "$arch" -C "$prov_root"
-rm -f -- "$arch"
-prov_src="${prov_root}/tools/provenance/src"
-if [ ! -d "$prov_src/provenance" ]; then
-  echo "::error::pinned provenance archive missing provenance package at ${prov_src}" >&2
-  exit 1
-fi
-
 # Private out-dir — not under a path later ship links are told to write into.
 out_dir="$(mktemp -d "${RUNNER_TEMP}/backlog-burn-diag-out.XXXXXX")"
 cleanup_paths+=("$out_dir")
+prov_root="$(mktemp -d "${RUNNER_TEMP}/pinned-provenance.XXXXXX")"
+cleanup_paths+=("$prov_root")
 
-# Strip credential env from the diag child: secrets reach it only via the
-# SECRETS_FILE the trusted workflow step prepared.
-env -u GITHUB_TOKEN -u GH_TOKEN \
-    -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
-    -u ZAI_KEY -u OPENAI_API_KEY -u OPENROUTER_API_KEY -u REGEN_TOKEN \
-    -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-  "$diag_blob" --link "$link" \
-    --secrets-file "$SECRETS_FILE" \
-    --provenance-src "$prov_src" \
-    --out-dir "$out_dir"
+# Restore pinned diag + provenance from verified *bytes* (CodeRabbit on #953):
+# digest the buffers, extract the archive from the same buffer, and run the
+# diag script via memfd so a pathname TOCTOU cannot swap the checked bytes.
+# Optional EXECUTION_LOG overrides the shared default (per-attempt log).
+execution_log_args=()
+if [ -n "${EXECUTION_LOG:-}" ]; then
+  execution_log_args=(--execution-log "$EXECUTION_LOG")
+fi
+prov_src="$(
+  START_SHA="$START_SHA" DIAG_SHA256="$DIAG_SHA256" \
+  PROV_ARCHIVE_SHA256="$PROV_ARCHIVE_SHA256" \
+  SECRETS_FILE="$SECRETS_FILE" LINK="$link" OUT_DIR="$out_dir" \
+  PROV_ROOT="$prov_root" \
+  EXEC_LOG_JSON="$(printf '%s\n' "${execution_log_args[@]+"${execution_log_args[@]}"}" | python3 -I -c 'import json,sys; print(json.dumps([l for l in sys.stdin.read().splitlines() if l]))')" \
+  python3 -I - <<'PY'
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tarfile
+from io import BytesIO
+
+start_sha = os.environ["START_SHA"]
+diag_sha = os.environ["DIAG_SHA256"]
+arch_sha = os.environ["PROV_ARCHIVE_SHA256"]
+secrets_file = os.environ["SECRETS_FILE"]
+link = os.environ["LINK"]
+out_dir = os.environ["OUT_DIR"]
+prov_root = os.environ["PROV_ROOT"]
+extra_args = json.loads(os.environ.get("EXEC_LOG_JSON") or "[]")
+
+git_base = [
+    "/usr/bin/git",
+    "--no-replace-objects",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.sshCommand=",
+]
+
+
+def die(msg: str) -> None:
+    print(f"::error::{msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+try:
+    diag_data = subprocess.check_output(
+        [*git_base, "show", f"{start_sha}:scripts/backlog-burn-agent-diag.sh"]
+    )
+except subprocess.CalledProcessError:
+    die(f"could not restore backlog-burn-agent-diag.sh from {start_sha}")
+if hashlib.sha256(diag_data).hexdigest() != diag_sha:
+    die("restored backlog-burn-agent-diag.sh sha256 does not match the pre-agent pin")
+
+try:
+    arch_data = subprocess.check_output(
+        [*git_base, "archive", start_sha, "tools/provenance/src"]
+    )
+except subprocess.CalledProcessError:
+    die(f"could not archive tools/provenance/src from {start_sha}")
+if hashlib.sha256(arch_data).hexdigest() != arch_sha:
+    die("restored tools/provenance/src archive sha256 does not match the pre-agent pin")
+
+# Extract from the verified buffer — never re-read a pathname.
+with tarfile.open(fileobj=BytesIO(arch_data), mode="r:") as tar:
+    tar.extractall(path=prov_root)
+prov_src = os.path.join(prov_root, "tools", "provenance", "src")
+if not os.path.isdir(os.path.join(prov_src, "provenance")):
+    die(f"pinned provenance archive missing provenance package at {prov_src}")
+
+# Bind execution to the verified diag bytes via memfd (Linux runners).
+if not hasattr(os, "memfd_create"):
+    die("memfd_create unavailable — cannot bind diag execution to verified bytes")
+fd = os.memfd_create("backlog-burn-agent-diag", 0)
+try:
+    os.write(fd, diag_data)
+    os.lseek(fd, 0, os.SEEK_SET)
+    # Re-hash the open fd contents before launch.
+    got = hashlib.sha256(os.read(fd, len(diag_data) + 1)).hexdigest()
+    if got != diag_sha:
+        die("memfd diag bytes drifted from the pre-agent pin before launch")
+    os.lseek(fd, 0, os.SEEK_SET)
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        not in {
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ZAI_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "REGEN_TOKEN",
+            "ACTIONS_RUNTIME_TOKEN",
+            "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        }
+    }
+    # Address the open memfd via this process's pid — a child bash's
+    # /proc/self/fd would not see the parent's descriptor.
+    script_path = f"/proc/{os.getpid()}/fd/{fd}"
+    cmd = [
+        "/usr/bin/bash",
+        script_path,
+        "--link",
+        link,
+        "--secrets-file",
+        secrets_file,
+        "--provenance-src",
+        prov_src,
+        "--out-dir",
+        out_dir,
+        *extra_args,
+    ]
+    proc = subprocess.run(cmd, env=env, check=False)
+finally:
+    os.close(fd)
+
+if proc.returncode != 0:
+    sys.exit(proc.returncode)
+print(prov_src)
+PY
+)"
+prov_src="${prov_src:?pinned provenance restore failed}"
 
 raw_diag="${out_dir}/diag.json"
 if [ ! -f "$raw_diag" ] || [ -L "$raw_diag" ]; then
@@ -197,53 +282,53 @@ def S(text: str) -> str:
     return scrub(text or "", secrets)
 
 
-raw = Path(raw_path).read_bytes()
+# Bound the read before allocating the whole file (CodeRabbit on #953).
+with Path(raw_path).open("rb") as fh:
+    raw = fh.read(MAX_BYTES + 1)
 if len(raw) > MAX_BYTES:
-    print(f"::error::diag.json too large ({len(raw)} > {MAX_BYTES})", file=sys.stderr)
+    print(f"::error::diag.json too large (>{MAX_BYTES} bytes)", file=sys.stderr)
     sys.exit(1)
 try:
     text = raw.decode("utf-8")
     obj = json.loads(text)
-except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-    print(f"::error::diag.json is not UTF-8 JSON: {exc}", file=sys.stderr)
+except (UnicodeDecodeError, json.JSONDecodeError):
+    # Do not echo the rejected payload or exception text that may carry it.
+    print("::error::diag.json failed UTF-8 JSON schema rule", file=sys.stderr)
     sys.exit(1)
 if not isinstance(obj, dict) or set(obj.keys()) != ALLOWED:
-    print(
-        f"::error::diag.json keys {sorted(obj.keys()) if isinstance(obj, dict) else type(obj)} "
-        f"!= {sorted(ALLOWED)}",
-        file=sys.stderr,
-    )
+    # Report the rule, never the rejected keys/values (CodeRabbit on #953).
+    print("::error::diag.json failed allowlisted-keys schema rule", file=sys.stderr)
     sys.exit(1)
 if not isinstance(obj["label"], str) or not isinstance(obj["log_note"], str):
-    print("::error::diag.json label/log_note must be strings", file=sys.stderr)
+    print("::error::diag.json failed label/log_note type schema rule", file=sys.stderr)
     sys.exit(1)
 if "final_assistant_message_truncated" in obj:
     print(
-        "::error::diag.json must not contain final_assistant_message_truncated",
+        "::error::diag.json failed no-message-text schema rule",
         file=sys.stderr,
     )
     sys.exit(1)
 msg_len = obj["final_assistant_message_len"]
 if type(msg_len) is not int or isinstance(msg_len, bool) or msg_len < 0:
-    print("::error::diag.json final_assistant_message_len must be a non-negative int", file=sys.stderr)
+    print("::error::diag.json failed message-len schema rule", file=sys.stderr)
     sys.exit(1)
 msg_sha = obj["final_assistant_message_sha256"]
 if not isinstance(msg_sha, str) or not _SHA256_HEX.fullmatch(msg_sha):
-    print("::error::diag.json final_assistant_message_sha256 must be 64 lowercase hex", file=sys.stderr)
+    print("::error::diag.json failed message-sha256 schema rule", file=sys.stderr)
     sys.exit(1)
 if not isinstance(obj["denied_tools"], list) or len(obj["denied_tools"]) > MAX_DENIALS:
-    print("::error::diag.json denied_tools invalid", file=sys.stderr)
+    print("::error::diag.json failed denied_tools schema rule", file=sys.stderr)
     sys.exit(1)
 extra = obj["denied_tools_extra"]
 if type(extra) is not int or isinstance(extra, bool) or extra < 0:
-    print("::error::diag.json denied_tools_extra must be a non-negative int", file=sys.stderr)
+    print("::error::diag.json failed denied_tools_extra schema rule", file=sys.stderr)
     sys.exit(1)
 clean_denials = []
 seen_tools = set()
 for row in obj["denied_tools"]:
     # Tool name only — refuse a reason/input field (Agentic Security on #953).
     if not isinstance(row, dict) or set(row.keys()) != {"tool"}:
-        print("::error::diag.json denial row must be {tool} only", file=sys.stderr)
+        print("::error::diag.json failed denial-row schema rule", file=sys.stderr)
         sys.exit(1)
     tool = str(row.get("tool") or "")
     # MED-A: refuse planted free text — allowlist / mcp pattern / "(other)" only.
@@ -252,7 +337,7 @@ for row in obj["denied_tools"]:
     # and collapse to "(other)" if a credential pattern fires (Bugbot on #953).
     if not tool_allowed(tool):
         print(
-            f"::error::diag.json denial tool not allowlisted: {tool!r}",
+            "::error::diag.json failed denial-tool allowlist schema rule",
             file=sys.stderr,
         )
         sys.exit(1)
