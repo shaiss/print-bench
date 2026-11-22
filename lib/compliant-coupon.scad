@@ -6,10 +6,15 @@
 //   designs/let-folding-panel/let-folding-panel-coupon.scad
 // — t-ladder (t is the t³-leverage knob) + identical production-t twins,
 // no overrides of harvest-site production values on the twins. Open this
-// file to print (top-level plate call below; `use <>` consumers ignore it),
-// or open lib/compliant-coupon-demo.scad for the plate plus golden asserts.
+// file to print a bed-sized plate (default coupon_plate=0; see below);
+// `use <>` consumers ignore the top-level call. Open
+// lib/compliant-coupon-demo.scad for the full multi-strip plate plus
+// golden asserts (check.sh CGAL-renders that — bed fit is a separate
+// printcheck behavioral test on each coupon_plate index).
 // Override the ladder only to extend it, e.g.:
 //   openscad -D 'coupon_ts_slfp=[0.9, 1.1]' lib/compliant-coupon.scad
+//   openscad -D 'coupon_plate=1' -D 'coupon_ts_xafp=[0.6,0.8,1.0,1.2,1.4]' \
+//     lib/compliant-coupon.scad
 //
 use <compliant.scad>
 
@@ -21,16 +26,30 @@ use <compliant.scad>
 // trustworthy: print it, measure, log under "## Field test log" in the
 // adopting design's NOTES.md (or a scratch NOTES next to a one-off print).
 //
+// Echoed K is the pure-end-moment torsional stiffness K = E·I/L (N·mm/rad)
+// for an SLFP (cross-axis echoes 8·E·I/L welded; LET echoes torsion
+// K = n_parallel·G·J/L/n_series). Convert a bench measurement to that K:
+//   • Pure end-moment:  K = M / θ
+//   • End-force (load F at free length L, measure tip angle θ):
+//                       K = F·L / (2θ)
+//     (cantilever: θ = F·L²/(2·E·I) ⇒ F·L/θ = 2K)
+//   • Tip-travel (load F, measure tip deflection δ):
+//                       K = F·L² / (3δ)
+//     (cantilever: δ = F·L³/(3·E·I) ⇒ F·L²/δ = 3K)
+// Do not compare a raw F·L/θ reading to the echo — that is 2K for an
+// end-force test. For the bistable arch, measure snap force f_s and
+// centre travel u_tr instead (not a K conversion).
+//
 // Two measurements, every specimen:
-//   1. Torque-vs-angle (stiffness) — hold one grip, deflect the other through
-//      a known angle (or known tip travel), record the restoring torque (or
-//      force × moment arm). Compare measured K to the echo. For the bistable
-//      arch, measure snap force f_s and centre travel u_tr instead.
+//   1. Stiffness — hold one grip, apply a known end-moment / end-force /
+//      tip travel, convert to K with the formulas above, compare to the
+//      echo. Arch: f_s and u_tr.
 //   2. Cycles-to-failure at θ_max — swing to the specimen's design stop
 //      (arch: through snap and back; SLFP tip-load δ=1.2 mm → θ=0.15 rad,
 //      matching lib/compliant-demo.scad; cross-axis ±stop_angle; LET 90°
 //      fold), return, repeat. Whitening at a root is the warning; a crack
 //      is the verdict. Record the cycle count next to the label.
+//      Cycling is separate from the stiffness conversion above.
 //
 // Material ranking (docs/advanced-techniques.md Domain 1 — a HEURISTIC, not
 // a universal law; real fatigue life shifts with grade, orientation, stress
@@ -48,6 +67,10 @@ use <compliant.scad>
 // Log each print with the FIELD-TEST block (templates/FIELD-TEST.md):
 // printed-from / part / slicer / result / measured deviations (K_meas vs
 // K_pred, cycles at θ_max) / carry-forward.
+//
+// Bed: printable units target a 220×220 mm bed (fits the repo's 256 mm
+// Bambu P2S class with margin). coupon_plate selects one unit; the demo's
+// full multi-strip composition is for check.sh, not for slicing.
 // ---------------------------------------------------------------------------
 
 $fn = 48;
@@ -92,6 +115,43 @@ coupon_ts_xafp = [0.6, 0.8, 1.0];
 coupon_ts_let  = [0.8, 1.2, 1.4];
 
 function fmt_t(tt) = str(tt, tt == floor(tt) ? ".0" : "");
+
+// ---- layout constants (bed-sized packing) --------------------------------
+// Printable plates must fit a 220×220 mm bed (256 mm class with margin).
+coupon_bed_mm = 220;
+
+// Cross-axis strip grid (3 columns). pitch_y clears production tab_w=22.
+coupon_xafp_cols = 3;
+coupon_xafp_pitch_x = 70;
+coupon_xafp_pitch_y = 80;
+// Half-extent Y of one XAFP specimen (production tabs widest: tab_w/2=11,
+// plus a few mm for the arc body so LET clearance stays conservative).
+coupon_xafp_env_y = 14;
+
+// LET strip grid (3 columns) — linear pitch_x=80×5 overflowed a 256 mm bed.
+// pitch_x must exceed production strip_len (70) or adjacent twins share a
+// face and fuse into one body.
+coupon_let_cols = 3;
+coupon_let_pitch_x = 72;
+coupon_let_pitch_y = 42;
+// Half-extent Y: gap + panel_d = 6+12 = 18, plus pad.
+coupon_let_env_y = 20;
+coupon_strip_gap = 8;
+
+// Item count = ladder cells + PETG twin + PLA twin.
+function coupon_xafp_n_items() = len(coupon_ts_xafp) + 2;
+function coupon_xafp_nrows() =
+    ceil(coupon_xafp_n_items() / coupon_xafp_cols);
+function coupon_xafp_last_row_y() =
+    (coupon_xafp_nrows() - 1) * coupon_xafp_pitch_y;
+
+// LET Y origin below an XAFP strip that starts at xafp_y0 — grows when the
+// ladder adds rows (documented -D coupon_ts_xafp=[...] extension).
+function coupon_let_origin_y(xafp_y0 = 140) =
+    xafp_y0 + coupon_xafp_last_row_y()
+        + coupon_xafp_env_y + coupon_let_env_y + coupon_strip_gap;
+
+function coupon_let_n_items() = len(coupon_ts_let) + 2;
 
 // ---- specimen builders (each is one watertight body) ---------------------
 
@@ -240,46 +300,79 @@ module coupon_slfp_strip(origin = [0, 0, 0]) {
 
 module coupon_xafp_strip(origin = [0, 0, 0]) {
     n = len(coupon_ts_xafp);
-    // Production twins need L=28 + 2·tab_len clearance between centres.
-    pitch_x = 70;
-    pitch_y = 80;
+    cols = coupon_xafp_cols;
+    pitch_x = coupon_xafp_pitch_x;
+    pitch_y = coupon_xafp_pitch_y;
     translate(origin) {
         for (i = [0 : n - 1])
             coupon_xafp_specimen(coupon_ts_xafp[i], fmt_t(coupon_ts_xafp[i]),
-                                 [(i % 3) * pitch_x, floor(i / 3) * pitch_y, 0],
+                                 [(i % cols) * pitch_x,
+                                  floor(i / cols) * pitch_y, 0],
                                  production = false);
         coupon_xafp_specimen(xa_t_prod, "PETG",
-                             [(n % 3) * pitch_x, floor(n / 3) * pitch_y, 0],
+                             [(n % cols) * pitch_x,
+                              floor(n / cols) * pitch_y, 0],
                              production = true);
         coupon_xafp_specimen(xa_t_prod, "PLA",
-                             [((n + 1) % 3) * pitch_x,
-                              floor((n + 1) / 3) * pitch_y, 0],
+                             [((n + 1) % cols) * pitch_x,
+                              floor((n + 1) / cols) * pitch_y, 0],
                              production = true);
     }
 }
 
 module coupon_let_strip(origin = [0, 0, 0]) {
     n = len(coupon_ts_let);
-    pitch_x = 80;
+    cols = coupon_let_cols;
+    pitch_x = coupon_let_pitch_x;
+    pitch_y = coupon_let_pitch_y;
     translate(origin) {
         for (i = [0 : n - 1])
             coupon_let_specimen(coupon_ts_let[i], fmt_t(coupon_ts_let[i]),
-                                [i * pitch_x, 0, 0], production = false);
+                                [(i % cols) * pitch_x,
+                                 floor(i / cols) * pitch_y, 0],
+                                production = false);
         coupon_let_specimen(let_t_prod, "PETG",
-                            [n * pitch_x, 0, 0], production = true);
+                            [(n % cols) * pitch_x,
+                             floor(n / cols) * pitch_y, 0],
+                            production = true);
         coupon_let_specimen(let_t_prod, "PLA",
-                            [(n + 1) * pitch_x, 0, 0], production = true);
+                            [((n + 1) % cols) * pitch_x,
+                             floor((n + 1) / cols) * pitch_y, 0],
+                            production = true);
     }
 }
 
-// Full plate: every compliant.scad module, ladder + production twins.
-module compliant_coupon_plate() {
-    coupon_arch_strip([0, 0, 0]);
-    coupon_slfp_strip([0, 90, 0]);
-    coupon_xafp_strip([0, 140, 0]);
-    coupon_let_strip([0, 280, 0]);
+// Full multi-strip composition (demo / check.sh) OR one bed-sized print
+// plate. which:
+//   "all" — every module, LET Y derived from XAFP row count
+//   0     — arch + SLFP
+//   1     — cross-axis
+//   2     — LET
+module compliant_coupon_plate(which = "all") {
+    xafp_y0 = 140;
+    if (which == "all") {
+        coupon_arch_strip([0, 0, 0]);
+        coupon_slfp_strip([0, 90, 0]);
+        coupon_xafp_strip([0, xafp_y0, 0]);
+        coupon_let_strip([0, coupon_let_origin_y(xafp_y0), 0]);
+    } else if (which == 0) {
+        coupon_arch_strip([0, 0, 0]);
+        coupon_slfp_strip([0, 70, 0]);
+    } else if (which == 1) {
+        coupon_xafp_strip([0, 0, 0]);
+    } else if (which == 2) {
+        coupon_let_strip([0, 0, 0]);
+    } else {
+        assert(false, str("compliant_coupon_plate: unknown which=", which,
+                          " (want \"all\" / 0 / 1 / 2)"));
+    }
 }
 
-// Print entrypoint — opening this file yields the plate. `use <>` ignores
-// top-level calls, so consumers (the demo, fixtures) stay module-only.
-compliant_coupon_plate();
+// Print entrypoint — opening this file yields a bed-sized plate.
+// Override with -D 'coupon_plate=1' (or 2). `use <>` ignores top-level
+// calls. Fixtures that `include` this file set coupon_emit=false (after
+// the include; last-assignment-wins) so only their own geometry runs.
+coupon_plate = 0;
+coupon_emit = true;
+if (coupon_emit)
+    compliant_coupon_plate(coupon_plate);

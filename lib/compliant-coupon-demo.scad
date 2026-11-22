@@ -51,5 +51,6 @@ echo(str("[compliant-coupon-demo] goldens OK: arch f_s=3 u_tr=4; ",
          "; XAFP K=", cross_axis_pivot_K(0.8, 28, 8),
          "; LET K=", let_joint_K(1, 3, 2.0, 1.2, 14)));
 
-// The printable plate — every module, t-ladder + production twins.
-compliant_coupon_plate();
+// Full multi-strip plate for check.sh CGAL — bed-sized print units are
+// coupon_plate=0/1/2 on lib/compliant-coupon.scad (printcheck bed test).
+compliant_coupon_plate("all");
