@@ -2,11 +2,12 @@
 // All dimensions in millimeters. Use from a design with:
 //   use <compliant.scad>
 //
-// Issue #202, STAGE 1 of 4 (harvest-first order, owner ruling): the bistable
-// arch and the flexure-root fillet — the two primitives four shipped designs
-// already re-derive inline. Pivots (small-length, cross-axis), the LET joint
-// and the stiffness coupon are later stages. The knowledge behind every
-// number here is docs/advanced-techniques.md, Domain 1.
+// Issue #202, STAGE 3 of 4 (harvest-first order, owner ruling; stage 1 was
+// the bistable arch + root fillet — #758; stage 2 the small-length and
+// cross-axis flexure pivots — #1047/#1052). This stage adds the LET
+// (lamina-emergent torsional) joint. The stiffness coupon is the remaining
+// stage (#1049). The knowledge behind every number here is
+// docs/advanced-techniques.md, Domain 1.
 //
 // HARVESTED, NOT INVENTED. Every module below is lifted from a design that
 // already proves it on the gate; the guards are the asserts those designs
@@ -20,6 +21,9 @@
 //                                       czs-slider.scad:251-260)
 //   root_fillet_2d                     designs/snap-cantilever-clip/snap-cantilever-clip.scad:140-149
 //   rooted_2d                          designs/let-folding-panel/let-folding-panel.scad:72-76
+//   small_length_pivot_2d / _pivot     designs/snap-cantilever-clip/snap-cantilever-clip.scad:85-90,134-149
+//   cross_axis_pivot_2d / _pivot       designs/cross-axis-flexure-pivot/cross-axis-flexure-pivot.scad:151-265
+//   let_joint_2d / let_joint           designs/let-folding-panel/let-folding-panel.scad:85-152
 //
 // One-time parity evidence (recorded here because the designs are not
 // switched to this library — scratch fixtures that `use` each design and
@@ -58,6 +62,58 @@
 //                     the bare band, identical to it away from the roots,
 //                     nothing outside the documented root footprint; with
 //                     6 mm clamp posts, printcheck 100/100, 1 body, watertight.
+//
+// Stage-2 parity (OpenSCAD 2021.01 / CGAL, 2026-11-20) — scratch fixtures
+// only, nothing committed beyond this note:
+//   snap-cantilever-clip  free-length finger + root fillet in the library
+//                     local frame (t=1, L=12, f=0.6, $fn=96) — the design's
+//                     square+difference at the strap face, rewritten to y=0
+//                     as the root — vs small_length_pivot_2d(1, 12, 0.6):
+//                     linear_extrude(15) ASCII STL BYTE-IDENTICAL (sha256
+//                     02c141e1…cab252286, 108 facets); placed at
+//                     plate_depth=20 the 2D/CGAL difference against the
+//                     design's absolute-coord finger+fillet is EMPTY both
+//                     ways. Predictions bit-equal (OpenSCAD ==): K, I,
+//                     sigma_doc = E·t·θ/(2L) at the design's tip-load
+//                     θ = 1.5·δ/L. Negative control: lib at L = 11 against
+//                     L = 12 is not byte-identical.
+//   cross-axis-flexure-pivot  pivot_2d() at production (t=0.8, L=28, w=8,
+//                     root_fillet=0.6, alpha=45, stop_angle=40, arc_wall=6.5,
+//                     tab_len=10, tab_w=22, tab_r=4, $fn=64) vs
+//                     cross_axis_pivot_2d(...) at the same numbers: 2D
+//                     symmetric difference EMPTY both ways (1708 facets
+//                     each); STL facet order differs by CSG-tree child
+//                     ordering the way compliant-gripper's mirrored arch
+//                     did, so the proof is the empty difference, not
+//                     byte-identity. Predictions bit-equal: K = 8·E·I/L,
+//                     sigma_weld = 2·E·t·θ/L, sigma_leaf = E·t·θ/(2L).
+//                     Negative control: lib at alpha = 40 against the
+//                     design's alpha = 45 leaves a 776-facet difference.
+//                     Both pivot modules pin their harvest $fn inside the
+//                     module body (SLFP 96, cross-axis 64) so a caller's
+//                     quality preset cannot move the fit — same discipline
+//                     as nuggs-coupling.scad; issue #1047 "owns its sampling".
+//
+// Stage-3 parity (OpenSCAD 2021.01 / CGAL, 2026-11-20) — scratch fixtures
+// only, nothing committed beyond this note:
+//   let-folding-panel  hinge_A_2d() ∪ hinge_B_2d() at production
+//                     (t=1.2, L=14, w=2.0, r=0.8, fingers=4, finger_w=3.5,
+//                     finger_reach=6, embed=1, $fn=48) vs
+//                     let_joint_2d(n_series=1, n_parallel=3, bar_w=2.0,
+//                     bar_t=1.2, bar_L=14, gap=6, finger_w=3.5,
+//                     root_fillet=0.8): linear_extrude(t) ASCII STL
+//                     BYTE-IDENTICAL (sha256 e42fca31…414a01a, 596
+//                     facets); 2D/CGAL symmetric difference EMPTY both ways.
+//                     Predictions bit-equal (OpenSCAD ==): K_joint =
+//                     n_spans·G·J/L, sigma_root = E·t·θ/(2·L_bend),
+//                     tau_bar = G·θ·r_c/L at theta_max=90°. Negative
+//                     control: lib at n_parallel=2 (fingers=3) against the
+//                     design's fingers=4 leaves a non-empty difference.
+//                     let_joint pins $fn = 48 inside the module body
+//                     (let-folding-panel.scad:61) so a caller's quality
+//                     preset cannot move the rooted closing — same
+//                     discipline as the pivots; issue #1048 "owns its
+//                     sampling".
 //
 // ---------------------------------------------------------------------------
 // THE LOCAL FRAME (the reason this generator exists). An arch is built in its
@@ -413,4 +469,683 @@ module root_fillet_2d(r, t, bite = 0) {
 module rooted_2d(r, t) {
     _root_fillet_guards(r, t);
     offset(r = -r) offset(r = r) children();
+}
+
+// ===========================================================================
+// Stage 2 — small-length flexural pivot (SLFP) and cross-axis flexure pivot
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Predictions — textually identical to the harvest sites' derived lines so a
+// design adopting them gets bit-identical numbers (OpenSCAD ==).
+// ---------------------------------------------------------------------------
+
+// Second moment of area of a rectangular beam section, mm^4.
+// snap-cantilever-clip.scad:85 / cross-axis-flexure-pivot.scad:90.
+function flexure_I(w, t) =
+    assert(w > 0, str("flexure_I: beam width w must be positive (got ", w, ")"))
+    assert(t > 0, str("flexure_I: beam thickness t must be positive (got ", t, ")"))
+    w * pow(t, 3) / 12;
+
+// SLFP stiffness K = E·I/L (N·mm/rad) — snap-cantilever-clip.scad:86;
+// docs/advanced-techniques.md "Governing relations".
+function small_length_pivot_K(t, L, w, E = 2000) =
+    assert(L > 0, str("small_length_pivot_K: free length L must be positive (got ", L, ")"))
+    assert(E > 0, str("small_length_pivot_K: modulus E must be positive (got ", E, " MPa)"))
+    E * flexure_I(w, t) / L;
+
+// Pure-moment root stress σ ≈ E·t·θ/(2L) (MPa) — the doc ideal
+// (snap-cantilever-clip.scad:90's sigma_doc). θ in radians.
+function small_length_pivot_sigma(t, L, theta, E = 2000) =
+    assert(t > 0, str("small_length_pivot_sigma: t must be positive (got ", t, ")"))
+    assert(L > 0, str("small_length_pivot_sigma: L must be positive (got ", L, ")"))
+    assert(theta >= 0, str("small_length_pivot_sigma: theta must not be negative (got ", theta, ")"))
+    assert(E > 0, str("small_length_pivot_sigma: E must be positive (got ", E, " MPa)"))
+    E * t * theta / (2 * L);
+
+// Tip-load root stress = 2× the pure-moment ideal (snap-cantilever-clip.scad:89).
+function small_length_pivot_sigma_tip(t, L, theta, E = 2000) =
+    2 * small_length_pivot_sigma(t, L, theta, E);
+
+// Cross-axis WELDED (pinned-crossing) stiffness K = 8·E·I/L (N·mm/rad) —
+// cross-axis-flexure-pivot.scad:93. Four half-beams of length L/2 in S-bend.
+function cross_axis_pivot_K(t, L, w, E = 2000) =
+    assert(L > 0, str("cross_axis_pivot_K: free span L must be positive (got ", L, ")"))
+    assert(E > 0, str("cross_axis_pivot_K: modulus E must be positive (got ", E, " MPa)"))
+    8 * E * flexure_I(w, t) / L;
+
+// Peak weld stress under the pinned S-bend, σ = 2·E·t·θ/L (MPa) —
+// cross-axis-flexure-pivot.scad:94. θ in radians.
+function cross_axis_pivot_sigma_weld(t, L, theta, E = 2000) =
+    assert(t > 0, str("cross_axis_pivot_sigma_weld: t must be positive (got ", t, ")"))
+    assert(L > 0, str("cross_axis_pivot_sigma_weld: L must be positive (got ", L, ")"))
+    assert(theta >= 0, str("cross_axis_pivot_sigma_weld: theta must not be negative (got ", theta, ")"))
+    assert(E > 0, str("cross_axis_pivot_sigma_weld: E must be positive (got ", E, " MPa)"))
+    2 * E * t * theta / L;
+
+// Unwelded leaf ideal σ = E·t·θ/(2L) — cross-axis-flexure-pivot.scad:95;
+// kept so a reader can see the ~4× gap against the welded model.
+function cross_axis_pivot_sigma_leaf(t, L, theta, E = 2000) =
+    small_length_pivot_sigma(t, L, theta, E);
+
+// ---------------------------------------------------------------------------
+// SLFP — local frame
+// ---------------------------------------------------------------------------
+//
+//       y                      rigid body (caller) occupies y >= 0
+//       ^
+//   ####|##################
+//   ####+-----------------------> x
+//       |  optional root fillet in the +x / −y quadrant
+//  beam |  (finger face at x = 0, thickness toward −x)
+// x∈[-t,0]
+//       |
+//       +  tip at y = −L
+//
+// Free length L along −Y from the root face at y = 0. Place with
+// translate/rotate/mirror — e.g. snap-cantilever-clip's finger at
+// plate_depth is just translate([0, plate_depth]) small_length_pivot_2d(...).
+// ---------------------------------------------------------------------------
+
+module _small_length_pivot_guards(t, L, root_fillet) {
+    // snap-cantilever-clip.scad:99 — two-perimeter floor.
+    assert(t >= 0.8, str("SLFP beam t = ", t, " under the two-perimeter floor (0.8 mm) — the flexure will not print"));
+    assert(L > 0, str("SLFP free length L must be positive (got ", L, ")"));
+    if (!is_undef(root_fillet)) {
+        _root_fillet_guards(root_fillet, t);
+        // Fillet must leave free beam past the root (same spirit as
+        // let-folding-panel.scad:138 / arch root_fillet < span/2).
+        assert(root_fillet < L,
+               str("SLFP root fillet ", root_fillet, " leaves no free beam (L ", L, ")"));
+    }
+}
+
+// 2D cantilever SLFP in the local frame above. root_fillet = undef → bare
+// root (sharp); a number ≥ 0.5·t places one weld-safe corner piece on the
+// channel side. Harvest site: snap-cantilever-clip.scad:134-149.
+//
+// The fillet is the design's difference() VERBATIM (square at [0,-f]×[f,f]
+// minus disc at (f,-f)), not `mirror([0,1]) root_fillet_2d(f,t)`: those two
+// are the same solid (stage-1 empty-symdiff proof) but a mirror re-samples
+// the arc and the STL is no longer byte-identical to the harvest site. The
+// guards still go through _root_fillet_guards / root_fillet_2d's rule.
+module small_length_pivot_2d(t, L, root_fillet = undef) {
+    _small_length_pivot_guards(t, L, root_fillet);
+    // Generator owns its sampling (issue #1047) — snap-cantilever-clip.scad:76.
+    // A caller's $fn must not move the fillet arc (parity is recorded at 96).
+    $fn = 96;
+    translate([-t, -L]) square([t, L]);
+    if (!is_undef(root_fillet)) {
+        f = root_fillet;
+        difference() {
+            translate([0, -f]) square([f, f]);
+            translate([f, -f]) circle(f);
+        }
+    }
+}
+
+// Extruded SLFP. Echoes predicted K and, when theta is given (radians), the
+// pure-moment root stress σ ≈ E·t·θ/(2L). E in MPa (PETG ≈ 2000 is the
+// harvest-site datum). tip_load = true echoes the tip-load bound (2×) too —
+// snap-cantilever-clip.scad:88-90's shape.
+module small_length_pivot(t, L, w, root_fillet = undef, E = 2000,
+                          theta = undef, tip_load = false) {
+    _small_length_pivot_guards(t, L, root_fillet);
+    // Assert BEFORE any prediction call: OpenSCAD evaluates assignments in
+    // dependency order inside a module, so `I = flexure_I(w,t)` would fire
+    // flexure_I's assert first and rename this refusal.
+    assert(w > 0, str("SLFP width w must be positive (got ", w, ") — it would extrude nothing"));
+    assert(E > 0, str("SLFP modulus E must be positive (got ", E, " MPa)"));
+    if (!is_undef(theta))
+        assert(theta >= 0, str("SLFP theta must not be negative (got ", theta, ")"));
+    // Inline (same expressions as flexure_I / small_length_pivot_K /
+    // small_length_pivot_sigma) so the echo cannot outrun the asserts above.
+    I = w * pow(t, 3) / 12;
+    K = E * I / L;
+    echo(str("[compliant] small_length_pivot: predicted K = ", K,
+             " N*mm/rad (I = ", I, " mm^4, E = ", E, " MPa, L = ", L,
+             ", t = ", t, ", w = ", w, ") — a prediction for the coupon to verify"));
+    if (!is_undef(theta)) {
+        sig = E * t * theta / (2 * L);
+        if (tip_load)
+            echo(str("[compliant] small_length_pivot: root stress at theta = ",
+                     theta * 180 / PI, " deg: ", 2 * sig, " MPa tip-load bound; ",
+                     sig, " MPa doc pure-moment ideal"));
+        else
+            echo(str("[compliant] small_length_pivot: root stress at theta = ",
+                     theta * 180 / PI, " deg: sigma ~= ", sig,
+                     " MPa (E*t*theta/(2L) pure-moment ideal)"));
+    }
+    linear_extrude(w) small_length_pivot_2d(t, L, root_fillet);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-axis flexure pivot — local frame
+// ---------------------------------------------------------------------------
+//
+// Virtual center at the origin. Two strips at ±alpha span free length L
+// between the rigid arcs' inner faces (r_in = L/2); both strips are the SAME
+// centered rectangle rotated, so the two blades cannot drift apart. The arcs'
+// end faces are the hard stops at ±stop_angle. Harvest site:
+// designs/cross-axis-flexure-pivot/ (beams_2d / root_fillets / weld_fillets /
+// ring_arc / pivot_2d).
+// ---------------------------------------------------------------------------
+
+// w = undef skips the three-perimeter check (2D path has no extrusion
+// height); the 3D module always passes a real w.
+module _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                                tab_len, tab_w, tab_r, w = undef) {
+    // cross-axis-flexure-pivot.scad:118 — extrusion floor (coupon may sit
+    // under the 0.8 production floor; the soft warn is the echo below).
+    assert(t >= 0.5, str("cross-axis beam t = ", t, " under 0.5 mm will not extrude at all"));
+    assert(L > 0, str("cross-axis free span L must be positive (got ", L, ")"));
+    // cross-axis-flexure-pivot.scad:119-120.
+    _root_fillet_guards(root_fillet, t);
+    // cross-axis-flexure-pivot.scad:121 — three perimeters (3D only).
+    if (!is_undef(w))
+        assert(w >= 2.4, str("cross-axis beam width w = ", w,
+                             " under 3 perimeters (2.4 mm) — one bad road kills the beam"));
+    // cross-axis-flexure-pivot.scad:122.
+    assert(alpha > 10 && alpha < 80,
+           str("crossing half-angle alpha = ", alpha, " outside 10-80 deg"));
+    // cross-axis-flexure-pivot.scad:123.
+    assert(stop_angle > 5 && stop_angle < 80,
+           str("hard-stop angle = ", stop_angle, " outside 5-80 deg"));
+    // cross-axis-flexure-pivot.scad:124.
+    assert(arc_wall >= 1.6, str("ring wall arc_wall = ", arc_wall,
+                                " under 1.6 mm — the arcs must be rigid, not a second flexure"));
+    r_in = L / 2;
+    r_out = r_in + arc_wall;
+    arc_half = (180 - stop_angle) / 2;
+    land = arc_wall - 0.5;
+    // Free beam between the two ring-root fillets on a strip (arch's
+    // root_fillet < span/2 spirit). Production f = 0.6 on L = 28 clears.
+    assert(root_fillet < r_in,
+           str("cross-axis root fillet ", root_fillet,
+               " leaves no free beam between the ring roots (L ", L, ")"));
+    // Weld-fillet disc centers along each bisector must stay inside the
+    // bore — otherwise a large fillet overlaps both ring arcs across the
+    // stop gap (CodeRabbit on #1052: f = 100 on L = 28). Reach is
+    // (t/2 + f)/sin(alpha) on the beam bisector and /cos(alpha) on the
+    // cross bisector (cross-axis-flexure-pivot.scad:219-221's r_x / r_y
+    // plus notch d = f/sin(hw)).
+    assert((t / 2 + root_fillet) / sin(alpha) < r_in,
+           str("cross-axis root fillet ", root_fillet,
+               " bridges the stop gap along the beam bisector"));
+    assert((t / 2 + root_fillet) / cos(alpha) < r_in,
+           str("cross-axis root fillet ", root_fillet,
+               " bridges the stop gap along the cross bisector"));
+    // cross-axis-flexure-pivot.scad:126-127 — harvest's fixed +6° land.
+    assert(arc_half >= alpha + 6,
+           str("arc half-width does not cover the beam roots — lower stop_angle or alpha"));
+    // Full beam-root footprint (half-thickness + root fillet) after rotation
+    // must still sit under the arc — otherwise the root protrudes into the
+    // stop gap and the moving arc contacts the fillet before the declared
+    // stop (CodeRabbit on #1052: t=4, L=14, f=2, stop_angle=78). Production
+    // (t=0.8, f=0.6, alpha=45, arc_half=70) clears by ~20°.
+    root_ang = atan2(r_in * sin(alpha) + (t / 2 + root_fillet) * cos(alpha),
+                     r_in * cos(alpha) - (t / 2 + root_fillet) * sin(alpha));
+    assert(arc_half >= root_ang + 1,
+           str("cross-axis beam-root footprint protrudes into the stop gap ",
+               "(root angle ", root_ang, " deg, arc_half ", arc_half, ")"));
+    // cross-axis-flexure-pivot.scad:129-130.
+    assert(pow(r_in + land, 2) + pow(t / 2, 2) < pow(r_out - 0.2, 2),
+           "beam end pokes through the ring's outer face");
+    // Tab furniture sign checks (API holes the inline copy never had as
+    // parameters — a zero tab still builds, a negative radius breaks offset).
+    assert(tab_len > 0, str("cross-axis tab_len must be positive (got ", tab_len, ")"));
+    assert(tab_w > 0, str("cross-axis tab_w must be positive (got ", tab_w, ")"));
+    assert(tab_r >= 0, str("cross-axis tab_r must not be negative (got ", tab_r, ")"));
+    // Strict <: offset(r) offset(delta=-r) collapses a rectangle to empty
+    // area when 2·r equals a side (Copilot on #1052) — equality is not a fit.
+    assert(2 * tab_r < tab_len && 2 * tab_r < tab_w,
+           str("cross-axis tab_r = ", tab_r, " does not fit the tab (", tab_len, " x ", tab_w, ")"));
+    // Arm far-circle (r=2) uses inset = min(4, tab_len/2 - 1). Require
+    // tab_len >= 8 so that inset stays >= 3: the circle then overlaps the
+    // tab with a solid neck AND does not poke past the outer edge
+    // (Bugbot on #1052: tab_len just above 2 with inset ≈ 0 overruns).
+    // Production tab_len = 10 → inset 4, harvest-identical.
+    assert(tab_len >= 8,
+           str("cross-axis tab_len = ", tab_len,
+               " too short for the arm to meet the tab with a solid neck"));
+}
+
+// Convex-corner-rounded rectangle — cross-axis-flexure-pivot.scad:145-146.
+module _cross_axis_rounded2d(len, wid, r)
+    offset(r = r) offset(delta = -r) square([len, wid], center = true);
+
+// Annular band r_in..r_out over [-arc_half, +arc_half] —
+// cross-axis-flexure-pivot.scad:151-160. The harvest site used a fixed
+// `r_out + 10` wedge margin, which is enough at production (arc_half 70°,
+// r_out 20.5 → chord clearance 30.5 > need) but for a large accepted span
+// the straight wedge edges bow inside r_out and sever the ring (Copilot on
+// #1052: L=120, arc_wall=1.6 → need r_out/cos(arc_half/2)). Keep the +10
+// floor so production tessellation stays byte-identical to the harvest site.
+module _cross_axis_ring_arc_2d(r_in, r_out, arc_half) {
+    rb = max(r_out + 10, r_out / cos(arc_half / 2));
+    intersection() {
+        difference() { circle(r_out); circle(r_in); }
+        polygon([[0, 0],
+                 [rb * cos(-arc_half), rb * sin(-arc_half)],
+                 [rb, 0],
+                 [rb * cos(arc_half), rb * sin(arc_half)]]);
+    }
+}
+
+// Canonical cross-axis root-fillet orientation: rigid at x >= 0, beam at
+// y <= 0, piece in x∈[-f,0] × y∈[0,f] — cross-axis-flexure-pivot.scad:172-176
+// VERBATIM (same solid as `mirror([1,0]) root_fillet_2d(f,t)`, but the
+// harvest site's difference() keeps the arc tessellation byte-identical).
+// Guards already ran in _cross_axis_pivot_guards via _root_fillet_guards.
+module _cross_axis_root_fillet_2d(f, t)
+    difference() {
+        translate([-f, 0]) square([f, f]);
+        translate([-f, f]) circle(f);
+    }
+
+// Four corners of one strip — cross-axis-flexure-pivot.scad:184-190.
+// Nested single-axis mirrors (NOT mirror([1,1])): a combined mirror is a
+// reflection about y = -x, which the canonical piece is symmetric under, so
+// the double-flip corner silently got no fillet (measured: 6/8 corners).
+module _cross_axis_root_fillets_at_2d(span, tt, a, root_fillet) {
+    f = max(root_fillet, 0.5 * tt);
+    for (e = [1, -1], s = [1, -1])
+        rotate([0, 0, a])
+            translate([e * span, s * tt / 2])
+                mirror([e < 0 ? 1 : 0, 0])
+                    mirror([0, s < 0 ? 1 : 0])
+                        _cross_axis_root_fillet_2d(f, tt);
+}
+
+// One fillet filling a concave notch of air-angle `psi` (deg) —
+// cross-axis-flexure-pivot.scad:201-212. Local frame: corner at the origin,
+// notch bisector along +x, walls at ±psi/2 from +x.
+module _cross_axis_notch_fillet_2d(f, psi) {
+    assert(f > 0, str("notch fillet must be positive (got ", f, ")"));
+    assert(psi > 0 && psi < 180,
+           str("notch air-angle psi = ", psi, " must be in (0, 180) deg"));
+    hw = psi / 2;
+    d  = f / sin(hw);
+    tl = f / tan(hw);
+    difference() {
+        polygon([[0, 0],
+                 [tl * cos(hw), -tl * sin(hw)],
+                 [tl * cos(hw),  tl * sin(hw)]]);
+        translate([d, 0]) circle(f);
+    }
+}
+
+// Both crossed blades from ONE centered strip rotated ±alpha — the
+// male/female-cannot-drift rule (cross-axis-flexure-pivot.scad:163-165).
+module _cross_axis_beams_2d(r_in, land, t, alpha)
+    for (a = [alpha, -alpha])
+        rotate([0, 0, a]) square([2 * (r_in + land), t], center = true);
+
+// Four re-entrant weld corners — cross-axis-flexure-pivot.scad:218-230.
+module _cross_axis_weld_fillets_2d(t, alpha, root_fillet) {
+    f = max(root_fillet, 0.5 * t);
+    r_x = (t / 2) / sin(alpha);
+    r_y = (t / 2) / cos(alpha);
+    for (a = [0, 180])
+        rotate([0, 0, a])
+            translate([r_x, 0])
+                _cross_axis_notch_fillet_2d(f, 2 * alpha);
+    for (a = [90, 270])
+        rotate([0, 0, a])
+            translate([r_y, 0])
+                _cross_axis_notch_fillet_2d(f, 180 - 2 * alpha);
+}
+
+// 2D cross-axis pivot in the virtual-center frame. Both blades from one
+// profile. Tab furniture defaults match the harvest site's production
+// handle so a parity fixture against pivot_2d() can be byte-identical.
+module cross_axis_pivot_2d(t, L, root_fillet, alpha = 45, stop_angle = 40,
+                           arc_wall = 6.5, tab_len = 10, tab_w = 22, tab_r = 4) {
+    _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                             tab_len, tab_w, tab_r);
+    // Generator owns its sampling (issue #1047) — cross-axis-flexure-pivot.scad:80.
+    // A caller's $fn must not move the rings, arm, notch fillets or tab offsets
+    // (parity is recorded at 64).
+    $fn = 64;
+    r_in     = L / 2;
+    r_out    = r_in + arc_wall;
+    arc_half = (180 - stop_angle) / 2;
+    land     = arc_wall - 0.5;
+    tab_cx   = r_out + tab_len / 2;
+    // Harvest site: far circle at tab_cx - 4 (production tab_len = 10 →
+    // inset 4). For a shorter accepted tab, pull the end into the tab so the
+    // r=2 circle still overlaps it with a solid neck; production inset is
+    // unchanged (min(4, 10/2 - 1) = 4).
+    arm_inset = min(4, tab_len / 2 - 1);
+
+    module ring_arc() _cross_axis_ring_arc_2d(r_in, r_out, arc_half);
+    module arm()
+        hull() {
+            translate([r_in + 3, 0]) circle(2);
+            translate([tab_cx - arm_inset, 0]) circle(2);
+        }
+    module frame()
+        union() {
+            rotate([0, 0, 180]) ring_arc();
+            mirror([1, 0]) arm();
+            translate([-tab_cx, 0]) _cross_axis_rounded2d(tab_len, tab_w, tab_r);
+        }
+    module stage()
+        union() {
+            ring_arc();
+            arm();
+            translate([tab_cx, 0]) _cross_axis_rounded2d(tab_len, tab_w, tab_r);
+        }
+
+    union() {
+        frame();
+        _cross_axis_beams_2d(r_in, land, t, alpha);
+        for (a = [alpha, -alpha])
+            _cross_axis_root_fillets_at_2d(r_in, t, a, root_fillet);
+        _cross_axis_weld_fillets_2d(t, alpha, root_fillet);
+        stage();
+    }
+}
+
+// Extruded cross-axis pivot. Echoes predicted K (welded model) and the weld /
+// leaf stresses at ±stop_angle. Optional h_pad raises a finger pad on the
+// stage tab (cross-axis-flexure-pivot.scad:365). Soft-warns when t < 0.8
+// (production floor) while still accepting down to the 0.5 extrusion floor.
+module cross_axis_pivot(t, L, w, root_fillet, alpha = 45, stop_angle = 40,
+                        arc_wall = 6.5, E = 2000, h_pad = 0,
+                        tab_len = 10, tab_w = 22, tab_r = 4) {
+    _cross_axis_pivot_guards(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                             tab_len, tab_w, tab_r, w = w);
+    // Pad's rounded2d must share the 2D module's harvest resolution
+    // (cross_axis_pivot_2d pins $fn = 64 for the silhouette; the pad is a
+    // separate extrude that would otherwise inherit the caller's $fn).
+    $fn = 64;
+    // Assert BEFORE prediction math — see small_length_pivot.
+    assert(E > 0, str("cross-axis modulus E must be positive (got ", E, " MPa)"));
+    assert(h_pad >= 0, str("cross-axis h_pad must not be negative (got ", h_pad, ")"));
+    // Prefix is "soft-warn", not "WARNING": check.sh's demo CGAL pass fails
+    // closed on any stderr line matching WARNING (scripts/check.sh:156), and
+    // this is an advisory — the hard floor is still t >= 0.5 above.
+    if (t < 0.8)
+        echo(str("[compliant] soft-warn: cross_axis_pivot t = ", t,
+                 " is under the 0.8 mm production floor (2 extrusion widths) — ",
+                 "fine for a deliberate coupon row, not for the pivot"));
+    // Inline (same expressions as flexure_I / cross_axis_pivot_K /
+    // cross_axis_pivot_sigma_*), so echo cannot outrun the asserts above.
+    I = w * pow(t, 3) / 12;
+    K = 8 * E * I / L;
+    theta = stop_angle * PI / 180;
+    sig_w = 2 * E * t * theta / L;
+    sig_l = E * t * theta / (2 * L);
+    r_out = L / 2 + arc_wall;
+    tab_cx = r_out + tab_len / 2;
+    echo(str("[compliant] cross_axis_pivot: predicted K ~= ", K,
+             " N*mm/rad at +/-", stop_angle, " deg (welded / pinned-crossing: ",
+             "8*E*I/L, I = ", I, " mm^4, E = ", E, " MPa) — a prediction for ",
+             "the coupon to verify"));
+    echo(str("[compliant] cross_axis_pivot: weld stress at +/-", stop_angle,
+             " deg: ", sig_w, " MPa (pinned S-bend) — leaf ideal would be ",
+             sig_l, " MPa"));
+    linear_extrude(w)
+        cross_axis_pivot_2d(t, L, root_fillet, alpha, stop_angle, arc_wall,
+                            tab_len, tab_w, tab_r);
+    if (h_pad > 0)
+        translate([0, 0, w])
+            linear_extrude(h_pad)
+                translate([tab_cx, 0]) _cross_axis_rounded2d(tab_len, tab_w, tab_r);
+}
+
+// ===========================================================================
+// Stage 3 — LET (lamina-emergent torsional) joint
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Predictions — match let-folding-panel.scad:113-131 at the recorded
+// production harvest settings (OpenSCAD ==). The library normalizes the
+// long/short sides in J (max/min); the inline design uses t/w directly, so
+// a swapped (bar_t > bar_w) call is NOT bit-identical to the inline copy.
+// ---------------------------------------------------------------------------
+
+// St-Venant torsion constant of a rectangular bar, mm^4 —
+// let-folding-panel.scad:119. The approximation needs the LONG side as `a`
+// and the SHORT as `b` (a ≥ b); normalize with max/min so a swapped
+// (bar_t > bar_w) call returns the same J as the axis-exchanged rectangle
+// (Copilot on #1057). Harvest site is w=2 ≥ t=1.2.
+function let_joint_J(bar_w, bar_t) =
+    assert(bar_w > 0, str("let_joint_J: bar_w must be positive (got ", bar_w, ")"))
+    assert(bar_t > 0, str("let_joint_J: bar_t must be positive (got ", bar_t, ")"))
+    let (
+        a = max(bar_w, bar_t),
+        b = min(bar_w, bar_t)
+    ) a * pow(b, 3) / 3
+        * (1 - 0.63 * (b / a) + 0.052 * pow(b / a, 5));
+
+// Shear modulus from E and ν — let-folding-panel.scad:116 (ν = 0.4 default).
+function let_joint_G(E = 2000, nu = 0.4) =
+    assert(E > 0, str("let_joint_G: modulus E must be positive (got ", E, " MPa)"))
+    assert(nu > -1 && nu < 0.5, str("let_joint_G: Poisson ratio nu must be in (-1, 0.5) (got ", nu, ")"))
+    E / (2 * (1 + nu));
+
+// Torsion-dominated joint stiffness K (N·mm/rad) —
+// let-folding-panel.scad:120-121. Spans act in parallel across X; series
+// rows divide (docs/advanced-techniques.md: series softens, parallel stiffens).
+function let_joint_K(n_series, n_parallel, bar_w, bar_t, bar_L, E = 2000, nu = 0.4) =
+    assert(n_series == floor(n_series),
+           str("let_joint_K: n_series must be an integer (got ", n_series, ")"))
+    assert(n_series >= 1, str("let_joint_K: n_series must be >= 1 (got ", n_series, ")"))
+    assert(n_parallel == floor(n_parallel),
+           str("let_joint_K: n_parallel must be an integer (got ", n_parallel, ")"))
+    assert(n_parallel >= 2, str("let_joint_K: n_parallel must be >= 2 (got ", n_parallel, ")"))
+    assert(bar_L > 0, str("let_joint_K: bar_L must be positive (got ", bar_L, ")"))
+    n_parallel * let_joint_G(E, nu) * let_joint_J(bar_w, bar_t) / bar_L / n_series;
+
+// Doc bending upper-bound root stress σ ≈ E·t·θ/(2·L_bend) (MPa) —
+// let-folding-panel.scad:122-123. L_bend = gap − bar_w/2. θ in radians.
+function let_joint_sigma(bar_t, bar_w, gap, theta, E = 2000) =
+    assert(bar_t > 0, str("let_joint_sigma: bar_t must be positive (got ", bar_t, ")"))
+    assert(bar_w > 0, str("let_joint_sigma: bar_w must be positive (got ", bar_w, ")"))
+    assert(gap > bar_w / 2, str("let_joint_sigma: gap must exceed bar_w/2 (got gap=", gap, ", bar_w=", bar_w, ")"))
+    assert(theta >= 0, str("let_joint_sigma: theta must not be negative (got ", theta, ")"))
+    assert(E > 0, str("let_joint_sigma: E must be positive (got ", E, " MPa)"))
+    E * bar_t * theta / (2 * (gap - bar_w / 2));
+
+// Torsion surface shear τ = G·θ·r_c/L (MPa) — the design stress when torsion
+// dominates (let-folding-panel.scad:124-125). θ in radians.
+function let_joint_tau(bar_w, bar_t, bar_L, theta, E = 2000, nu = 0.4) =
+    assert(bar_w > 0, str("let_joint_tau: bar_w must be positive (got ", bar_w, ")"))
+    assert(bar_t > 0, str("let_joint_tau: bar_t must be positive (got ", bar_t, ")"))
+    assert(bar_L > 0, str("let_joint_tau: bar_L must be positive (got ", bar_L, ")"))
+    assert(theta >= 0, str("let_joint_tau: theta must not be negative (got ", theta, ")"))
+    let_joint_G(E, nu) * theta * sqrt(pow(bar_w / 2, 2) + pow(bar_t / 2, 2)) / bar_L;
+
+// ---------------------------------------------------------------------------
+// LET joint — local frame
+// ---------------------------------------------------------------------------
+//
+// Fold line along X at y = 0. One torsion bar (or n_series bars stacked along
+// Y) with interdigitated fingers: A-side at even pitches toward −Y, B-side at
+// odd pitches toward +Y. bar_L is the nominal, unfilleted free span between
+// adjacent fingers (pitch = finger_w + bar_L); root fillets eat into that
+// span, so the measurable straight length after filleting is shorter. The
+// harvested prediction model still uses this nominal bar_L. Strip starts at
+// x = 0.
+//
+//       y
+//       ^        B fingers (odd) → panel / next series row at +gap
+//       |    ┌───┐     ┌───┐
+//   ####|====┘   └=====┘   └====  ← torsion bar(s), width bar_w
+//       |  ┌───┐     ┌───┐
+//       |  └───┘     └───┘        A fingers (even) → panel at −gap
+//       +-----------------------------------------------> x
+//       0
+//
+// n_parallel = number of torsion spans (= fingers − 1). n_series = number of
+// bar rows along Y (series softens); row centres sit 2·gap apart. Odd rows
+// FLIP their A/B finger parity so facing fingers share an X pitch and union
+// across the mid-plane (Copilot on #1057: same-parity stacking left adjacent
+// rows disconnected). Harvest site is n_series = 1, n_parallel = 3
+// (fingers = 4). Place with translate/rotate/mirror — attach panels at the
+// outer finger tips (y ≤ −gap and y ≥ +(2·(n_series−1)·gap + gap), with the
+// harvest's 1 mm embed past those faces for a robust union).
+// ---------------------------------------------------------------------------
+
+module _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                         finger_w, root_fillet, embed) {
+    // Integer counts first (Copilot on #1057): a fractional n_series emits
+    // floor(n) rows via `for (s = [0:n-1])` while K divides by the fraction;
+    // a fractional n_parallel emits floor(n)+1 fingers while K uses the
+    // fraction. Refuse before any geometry assert so the named message is
+    // the diagnosis.
+    assert(n_series == floor(n_series),
+           str("LET n_series must be an integer (got ", n_series, ")"));
+    assert(n_parallel == floor(n_parallel),
+           str("LET n_parallel must be an integer (got ", n_parallel, ")"));
+    // let-folding-panel.scad:135 — two-perimeter floor.
+    assert(bar_t >= 0.8, str("LET torsion bar t = ", bar_t,
+                             " under the 0.8 mm minimum feature"));
+    // let-folding-panel.scad:136 via _root_fillet_guards — r > 0 and ≥ 0.5·t.
+    _root_fillet_guards(root_fillet, bar_t);
+    // let-folding-panel.scad:137 — harvest floor 1.2 mm. The message does
+    // NOT claim "3 perimeters": at a stock 0.4 mm nozzle (0.42–0.45 mm lines)
+    // 1.2 mm is two walls + a gap-fill sliver, not three full lines (Jane on
+    // #1057). Keep the floor; say what the plastic actually gets.
+    assert(bar_w >= 1.2, str("LET torsion bar w = ", bar_w,
+                             " under the 1.2 mm floor (harvest site; ~2 walls ",
+                             "at a 0.4 mm nozzle) — it will tear"));
+    // let-folding-panel.scad:138 — free torsion span after the root fillets.
+    assert(bar_L > 2 * root_fillet,
+           str("LET no free torsion span left after the root fillets (L=",
+               bar_L, ", 2r=", 2 * root_fillet, ")"));
+    // let-folding-panel.scad:139 — fingers >= 3 ↔ n_parallel >= 2.
+    assert(n_parallel >= 2, str("LET n_parallel = ", n_parallel,
+                                " — a LET needs at least 2 fingers on one side ",
+                                "(n_parallel >= 2, fingers = n_parallel + 1)"));
+    // let-folding-panel.scad:140 — fingers too short to bridge the panels.
+    assert(gap > bar_w / 2 + 2, str("LET fingers too short to bridge the panels ",
+                                    "(gap=", gap, ", need > ", bar_w / 2 + 2, ")"));
+    // API holes the inline copy never had as parameters.
+    assert(n_series >= 1, str("LET n_series must be >= 1 (got ", n_series, ")"));
+    assert(finger_w > 0, str("LET finger_w must be positive (got ", finger_w, ")"));
+    assert(embed >= 0, str("LET embed must not be negative (got ", embed, ")"));
+    // Multi-row: a finger tip at gap+embed must not reach the opposite outer
+    // panel face at (2·n_series−1)·gap, or every row bridges both panels and
+    // the series K prediction (÷ n_series) is off by ~n_series² (CodeRabbit
+    // on #1057). Threshold embed < 2·gap − bar_w/2; n_series=1 keeps the
+    // harvest site's unbounded embed into its one pair of panels.
+    assert(n_series == 1 || embed < 2 * gap - bar_w / 2,
+           str("LET embed = ", embed, " lets a series row reach the opposite ",
+               "panel face (need embed < 2*gap - bar_w/2 = ",
+               2 * gap - bar_w / 2, ")"));
+}
+
+// One series-row silhouette: A-half ∪ B-half, each rooted separately —
+// let-folding-panel.scad:85-109 VERBATIM when flip = false (the harvest
+// splits the bar so each half carries its own root fillets; a single closing
+// of the union is the same solid but re-samples the offsets and is no longer
+// byte-identical). flip = true swaps A/B finger parity so an odd series row
+// meets its neighbour on the same X pitches.
+module _let_joint_row_2d(n_parallel, bar_w, bar_t, bar_L, gap, finger_w,
+                         root_fillet, embed, flip = false) {
+    fingers = n_parallel + 1;
+    pitch = finger_w + bar_L;
+    strip_len = fingers * pitch;
+    // Toward −Y: even pitches when !flip (harvest A), odd when flip.
+    rooted_2d(root_fillet, bar_t) {
+        translate([0, -bar_w / 2]) square([strip_len, bar_w / 2]);
+        for (i = [0 : fingers - 1])
+            if ((i % 2 == 0) != flip) {
+                x0 = i * pitch + (pitch - finger_w) / 2;
+                translate([x0, -gap - embed])
+                    square([finger_w, gap + embed + bar_w / 2]);
+            }
+    }
+    // Toward +Y: odd pitches when !flip (harvest B), even when flip.
+    rooted_2d(root_fillet, bar_t) {
+        translate([0, 0]) square([strip_len, bar_w / 2]);
+        for (i = [0 : fingers - 1])
+            if ((i % 2 == 1) != flip) {
+                x0 = i * pitch + (pitch - finger_w) / 2;
+                translate([x0, -bar_w / 2])
+                    square([finger_w, bar_w / 2 + gap + embed]);
+            }
+    }
+}
+
+// 2D LET joint in the local frame above. Generator owns its sampling
+// (issue #1048) — let-folding-panel.scad:61 pins $fn = 48; a caller's
+// quality preset must not move the rooted closing (parity is at 48).
+// root_fillet = undef → 0.5·bar_t (the N3 floor, not the harvest's 0.8).
+module let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                    finger_w = 3.5, root_fillet = undef, embed = 1) {
+    rf = is_undef(root_fillet) ? 0.5 * bar_t : root_fillet;
+    _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                      finger_w, rf, embed);
+    $fn = 48;
+    // Series rows along Y: centres 2·gap apart. Odd rows flip finger parity
+    // so facing fingers share an X pitch and union (embed overlap) into one
+    // body — n_series = 1 is the harvest site (flip = false, byte-identical).
+    for (s = [0 : n_series - 1])
+        translate([0, s * 2 * gap])
+            _let_joint_row_2d(n_parallel, bar_w, bar_t, bar_L, gap, finger_w,
+                              rf, embed, flip = (s % 2 == 1));
+}
+
+// Extruded LET joint. Echoes torsion-dominated predicted K and, when theta
+// is given (radians), the doc bending upper-bound root stress and the
+// torsion surface shear (the design stress). E in MPa (PETG ≈ 2000),
+// ν = 0.4 — the harvest-site datum.
+//
+// Defaults & adoption (Jane/PM on #1057):
+//   * root_fillet = undef → 0.5·bar_t, the N3 / docs floor — NOT the harvest
+//     site's proven 0.8. Despec deliberately for cycle life.
+//   * Echoes assume the *printed* bar_t. Pin layer height so the slicer
+//     realises that t (harvest pins 0.2 mm), or coupon-tune after the fact.
+//   * An adopting design's README carries the material and bed lines the
+//     harvest site already states (not PLA — live flexures crack; PETG on
+//     smooth PEI welds a large flat sheet) — see designs/let-folding-panel/.
+module let_joint(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                 finger_w = 3.5, root_fillet = undef, embed = 1,
+                 E = 2000, nu = 0.4, theta = undef) {
+    rf = is_undef(root_fillet) ? 0.5 * bar_t : root_fillet;
+    _let_joint_guards(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                      finger_w, rf, embed);
+    // Assert BEFORE prediction math — see small_length_pivot.
+    assert(E > 0, str("LET modulus E must be positive (got ", E, " MPa)"));
+    assert(nu > -1 && nu < 0.5, str("LET Poisson ratio nu must be in (-1, 0.5) (got ", nu, ")"));
+    if (!is_undef(theta))
+        assert(theta >= 0, str("LET theta must not be negative (got ", theta, ")"));
+    // Inline (same expressions as let_joint_J / _G / _K / _sigma / _tau) so
+    // the echo cannot outrun the asserts above. J normalizes a=max, b=min
+    // (Copilot on #1057 — swapped bar_t > bar_w must not inflate J).
+    Gs = E / (2 * (1 + nu));
+    a = max(bar_w, bar_t);
+    b = min(bar_w, bar_t);
+    J = a * pow(b, 3) / 3
+        * (1 - 0.63 * (b / a) + 0.052 * pow(b / a, 5));
+    K_bar = Gs * J / bar_L;
+    K_tot = n_parallel * K_bar / n_series;
+    echo(str("[compliant] let_joint: predicted K = ", K_tot,
+             " N*mm/rad (", n_parallel, " parallel spans x ", K_bar,
+             " / ", n_series, " series rows; J = ", J, " mm^4, E = ", E,
+             " MPa, nu = ", nu, ") — a prediction for the coupon to verify"));
+    if (!is_undef(theta)) {
+        // Series model: each row takes ~theta/n_series. tau_bar uses the
+        // per-row angle so multi-row stress matches K_tot. sigma_root stays
+        // the full-fold doc upper bound (explicitly labeled) — Bugbot/#1057
+        // asked to split both; CodeRabbit keeps sigma as the full-fold bound.
+        theta_row = theta / n_series;
+        L_bend = gap - bar_w / 2;
+        sig = E * bar_t * theta / (2 * L_bend);
+        r_c = sqrt(pow(bar_w / 2, 2) + pow(bar_t / 2, 2));
+        tau = Gs * theta_row * r_c / bar_L;
+        echo(str("[compliant] let_joint: at theta = ", theta * 180 / PI,
+                 " deg: sigma_root = ", sig,
+                 " MPa (doc upper bound if a root took the full fold), ",
+                 "tau_bar = ", tau,
+                 " MPa (per-row twist theta/", n_series,
+                 " — the design stress here; torsion dominates)"));
+    }
+    linear_extrude(bar_t)
+        let_joint_2d(n_series, n_parallel, bar_w, bar_t, bar_L, gap,
+                     finger_w, rf, embed);
 }

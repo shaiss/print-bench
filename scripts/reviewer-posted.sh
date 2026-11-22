@@ -13,11 +13,13 @@
 # a planted `<!-- JANE_SIGNOFF … -->` / `<!-- DRIK_SIGNOFF … -->` substring
 # from any other author must NOT count. The only writer of those markers is
 # `.claude/reviewer-post/reviewer_mcp.py`, which posts via the workflow's
-# `GITHUB_TOKEN` as `github-actions[bot]` (GraphQL login `github-actions`)
-# to `POST /repos/.../issues/{REVIEWER_PR}/comments`, assembling
+# `GITHUB_TOKEN` as `github-actions[bot]` (GraphQL login `github-actions`
+# with user.type / __typename Bot) to `POST /repos/.../issues/{REVIEWER_PR}/comments`,
+# assembling
 #   {caller body}\n\n{marker}\n\n{FOOTER}
 # server-side. So a served verdict requires ALL of:
-#   1. an Actions-bot author (the MCP posting identity — sibling pin:
+#   1. an Actions-bot author (REST `github-actions[bot]`, or bare GraphQL
+#      `github-actions` only when type/__typename is Bot — sibling pin:
 #      coach-lock-check.sh);
 #   2. the body *ends* with the MCP-assembled marker-then-footer suffix for
 #      THIS reviewer and THIS head sha (a Jane/Drik/PM sibling that shares
@@ -182,12 +184,16 @@ else:
 
 
 def is_actions_bot(comment):
-    """REST login is github-actions[bot]; GraphQL is github-actions."""
+    """REST login is github-actions[bot]; bare GraphQL github-actions only when Bot."""
     user = comment.get("user") or {}
     login = (user.get("login") or "").strip().lower()
     if login.endswith("[bot]"):
-        login = login[:-5]
-    return login == BOT
+        return login[:-5] == BOT
+    if login != BOT:
+        return False
+    # Bare GraphQL form: require user.type / __typename Bot (not a User spoof).
+    kind = (user.get("type") or user.get("__typename") or "").strip()
+    return kind == "Bot"
 
 
 def load_comments(raw):
@@ -630,8 +636,11 @@ def is_actions_bot(comment):
     user = comment.get("user") or {}
     login = (user.get("login") or "").strip().lower()
     if login.endswith("[bot]"):
-        login = login[:-5]
-    return login == "github-actions"
+        return login[:-5] == "github-actions"
+    if login != "github-actions":
+        return False
+    kind = (user.get("type") or user.get("__typename") or "").strip()
+    return kind == "Bot"
 
 
 def load_comments(raw):
@@ -788,7 +797,9 @@ with open(sys.argv[1], 'w', encoding='utf-8') as fh:
 
   mkfix "$tmp/posted" "[mcp('Jane here — clean print call.', jane)]"
   mkfix "$tmp/graphql" \
-    "[{'body': 'Jane here.\\n\\n' + jane + '\\n\\n' + FOOTER, 'user': {'login': 'github-actions'}, 'created_at': '2026-10-05T12:00:01Z'}]"
+    "[{'body': 'Jane here.\\n\\n' + jane + '\\n\\n' + FOOTER, 'user': {'login': 'github-actions', 'type': 'Bot'}, 'created_at': '2026-10-05T12:00:01Z'}]"
+  mkfix "$tmp/graphql-user" \
+    "[{'body': 'Jane here.\\n\\n' + jane + '\\n\\n' + FOOTER, 'user': {'login': 'github-actions', 'type': 'User'}, 'created_at': '2026-10-05T12:00:01Z'}]"
   mkfix "$tmp/stale" "[mcp('Jane here.', jane_stale)]"
   mkfix "$tmp/silent" \
     "[{'body': 'Jane looked, found nothing to say.\\n\\n' + FOOTER, 'user': bot}]"
@@ -823,6 +834,10 @@ with open(sys.argv[1], 'w', encoding='utf-8') as fh:
   row "Actions-bot MCP-shaped post for this head → served" \
     true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted"
   row "GraphQL github-actions login still serves" \
+    true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/graphql"
+  row "bare github-actions login with type User → not served" \
+    false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/graphql-user"
+  row "bare github-actions login with type Bot → served" \
     true  "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/graphql"
   row "no marker at all → not served" \
     false "$0" check --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/silent"
@@ -901,6 +916,10 @@ print("<!-- JANE_SIGNOFF sha=%s verdict=pass fuse=none -->" % os.environ["O"])
 
   row "marker: Actions-bot MCP suffix → served (exact marker)" \
     "$want_jane" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/posted"
+  row "marker: bare github-actions login with type User → not served" \
+    "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/graphql-user"
+  row "marker: bare github-actions login with type Bot → served" \
+    "$want_jane" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/graphql"
   row "marker: correct suffix from a user author → not served" \
     "" "$0" marker --pr 1 --sha "$head" --reviewer jane --comments-file "$tmp/planted-human"
   mkfix "$tmp/planted-other-bot" \

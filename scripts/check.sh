@@ -646,8 +646,9 @@ if ! ./scripts/coach-lock-check.sh --selftest; then
 fi
 
 # backlog-burn post-agent outcome gate (issue #962): subtype=success with
-# HEAD still on main and no decline must fail clearly; diag redacts tokens
-# and caps the final message; show_full_output stays false on the ship steps.
+# HEAD still on main and no stop maps to deferred-no-outcome (settle sees
+# declined); missing/non-success subtype still fails hard; diag redacts
+# tokens and caps the final message; show_full_output stays false.
 echo "-- backlog-burn-ship-check selftest: scripts/backlog-burn-ship-check.sh --selftest"
 if ! ./scripts/backlog-burn-ship-check.sh --selftest; then
   fail=1
@@ -660,6 +661,20 @@ fi
 # from the copies in capture.sh and the upload-diag schema.
 echo "-- backlog-burn-agent-diag selftest: scripts/backlog-burn-agent-diag.sh --selftest"
 if ! ./scripts/backlog-burn-agent-diag.sh --selftest; then
+  fail=1
+fi
+
+# backlog-burn agent Bash deny backstop (issue #1022): loads the real
+# .claude/backlog-burn-settings.json and asserts — under Claude Code's
+# matcher, not a grep — that gh issue comment/edit, gh label, and
+# non-GET issue comment/label REST writes are refused while the
+# legitimate local-git / read-only gh surface still passes.
+echo "-- backlog-burn-perms selftest: scripts/backlog-burn-perms-check.sh --selftest"
+if ! ./scripts/backlog-burn-perms-check.sh --selftest; then
+  fail=1
+fi
+echo "-- backlog-burn-perms check: scripts/backlog-burn-perms-check.sh"
+if ! ./scripts/backlog-burn-perms-check.sh; then
   fail=1
 fi
 

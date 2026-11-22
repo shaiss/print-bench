@@ -75,8 +75,12 @@ def _dump(comments) -> str:
 #: ``$tmp/<name>`` → the file text reviewer-posted.sh's selftest writes there.
 RP_FIXTURES = {
     "posted": lambda: _dump([mcp("Jane here — clean print call.", jane)]),
-    "graphql": lambda: _dump([{"body": "Jane here.\n\n" + jane + "\n\n" + FOOTER, "user": {"login": "github-actions"},
+    "graphql": lambda: _dump([{"body": "Jane here.\n\n" + jane + "\n\n" + FOOTER,
+                               "user": {"login": "github-actions", "type": "Bot"},
                                "created_at": "2026-10-05T12:00:01Z"}]),
+    "graphql-user": lambda: _dump([{"body": "Jane here.\n\n" + jane + "\n\n" + FOOTER,
+                                    "user": {"login": "github-actions", "type": "User"},
+                                    "created_at": "2026-10-05T12:00:01Z"}]),
     "stale": lambda: _dump([mcp("Jane here.", jane_stale)]),
     "silent": lambda: _dump([{"body": "Jane looked, found nothing to say.\n\n" + FOOTER, "user": bot}]),
     "drik": lambda: _dump([mcp("Drik here.", drik)]),
@@ -108,8 +112,7 @@ RP_FIXTURES = {
     "slurp": lambda: json.dumps([[{"body": "page1", "user": {"login": "github-actions[bot]"}}],
                                  [{"body": "Jane.\n\n" + jane + "\n\n" + FOOTER,
                                    "user": {"login": "github-actions[bot]"}}]]),
-    # Issue #947 marker-verb fixtures (parity is check-only; names must still
-    # match every mkfix the script writes so a dropped fixture fails here).
+    # Issue #947 marker-verb fixtures (names must still match every mkfix).
     "planted-other-bot": lambda: _dump([mcp("plant", jane, user={"login": "copilot-pull-request-reviewer[bot]",
                                                                   "type": "Bot"})]),
     "short-sha": lambda: _dump([{"body": "x\n\n<!-- JANE_SIGNOFF sha=abc123 verdict=pass fuse=none -->\n\n"
@@ -127,6 +130,8 @@ RP_FIXTURES = {
 RP_ROWS = {
     "Actions-bot MCP-shaped post for this head → served": True,
     "GraphQL github-actions login still serves": True,
+    "bare github-actions login with type User → not served": False,
+    "bare github-actions login with type Bot → served": True,
     "no marker at all → not served": False,
     "marker names an older head → stale": False,
     "marker without a sha field → unserved": False,
@@ -160,6 +165,43 @@ RP_ROWS = {
     "slurped page arrays still find the marker": True,
 }
 
+# Marker strings built from parts (never a literal HTML comment in this file's
+# expected-want map beyond the fixture builders above).
+_WANT_JANE = jane
+_WANT_JANE_ACK = jane_ack
+_WANT_JANE_OLD = jane_stale
+
+#: Issue #947 ``marker`` verb rows → expected marker text (built from parts) or "".
+RP_MARKER_ROWS = {
+    "marker: Actions-bot MCP suffix → served (exact marker)": _WANT_JANE,
+    "marker: bare github-actions login with type User → not served": "",
+    "marker: bare github-actions login with type Bot → served": _WANT_JANE,
+    "marker: correct suffix from a user author → not served": "",
+    "marker: correct suffix from another [bot] app → not served": "",
+    "marker: Actions-bot marker mid-body (no suffix) → not served": "",
+    "marker: Actions-bot cross-family planted marker → not served": "",
+    "marker: Actions-bot wrong/older sha → not served": "",
+    "marker --currency: trusted older sha is the currency fallback": _WANT_JANE_OLD,
+    "marker: Actions-bot short sha → not served": "",
+    "marker --currency: short sha still not served": "",
+    "marker: lowercase family → not served": "",
+    "marker: marker in a non-bot review-shaped body → not served": "",
+    "marker: user marker after valid bot → bot still wins": _WANT_JANE,
+    "marker: last qualifying exact-sha marker wins": _WANT_JANE_ACK,
+    "marker: later older-sha bot post does not override head marker": _WANT_JANE,
+}
+
+RP_MARKER_REFUSALS = {
+    "marker: typo'd reviewer refused": lambda c: trust.marker(c, reviewer="jan", sha=HEAD),
+    "marker: short sha arg refused": lambda c: trust.marker(c, reviewer="jane", sha="abc123"),
+}
+
+_WANT_SHELL = {
+    "$want_jane": _WANT_JANE,
+    "$want_jane_ack": _WANT_JANE_ACK,
+    "$want_jane_old": _WANT_JANE_OLD,
+}
+
 #: Every refusal row → the Python call that must raise ValueError (None: the refusal is about a
 #: CLI argument this function does not take — the PR number, the live-mode token).
 RP_REFUSALS = {
@@ -171,31 +213,48 @@ RP_REFUSALS = {
 }
 
 
-def _rp_rows():
-    """Parse check-verb decision/refusal rows only.
+def _parse_cli_opts(args: list[str]) -> dict:
+    """Parse ``--key value`` pairs plus a bare ``--currency`` flag."""
+    opts: dict = {}
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--currency":
+            opts["--currency"] = True
+            i += 1
+        elif tok.startswith("--") and i + 1 < len(args):
+            opts[tok] = args[i + 1]
+            i += 2
+        else:
+            i += 1
+    return opts
 
-    Issue #947 added a ``marker`` verb whose selftest rows return marker
-    text (not true/false) and are not in the trust.served parity surface —
-    skip them here so a new marker row cannot break the check-port pin.
-    """
-    rows, refusals = [], []
+
+def _rp_rows():
+    """Parse check-verb and marker-verb decision/refusal rows from the selftest."""
+    check_rows, marker_rows = [], []
+    check_refusals, marker_refusals = [], []
     for line in _logical_lines(_selftest_body(RP_SCRIPT)):
         stripped = line.strip()
         if stripped.startswith('row "'):
             tokens = shlex.split(stripped)
             label, want, args = tokens[1], tokens[2], tokens[3:]
-            if args[:2] != ["$0", "check"]:
-                # marker (and any future non-check) rows — not trust.served.
-                continue
-            opts = dict(zip(args[2::2], args[3::2]))
-            rows.append((label, want, opts))
+            assert args[0] == "$0", label
+            verb = args[1]
+            opts = _parse_cli_opts(args[2:])
+            if verb == "check":
+                check_rows.append((label, want, opts))
+            elif verb == "marker":
+                marker_rows.append((label, want, opts))
+            else:
+                raise AssertionError(f"unexpected selftest verb {verb!r} in {label}")
         elif stripped.startswith('refuses "'):
             label = shlex.split(stripped)[1]
-            # marker: refusals are the marker verb's CLI; check refusals only.
             if label.startswith("marker:"):
-                continue
-            refusals.append(label)
-    return rows, refusals
+                marker_refusals.append(label)
+            else:
+                check_refusals.append(label)
+    return check_rows, check_refusals, marker_rows, marker_refusals
 
 
 def _rp_fixture_names() -> set[str]:
@@ -206,10 +265,17 @@ def _rp_fixture_names() -> set[str]:
     return names
 
 
+def _resolve_marker_want(want: str) -> str:
+    """Map shell ``$want_*`` placeholders (and empty) to marker text built from parts."""
+    if want in _WANT_SHELL:
+        return _WANT_SHELL[want]
+    return want
+
+
 def test_every_reviewer_posted_selftest_row_agrees():
     """Every `row` of scripts/reviewer-posted.sh --selftest (labels parsed from the script; the expected true/false and fixture rebuilt in Python) gets the same verdict from trust.served; a label added to the script without a Python row fails."""
-    rows, refusals = _rp_rows()
-    assert len(rows) == 33 and len({label for label, _, _ in rows}) == len(rows)
+    rows, refusals, marker_rows, marker_refusals = _rp_rows()
+    assert len(rows) == 35 and len({label for label, _, _ in rows}) == len(rows)
     assert {label for label, _, _ in rows} == set(RP_ROWS)
     assert _rp_fixture_names() == set(RP_FIXTURES)
     for label, want, opts in rows:
@@ -226,6 +292,23 @@ def test_every_reviewer_posted_selftest_row_agrees():
         if call is not None:
             with pytest.raises(ValueError):
                 call(posted)
+    # Issue #947 marker verb — parity with trust.marker (no longer skipped).
+    assert len(marker_rows) == 16 and len({label for label, _, _ in marker_rows}) == len(marker_rows)
+    assert {label for label, _, _ in marker_rows} == set(RP_MARKER_ROWS)
+    for label, want, opts in marker_rows:
+        expect = _resolve_marker_want(want)
+        assert expect == RP_MARKER_ROWS[label], f"the script changed its expectation: {label}"
+        assert opts["--pr"] == "1"
+        sha = {"$head": HEAD, "$old": OLD}[opts["--sha"]]
+        name = opts["--comments-file"].removeprefix("$tmp/")
+        comments = trust.load_comments(RP_FIXTURES[name]())
+        got = trust.marker(comments, reviewer=opts["--reviewer"], sha=sha,
+                           currency=bool(opts.get("--currency")))
+        assert got == RP_MARKER_ROWS[label], label
+    assert set(marker_refusals) == set(RP_MARKER_REFUSALS)
+    for label, call in RP_MARKER_REFUSALS.items():
+        with pytest.raises(ValueError):
+            call(posted)
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash to run the script itself")
@@ -233,7 +316,7 @@ def test_rebuilt_fixtures_get_the_scripts_own_verdicts(tmp_path):
     """Fidelity of the Python rebuild: the REAL reviewer-posted.sh, run on each rebuilt fixture file,
     prints the row's expected verdict — so the port is compared against the script's fixtures, not
     against a lookalike."""
-    rows, _ = _rp_rows()
+    rows, _, marker_rows, _ = _rp_rows()
     for name, build in RP_FIXTURES.items():
         (tmp_path / name).write_text(build(), encoding="utf-8")
     for label, want, opts in rows:
@@ -246,6 +329,18 @@ def test_rebuilt_fixtures_get_the_scripts_own_verdicts(tmp_path):
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env)
         assert proc.returncode == 0, (label, proc.stderr)
         assert proc.stdout.strip() == want, label
+    for label, want, opts in marker_rows:
+        argv = ["bash", str(RP_SCRIPT), "marker", "--pr", opts["--pr"],
+                "--sha", {"$head": HEAD, "$old": OLD}[opts["--sha"]], "--reviewer", opts["--reviewer"],
+                "--comments-file", str(tmp_path / opts["--comments-file"].removeprefix("$tmp/"))]
+        if opts.get("--currency"):
+            argv.append("--currency")
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_OUTPUT"}
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env)
+        assert proc.returncode == 0, (label, proc.stderr)
+        # marker() appends a trailing newline for CLI readability; the
+        # selftest's command substitution strips it — match that here.
+        assert proc.stdout.rstrip("\n") == _resolve_marker_want(want), label
 
 
 #: Bodies chosen to probe where a digest-based rule could part ways with ``body.endswith(...)``.
@@ -376,6 +471,13 @@ def test_actions_bot_spellings():
     assert trust.is_actions_bot(" GitHub-Actions[BOT] ")
     for login in ("github-actions[bot][bot]", "github-actions-bot", "cursor[bot]", "shaiss", "", None, 7):
         assert not trust.is_actions_bot(login), login
+    # Comment-shaped rule: bare GraphQL login only when type/__typename is Bot.
+    assert trust._comment_is_actions_bot({"user": {"login": "github-actions[bot]"}})
+    assert trust._comment_is_actions_bot({"user": {"login": "github-actions", "type": "Bot"}})
+    assert trust._comment_is_actions_bot({"user": {"login": "github-actions", "__typename": "Bot"}})
+    assert not trust._comment_is_actions_bot({"user": {"login": "github-actions", "type": "User"}})
+    assert not trust._comment_is_actions_bot({"user": {"login": "github-actions"}})
+    assert not trust._comment_is_actions_bot({"user": {"login": "attacker", "type": "Bot"}})
 
 
 def _mcp_footer() -> str:

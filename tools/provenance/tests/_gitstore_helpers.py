@@ -38,8 +38,14 @@ def _env() -> dict[str, str]:
 
 def sh(cwd: os.PathLike, *args: str, input: Optional[bytes] = None) -> str:
     """Plain git for test set-up (never the code under test)."""
+    # core.untrackedCache=false / core.fsmonitor=false: git 2.43+ otherwise
+    # rewrites the index with an UNTR (and sometimes FSMN) extension on
+    # `status`, which breaks byte-identical index assertions in
+    # test_gitstore.py (pre-existing on main under this runner).
     p = subprocess.run(["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null",
-                        "-c", "commit.gpgSign=false", *args],
+                        "-c", "commit.gpgSign=false",
+                        "-c", "core.untrackedCache=false",
+                        "-c", "core.fsmonitor=false", *args],
                        input=input, capture_output=True, env=_env())
     if p.returncode != 0:
         raise AssertionError(f"git {args}: {p.stderr.decode()}")

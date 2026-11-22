@@ -91,13 +91,59 @@ declines design requests). The queue is the contract between the seats:
   (`GROWTH_SELECTED_ISSUES`), meters copy with the weighted rule (URLs = 23,
   wide code points = 2, hard cap 280 — `growth.tweetlen` is the reference,
   and `tools/growth/tests/test_server_parity.py` pins the server's copy to
-  it), enforces one post per queue item ever (`<!-- growth-twitter:posted
-  -->` / `<!-- growth-twitter:dry-run -->` marker comments), caps posts per
-  run, applies no labels, and decides dry-run vs live itself — the model
-  never does. After a live post it closes the drained item (queue
-  semantics); after a dry run it only comments.
+  it),   preserves every `@handle` from the first paragraph of `## Message` in
+  the **root** tweet (`growth.roottags` — extract-only from untrusted issue
+  text; at most 5 ASCII handles; restore via drafted paragraph or append,
+  else refuse untagged; NFKC-normalize the final root and every thread part
+  and refuse full-width ``＠``/``﹫`` or more than 5 mention-shaped tokens),
+  LIVE posts only after a **preview → human re-label → post** loop:
+  a trusted preview comment (body **begins** with exactly the dry-run
+  marker, then the ``message-digest`` line, then the ``render-digest``
+  line at column 0 — leading whitespace refused; mid-body / quoted /
+  fenced copies never trusted — #1021; pre-#1023 message-digest-only
+  headers are not trusted; ``message-digest`` is sha256 of
+  NFKC(``## Message`` first paragraph) + ``\n`` + NFKC(``## Link``) —
+  the drafted root and the queue Link; ``render-digest`` is sha256 of a
+  deterministic JSON array of the raw root + thread parts (no NFKC, no
+  join separator — so ``10⁵``/``105`` and ``a\\0b``/``a``+``b`` cannot
+  collide) — LIVE refuses unless the postable copy matches that digest
+  (#1023), so altered prose or bare-domain injection via recomposition
+  cannot reach the channel;
+  only scheme URLs (``http(s)://…``, case-insensitive) from that
+  paragraph or ``## Link`` may appear; draft URLs bare (exact match
+  refuses a trailing ``.`` or a ``<url>`` wrap) — authored by
+  ``github-actions[bot]`` / ``type=Bot``, never edited) must match the
+  current body; the **latest** `approved-to-post` labeled event overall
+  must be an allowlisted User (`GROWTH_APPROVER_LOGINS`), strictly after
+  that preview **and** after the bot's own most recent removal of the
+  label, with no unlabeled after it (stale/revoked approvals refuse).
+  When `GROWTH_REQUIRE_DIRECT_HUMAN_LABEL` is true (anything but the
+  literal `false`; default), `performed_via_github_app` must be null.
+  Caveat: an automation credential with Shai's permissions can apply
+  labels, so a label is not proof a human applied it. The body freeze
+  must still pass. Missing preview on a LIVE run **self-migrates**:
+  writes the preview, **removes** `approved-to-post` only (never adds a
+  label), does not post, does not consume the run's post slot or the
+  daycap — a LIVE run first preview-migrates every approved item that
+  needs one (up to `MAX_PREVIEWS_PER_RUN` = 60, enforced in the posting
+  tool), then posts at most `max_posts_per_run` among items that pass
+  every gate; it never posts an issue it preview-migrated earlier in
+  the same run. A digest mismatch on an existing trusted preview refuses
+  (`digest mismatch without edit` / `render-digest mismatch`) rather
+  than writing a second preview — recovery is edit the issue body
+  (which creates a new edit), then a new preview, then a re-label.
+  Exactly one trusted preview after ``lastEditedAt`` — more is
+  refuse-on-ambiguity. Unreadable timeline/comments/label-removal → fail
+  closed. Paginated REST walks (issue comments, issue events) share a hard
+  page cap with ``tools/growth``: hitting the cap raises rather than
+  returning a truncated oldest-first prefix (a silent prefix can drop the
+  newest revocation). Enforces one post per queue item ever, caps posts per
+  run, and decides dry-run vs live itself — the model never does. After a
+  live post it closes the drained item; after a dry run / self-migrate it
+  only comments.
 * **`tools/growth`** — the deterministic engine (strict conf parser, the
-  weighted-length rule, the drain policy, a minimal cron matcher, the
+  weighted-length rule, root-@tag preservation, trusted-preview + human
+  approval gates, the drain policy, a minimal cron matcher, the
   per-UTC-day live-post cap (`daycap`), the accelerated-timeline simulator,
   the OAuth 1.0a X poster seam), stdlib-only with its own pytest suite; see
   its README.
@@ -139,12 +185,28 @@ declines design requests). The queue is the contract between the seats:
    **and** the four X credentials (`X_API_KEY`, `X_API_SECRET`,
    `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`) as repo secrets. The posting
    tool checks both itself; a model cannot reach either.
-3. **This post, now** — per item, the human-applied `approved-to-post`
-   label (while the committed policy says `require_approval: true`). The
-   dry-run comment on the queue issue is exactly what is being approved.
-   The label itself is **auto-ensured by the first armed run** (the drain
-   job creates it idempotently), so it always exists for a human to apply —
-   merging the desk's code never creates repo labels.
+3. **This post, now** — per item, the `approved-to-post` label (while the
+   committed policy says `require_approval: true`). The dry-run / preview
+   comment on the queue issue shows the rendered copy under the gates. The
+   `message-digest` binds the `## Message` first paragraph and `## Link`;
+   the `render-digest` binds that exact root + thread — LIVE refuses
+   unless the postable copy matches (issue #1023). The first armed run
+   **tries** to create the label *definition* idempotently (`gh label
+   create … || true`; creation errors are ignored) and does not apply the
+   label to issues — merging the desk's code never creates repo labels. If
+   the label is missing, an approver can create it manually before applying
+   it.
+
+**approved-to-post rule (Shai, 2026-11-13):**
+`GROWTH_REQUIRE_DIRECT_HUMAN_LABEL=false`, so a label an agent adds counts
+as approval. No agent or workflow adds `approved-to-post` unless Shai asked,
+in his own words, for that specific issue. A relay from another agent does
+not count, and neither do blanket instructions. Each agent add is logged
+with the time, the issue, the agent, and a link to Shai's ask. The approver
+allowlist (`GROWTH_APPROVER_LOGINS`) stays shaiss-only. Caveat: an
+automation credential with Shai's permissions can apply labels, so a
+label is not proof a human applied it. (Also in
+`.claude/skills/growth-twitter/SKILL.md`.)
 
 Turning `require_approval` off (a one-line reviewed PR) is the deliberate
 last step to a fully autonomous channel — never a default, and rungs 1–2
@@ -296,7 +358,7 @@ cadence parity is `cadence-sync-check.sh`-covered.
 |---|---|
 | A prompt-injected queue item steers the agent | The item is DATA (the context banner); the agent's only write is `post_tweet`; the tool re-reads state, binds to the trusted candidate set, hardcodes markers, applies no labels — at worst the item's own copy is bad, which a human reads before it can go live |
 | The agent invents a fact, number, or link | The skill's fact-budget rule; the dry-run comment surfaces the copy for review before approval; the Link is the queue item's, verbatim |
-| A post goes out twice | The claim-first marker: the `posted` marker is written on the issue BEFORE the first tweet, so a *mid-thread* or bookkeeping failure keeps it and loses at most one post a human retries deliberately — never a channel duplicate; all comment pages are walked |
+| A post goes out twice | The claim-first marker: the `posted` marker is written on the issue BEFORE the first tweet, so a *mid-thread* or bookkeeping failure keeps it and loses at most one post a human retries deliberately — never a channel duplicate; all comment pages are walked (page-cap hit fails closed, never truncates) |
 | A rejected post strands the item behind a false claim | The complement of claim-first: a **first-tweet** rejection published nothing, so the tool **withdraws** the claim and records the reason — the `⚠️ Growth post failed` comment carries X's actual error body (`poster.py` reads it instead of swallowing the HTTP status), and the item stays retryable rather than frozen until a human hand-deletes a marker (the credits-depleted 402 lesson) |
 | Over-long copy burns an approval at the API | The weighted-length guard refuses at compose review time (tool + simulator), parity-pinned against the reference rule |
 | The poster refills its own queue | Its backstop denies `mcp__growth_queue` (pinned by `growth-perms-check.sh` with a negative control); the reverse — the queuer reaching the channel — is closed the same way: `reeve-growth`, the one scheduled routine that *owns* the queue server, denies the poster `mcp__growth_twitter`, pinned by `reeve-growth-perms-check.sh` with its own negative control. Every *other* sibling backstop denies **both** growth servers |

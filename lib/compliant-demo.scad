@@ -113,3 +113,102 @@ echo(str("[compliant-demo] solve: rise = ", rise1, " mm, span = ", span1,
          bistable_arch_y(span1 / 2, span1, rise1), " mm"));
 echo(str("[compliant-demo] boundary arch: rise/t = ", 2.3 / 1, ", span/rise = ", 23 / 2.3,
          " — both exactly on their bars, accepted"));
+
+// ---------------------------------------------------------------------------
+// Station 7: small_length_pivot — snap-cantilever-clip's production SLFP
+// (t = 1.0, L = 12, w = 15, root_fillet = 0.6) hanging from a strap post,
+// placed in the library's local frame. Echoes K and tip-load root stress at
+// the design's θ = 1.5·δ/L with δ = 1.2. Beside it, the bare (unfilleted)
+// accepting boundary at t = 0.8.
+// ---------------------------------------------------------------------------
+sl_t = 1.0; sl_L = 12; sl_w = 15; sl_f = 0.6;
+sl_delta = 1.2;
+sl_theta = 1.5 * sl_delta / sl_L;
+translate([0, 70, 0]) {
+    // strap the beam hangs from (y >= 0 in the local frame)
+    translate([-6, 0, 0]) cube([12, 4, sl_w]);
+    small_length_pivot(sl_t, sl_L, sl_w, root_fillet = sl_f, E = 2000,
+                       theta = sl_theta, tip_load = true);
+}
+translate([20, 70, 0]) {
+    translate([-4, 0, 0]) cube([8, 3, 4]);
+    small_length_pivot(0.8, 10, 4, root_fillet = 0.4);
+}
+
+// ---------------------------------------------------------------------------
+// Station 8: cross_axis_pivot — production numbers from
+// cross-axis-flexure-pivot (t = 0.8, L = 28, w = 8, root_fillet = 0.6,
+// alpha = 45, stop_angle = 40, arc_wall = 6.5). Both blades from one profile;
+// echoes welded K and weld/leaf stresses. Beside it, the accepting boundary
+// at the extrusion floor t = 0.5 with w = 2.4 (3 perimeters) — soft-warns.
+// ---------------------------------------------------------------------------
+translate([160, 0, 0])
+    cross_axis_pivot(0.8, 28, 8, 0.6, alpha = 45, stop_angle = 40,
+                     arc_wall = 6.5, E = 2000, h_pad = 4);
+translate([160, 55, 0])
+    cross_axis_pivot(0.5, 28, 2.4, 0.3, alpha = 45, stop_angle = 40,
+                     arc_wall = 6.5, E = 2000, h_pad = 0);
+
+// ---------------------------------------------------------------------------
+// Station 9: cross-axis wedge-mask clearance — Copilot #1052: a large
+// accepted span (L = 120, arc_wall = 1.6) used to sever the rigid arcs
+// because r_out+10 left the wedge chord inside the bore. Must render as a
+// single solid (the derived rb = r_out/cos(arc_half/2) keeps the mask clear).
+// Body-count proof (check.sh only fails ERROR/WARNING, never a volume
+// count): tools/printcheck/tests/test_compliant_xafp_wedge.py renders this
+// geometry alone and asserts fusecheck counts exactly 1 body, with the
+// old fixed r_out+10 wedge as its negative control (severed → >1 bodies).
+// ---------------------------------------------------------------------------
+translate([240, 0, 0])
+    cross_axis_pivot(0.8, 120, 2.4, 0.6, alpha = 45, stop_angle = 40,
+                     arc_wall = 1.6, E = 2000, h_pad = 0,
+                     tab_len = 10, tab_w = 22, tab_r = 4);
+
+echo(str("[compliant-demo] SLFP: K = ", small_length_pivot_K(sl_t, sl_L, sl_w),
+         " N*mm/rad, sigma_doc = ", small_length_pivot_sigma(sl_t, sl_L, sl_theta),
+         " MPa at theta = ", sl_theta * 180 / PI, " deg"));
+echo(str("[compliant-demo] cross-axis: K = ", cross_axis_pivot_K(0.8, 28, 8),
+         " N*mm/rad, sigma_weld = ",
+         cross_axis_pivot_sigma_weld(0.8, 28, 40 * PI / 180), " MPa"));
+
+// ---------------------------------------------------------------------------
+// Station 10: let_joint — let-folding-panel's production LET
+// (n_series=1, n_parallel=3 ↔ fingers=4, bar_w=2.0, bar_t=1.2, bar_L=14,
+// gap=6, finger_w=3.5, root_fillet=0.8). Echoes torsion-dominated K and
+// root σ / τ at theta_max = 90°. Beside it, the accepting boundary at
+// bar_t = 0.8 with root_fillet = 0.4 and n_parallel = 2 (fingers = 3).
+// ---------------------------------------------------------------------------
+let_ns = 1; let_np = 3;
+let_w = 2.0; let_t = 1.2; let_L = 14; let_g = 6;
+let_fw = 3.5; let_r = 0.8;
+let_theta = 90 * PI / 180;
+translate([0, 110, 0])
+    let_joint(let_ns, let_np, let_w, let_t, let_L, let_g,
+              finger_w = let_fw, root_fillet = let_r, E = 2000,
+              theta = let_theta);
+// Boundary cell: t and w sit exactly ON their floors (0.8 / 1.2) with
+// root_fillet = 0.5·t — proves the guards accept their own floors. Not an
+// endorsement to print at the floor; the harvest site's bar_w = 2.0 / r = 0.8
+// is the number you print (Jane/PM on #1057).
+translate([80, 110, 0])
+    let_joint(1, 2, 1.2, 0.8, 14, 6, finger_w = 3.5, root_fillet = 0.4,
+              E = 2000, theta = let_theta);
+// Two-row series (Copilot #1057): odd row flips finger parity so facing
+// fingers share an X pitch and union into ONE body. Body-count proof is
+// tools/printcheck/tests/test_compliant_let_series.py (fusecheck == 1),
+// with the unflipped stack as its negative control (bodies > 1).
+translate([160, 110, 0])
+    let_joint(2, let_np, let_w, let_t, let_L, let_g,
+              finger_w = let_fw, root_fillet = let_r, E = 2000,
+              theta = let_theta);
+
+echo(str("[compliant-demo] LET: K = ",
+         let_joint_K(let_ns, let_np, let_w, let_t, let_L),
+         " N*mm/rad, sigma_root = ",
+         let_joint_sigma(let_t, let_w, let_g, let_theta),
+         " MPa, tau_bar = ",
+         let_joint_tau(let_w, let_t, let_L, let_theta), " MPa"));
+echo(str("[compliant-demo] LET J swap-invariant: J(w,t) = ",
+         let_joint_J(let_w, let_t), ", J(t,w) = ",
+         let_joint_J(let_t, let_w),
+         " — equal = ", let_joint_J(let_w, let_t) == let_joint_J(let_t, let_w)));

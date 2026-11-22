@@ -102,7 +102,8 @@ default-depth holder pair.
   flush at the *neck's* top face; assert keeps the head below the plane the
   rod bottoms on (rod seats on the collar shoulder, never on the screw).
   `screw_count=2` grows the flange so both off-axis heads clear the neck —
-  the brief's anti-spin option.
+  the brief's anti-spin option. The screwless path for `screw_count=1` is
+  D14's wall-face ribs.
 - **D10 — Style: builds from the `workshop-utility` tokens, does not claim
   the pack (printability wins).** The brief named the pack and the geometry
   uses its tokens (`style_fn` 64 everywhere but the lib-pinned thread helix
@@ -155,6 +156,56 @@ default-depth holder pair.
   stays boss + default collar). No new coupon — thread/bore coupons already
   cover the fits. Default `engagement_depth`, deep geometry, fitchecks, and
   style claim unchanged.
+- **D13 — (B1) Seat detent + witness window, both on by default.** The closed
+  socket hid whether the rod had bottomed on the shoulder. Two small features
+  on `collar_use` (so `collar-shallow` inherits them via `depth=`):
+  1. **Seat detent** — a triangular annulus, `seat_detent_radial` 0.30 mm
+     inward, `seat_detent_h` 0.8 mm, starting `seat_detent_lift` 0.4 mm above
+     the rod-seat plane. Peak bore = 40.6 − 0.60 = **40.0** — line-to-line
+     with a 40 mm rod (0.10 mm diametral interference if the lip is pushed to
+     0.35). The rod scrapes the peak then drops the last 0.4 mm onto the
+     shoulder: click, then solid stop. Added *after* the bore cut so the
+     Ø40.6 cylinder cannot eat it. Union-welded 0.6 mm into the tube wall;
+     load-bearing wall stays 3.2. Hand-pushable: the lip is a short axial
+     bump, not a press-fit length.
+  2. **Witness window** — two 1.6 × 8 mm axial capsule slots through the
+     wall, 180° apart, rounded ends **0.3 mm above** `rod_stop_z` (the boss
+     neck tip in collar coords = `boss_h − flange_t`). The Ø40 rod passes the
+     bore transition at `collar_lower_h` (ID opens to the female bore) and
+     bottoms on the boss ~1 mm past that plane — so a window keyed to
+     `collar_lower_h + 0.3` filled the same for seated and ~1 mm-short rods
+     (Copilot on #989). Keying to the actual stop makes empty dark at the
+     seat end mean short-of-seat, and the tip edge appear only when bottomed.
+     The lower tip sits in the +1 mm relief above the male neck, so thread
+     clearance / `fit-mate` / phase / `lead_in` stay untouched (D3). Printed
+     **rod-mouth-down** (D5); the 1.6 mm hoop width bridges on a stock
+     0.4/0.2 profile without supports (N4).
+  Production defaults **on** (`seat_detent`, `witness_window`); either can
+  be switched off. Asserts cap the lip at 0.5 mm radial, the slot width at
+  3 mm (bridge), and both features to fit `shallow_engagement_depth`.
+  **Bore coupon left alone:** it is a 12 mm slice of the *straight* slip
+  bore, meant to prove `rod_clearance` by sliding along the pole. The detent
+  is a seat-only catch, not a bore-diameter change; putting it on the coupon
+  would turn a slip check into a catch check. Thread coupon unchanged (N5).
+  Field confirmation — does the click survive ~730 axial curtain-tugs/yr,
+  and is the tip readable in the slot — waits on the proving print's
+  week-of-use seat check. Geometry is otherwise v2.
+- **D14 — (B2) Anti-rotation keys on the boss wall face, on by default for
+  `screw_count=1`.** D9's off-axis pair still grows the flange for heavier
+  installs; this is the screwless path so a single central M5 in a drywall
+  anchor does not spin when the knurled collar is torqued on/off (brief
+  #355; Drik: make the boss resist spin). Eight radial **45° V-grooves**,
+  `anti_rotate_h` 0.8 mm (4 layers), `anti_rotate_w` 1.6 mm (= 2·h, so
+  flanks are exactly 45°), cut into the flange's bed/wall face (z≈0)
+  between an inner washer and the outer rim. Printed flange-down those
+  slots are first-layer gaps whose walls are self-supporting — no pocket
+  roof, no spike below z=0, no new overhang (N4). `screw_count=2` omits
+  the grooves so they never cross the off-axis shanks; the two screws
+  already pin rotation. Toggle `anti_rotate=false` for a flat flange
+  (tile/masonry, where the lands cannot bite). Thread/bore coupons
+  unchanged — they never include the flange. Collar untouched (B1's seat
+  detent lives there). Field confirmation that the bite holds a week's
+  unthread torque waits on the proving print; geometry is otherwise v2.
 
 ## Print settings
 
@@ -177,7 +228,9 @@ default-depth holder pair.
 ## Print this first
 
 Two fits to tune, two coupons. Both are include-override wrappers on the
-production modules — what you print *is* what ships.
+production modules — what you print *is* what ships. The wall-face ribs are
+not a third coupon — they validate on the proving print (item 3), not a
+dedicated part.
 
 1. **Thread coupon** (`alcove-rod-socket-coupon.scad`): male stub + female
    ring from the production thread. Screw the ring on: it should run free
@@ -194,33 +247,63 @@ production modules — what you print *is* what ships.
    - Visible wobble → lower it 0.1 mm.
    - In ASA print this coupon first: bore shrink is ~0.2–0.4 mm, most of
      the slip — expect +0.1–0.2 mm on `rod_clearance`.
+   - The seat detent is **not** on this coupon (D13): it proves the slip
+     bore, not the seat catch. Tune the catch on a full collar.
+3. **Boss spin-check (no extra print):** the boss *is* its own coupon.
+   Press the printed flange onto scrap drywall or painted wood, hand-torque
+   the M5, and check for spin — five minutes. The ribs' bite validates on
+   the proving print / this press-check, not a rib coupon.
+4. **If the proving print still spins** (after the press-check and a real
+   wall install): deepen first — override `anti_rotate_h=1.2` /
+   `anti_rotate_w=2.4` (docs-only escalation; SCAD defaults stay 0.8 / 1.6)
+   before jumping to `screw_count=2`. Contingent on a spinning proving
+   print; do not pre-emptively deepen.
 
 Measure the pole with calipers first and set `rod_d` to the *barrel* reading
 (where the socket sits), not the finial/ring size.
 
-### 25 mm reference coupons (B5 / #809)
+### 25 mm reference size (B5 / B5b)
 
-For a **25 mm** closet-rod reference (brief origin size), print these gated
-parts instead of hand-overriding `rod_d`:
+For a **25.0 mm** closet-rod reference, print the gated coupons first, then
+the gated holders. Every `*-25` part pins `rod_d` at **25.0** in the geometry
+(`rod_clearance` still defaults to 0.6 unless you change it in Customizer on
+the plain parts — see README for inch-rod and retune paths).
 
-| Part | Wrapper | What it proves |
+| Part | Wrapper | Role |
 |---|---|---|
-| `thread-coupon-25` | `alcove-rod-socket-thread-coupon-25.scad` | printed thread at 25 mm major stack |
-| `bore-coupon-25` | `alcove-rod-socket-bore-coupon-25.scad` | slip bore at `rod_clearance=0.6` → **25.6 mm** Ø |
+| `thread-coupon-25` | `alcove-rod-socket-thread-coupon-25.scad` | tune `thread_tol` at 25 mm |
+| `bore-coupon-25` | `alcove-rod-socket-bore-coupon-25.scad` | tune `rod_clearance` → **25.6 mm** bore at default |
+| `boss-25` | `alcove-rod-socket-boss-25.scad` | production wall boss (CI-gated; not field-tested yet) |
+| `collar-25` | `alcove-rod-socket-collar-25.scad` | production deep collar (28 mm engagement) |
+| `collar-shallow-25` | `alcove-rod-socket-collar-shallow-25.scad` | far-side shallow collar (12 mm) |
 
-Same tune flow as the 40 mm coupons (`thread_tol`, `rod_clearance`). US rods
-sold as 1″ often measure **25.4 mm** — see README (raise `rod_clearance` or
-set `rod_d = 25.4`). Boss / collar at 25 mm are **not** Release-gated in B5;
-after coupons fit, Customizer `rod_d = 25` + `part` boss/collar exports the
-holders (32 flutes auto). Gated `boss-25` / `collar-25` parts are backlog B5b.
+Same tune flow as 40 mm. The gated `*-25` holders assume default **`thread_tol`**
+(0.3) and **`rod_clearance`** (0.6). If either coupon settles elsewhere, use
+plain `boss` / `collar` / `collar-shallow` with `rod_d = 25` and your tuned
+`thread_tol` / `rod_clearance` (the gated `*-25` exports stay pinned to defaults
+until a future pinned export exists). Gated **`boss-25`** is **`screw_count=1`**
+only; heavy closet installs need plain **`boss`** with `rod_d = 25` and
+`screw_count = 2` (or a stud). At 25 mm the boss flange is about **Ø43.8**
+(vs Ø58.8 at 40 mm).
+
+**Field question (Drik / #812) — answered until print report (#992):** at 25 mm
+the collar OD is **39 mm** and the auto-capped grip is **32 flutes** (tighter
+pitch than 40 mm / 36). Do not retune `knurl_flutes` without a print report;
+Drik's customer-side answer is that wash-day grip pitch is unlikely to matter
+(thread feel / retention is the report that counts). The product page now
+expects finer, softer lands at this OD. First 25 mm print report should also
+note whether the 40 mm wall-to-wall rod-cut guidance (~40 mm short) still
+feels right at the smaller collar.
 
 ## Rod cut (wall-to-wall)
 
-With both collars seated, each rod end bottoms on the collar shoulder at
-`flange_t + collar_lower_h` = 6.4 + 12.6 = **19 mm** from its wall (the +1 mm
-in `collar_lower_h` is relief past the boss neck tip at `boss_h` = 18).
-Double-bottom length is therefore wall-to-wall − **38 mm**; the product page
-recommends ≈ **40 mm** short (38–42 band) for a couple mm of install slack.
+With both collars seated, each rod end bottoms on the **boss neck tip** at
+`boss_h` = **18 mm** from its wall (`rod_stop_z` = `lead_in + neck_len` =
+11.6 in collar coords). The bore transition at `flange_t + collar_lower_h` =
+19 mm is not a rod seat — the +1 mm in `collar_lower_h` is relief past the
+neck tip, and the ID opens there into the female bore. Double-bottom length
+is therefore wall-to-wall − **36 mm**; the product page recommends ≈ **40 mm**
+short (38–42 band) for install slack above that hard stop.
 Deep/shallow mouth heights off the wall are 47 / 31 mm (`flange_t` + collar
 height) — they set mouth-to-mouth, not the cut. Engagement depths (28 / 12)
 are how far the rod plugs past each mouth once it is in, not a span to
@@ -256,7 +339,10 @@ M5 in a rated anchor; heavier than that → find a stud, or set
 `screw_count=2`** — the second off-axis screw also pins the boss against
 the spin of unthreading. The cyclic half of this load (~730 axial
 curtain-tugs a year against single-digit unthreads) is charter B1's
-vibration case, not this rating's.
+vibration case, not this rating's. **B2's wall-face ribs** take that same
+unthread torque on `screw_count=1` so the single anchor is not asked to
+resist spin in drywall; they do not change the ~10 kg hung-weight ceiling
+— heavier still wants a stud or `screw_count=2`.
 
 ## Field test log
 

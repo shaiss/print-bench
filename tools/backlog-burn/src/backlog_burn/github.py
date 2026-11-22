@@ -97,6 +97,10 @@ def _get(url: str, token: str) -> tuple[Any, dict[str, str]]:
         except Exception as exc:  # noqa: BLE001 — classified by _is_retryable
             if not _is_retryable(exc) or attempt + 1 >= _GET_ATTEMPTS:
                 raise
+            # A retryable HTTPError owns an open response body; close/drain it
+            # before sleeping or each failed attempt leaks a socket/file handle.
+            if isinstance(exc, urllib.error.HTTPError):
+                exc.close()
             _sleep(_retry_delay(attempt))
     raise AssertionError("unreachable: the retry loop always returns or raises")
 
@@ -107,6 +111,20 @@ def _get(url: str, token: str) -> tuple[Any, dict[str, str]]:
 # eligible issue and select the wrong one, with no signal (the repo's "no
 # silent caps" rule).
 _MAX_PAGES = 100
+
+
+def _require_api_host(url: str) -> None:
+    """Refuse a URL whose scheme+host differ from :data:`_API`.
+
+    Pagination follows ``Link: rel="next"`` with the same Bearer token; an
+    off-host next URL must not be requested (Cipher #898 LOW / issue #904).
+    """
+    parsed = urllib.parse.urlparse(url)
+    root = urllib.parse.urlparse(_API)
+    if (parsed.scheme, parsed.netloc) != (root.scheme, root.netloc):
+        raise ValueError(
+            f"refusing to follow Link next URL off API host {_API!r}: {url!r}"
+        )
 
 
 def _paginate(path: str, token: str) -> list[dict[str, Any]]:
@@ -137,7 +155,10 @@ def _paginate(path: str, token: str) -> list[dict[str, Any]]:
 
 
 def _next_link(link_header: str) -> str:
-    """The ``rel="next"`` URL from a ``Link`` header, or ``""``."""
+    """The ``rel="next"`` URL from a ``Link`` header, or ``""``.
+
+    Raises ``ValueError`` if the next URL's scheme+host differ from ``_API``.
+    """
     for part in link_header.split(","):
         section = part.split(";")
         if len(section) < 2:
@@ -145,6 +166,8 @@ def _next_link(link_header: str) -> str:
         url = section[0].strip().lstrip("<").rstrip(">")
         for param in section[1:]:
             if param.strip() == 'rel="next"':
+                if url:
+                    _require_api_host(url)
                 return url
     return ""
 

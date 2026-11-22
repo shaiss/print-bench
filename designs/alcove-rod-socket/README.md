@@ -1,42 +1,71 @@
 # Alcove rod socket
 
-A parametric, two-part screw-together end socket for a 40 mm curtain or
-closet rod that spans a recess or alcove. A wall boss screws flat to each
-facing wall; the rod's ends plug into knurled collars that hand-thread onto
-the bosses. Curtains down for washing = unthread two collars, no tools.
+A parametric, two-part screw-together end socket for curtain or closet rods
+that span a recess or alcove. Default **40 mm** is the gated production size
+(coupon-proven; not yet field-proven on a hung rod — see NOTES); a **25 mm**
+reference set is CI-gated with the same field-test honesty (see *What you
+get*). A wall boss screws flat to each facing wall; the rod's ends plug into
+knurled collars that hand-thread onto the bosses. Curtains down for washing
+= unthread two collars, no tools.
 
 > **v2** — ships the separable multi-object plate deliverable. v1 (#361)
 > printed **fused** in the field (a single STL of the two parts slices as one
-> welded body); v2 fixes the packaging, geometry unchanged. See *Deliverable*
-> below and the field test log in NOTES.md.
+> welded body); v2 fixes the packaging (per-part STLs / plate as file format),
+> geometry unchanged — the proving print that confirms the customer-facing
+> cure (print, unthread, lift the rod) is still pending (≈6¼ h / ~71 g
+> PLA-estimated for boss ×2 + collar + collar-shallow; see NOTES.md).
+> See *Deliverable* below and the field test log in NOTES.md.
 
-![Product shot](previews/product-hero.png)
+![Product shot — slots are the seat window — see the section below](previews/product-hero.png)
 
 ![4-view contact sheet](previews/contact-sheet.png)
 
-![Section through the seated socket](previews/cutaway.png)
+![Kept half of the seated socket — exterior silhouette](previews/cutaway.png)
 
-![The seated pair with the rod through it — boss, collar, thread engaged](previews/assembly.png)
+![Section through the seated socket — face-on cut](previews/cutaway-section.png)
+
+![Diametral section — full flange-to-flange width; printed thread engaged on both sides of the bore; the black notches at the flange floor are the anti-rotation grooves in section](previews/cutaway-wide.png)
+
+![The seated pair with the rod through it (shown ghosted) — boss, collar, thread engaged](previews/assembly.png)
+
+Shots render source defaults; the v2.0 Release STLs predate the detent, witness slots and V-grooves.
 
 ## What you get
 
 Printed **in pairs** (one holder per wall, one pair per rod):
 
-- `boss` — the wall plate: Ø58.8 × 18 mm disc with a countersunk M5 screw
-  hole and an external printed thread (an optional second off-axis screw
-  setting, `screw_count=2`, grows the flange for heavier installs — a hung
-  pair over ~10 kg; see Assembly).
+- `boss` — the wall plate: Ø58.8 × 18 mm disc at default **40 mm** `rod_d`
+  (about **Ø43.8** at **25 mm**), countersunk M5 screw hole and an external
+  printed thread. The wall face carries eight shallow 45° V-grooves (source
+  default on for renders) so a single central M5 in a drywall anchor does not
+  spin when the collar is torqued — **v2.0 Release STLs ship plain flanges**
+  (no grooves; hold the flange when you torque, Assembly step 4). For heavier
+  installs (a hung pair over ~10 kg — reasoned ceiling, not load-tested / not
+  a measurement; see NOTES) set `screw_count=2` — that grows the flange for an
+  off-axis pair and **omits** the V-grooves (the two screws already pin the
+  boss; see Assembly). Gated **`boss-25`** is single-screw only (`screw_count=1`).
+
+  ![Boss wall/bed face — eight anti-rotation V-grooves](previews/boss-bed.png)
 - `collar` — the rod socket: Ø54 × 40.6 mm knurled tube, internal printed
   thread below, Ø40.6 rod bore above (default `engagement_depth=28`).
 - `collar-shallow` — the same collar at `engagement_depth=12` (far side of
   the push-in-deep / drop-in-shallow install). Gated and shipped in the
   Release; not on the plate (the plate is the default-depth holder pair).
 - `thread-coupon` / `bore-coupon` — the "print this first" fit checks at the
-  default 40 mm rod (see Print settings).
+  default 40 mm rod (see Print settings); Release files are
+  `alcove-rod-socket-coupon.stl` and `alcove-rod-socket-bore-coupon.stl`.
 - `thread-coupon-25` / `bore-coupon-25` — the same coupons at the **25 mm
-  reference** size (CI-gated; wrappers
+  reference** size (CI-gated; not field-tested on a real rod yet; wrappers
   `alcove-rod-socket-thread-coupon-25.scad` /
   `alcove-rod-socket-bore-coupon-25.scad`).
+- `boss-25` / `collar-25` / `collar-shallow-25` — the production holders at
+  **25.0 mm** barrel (CI-gated; same field-test status; collar about
+  **Ø39 mm** OD at 25 mm). Wrappers:
+  `alcove-rod-socket-boss-25.scad`, `alcove-rod-socket-collar-25.scad`,
+  `alcove-rod-socket-collar-shallow-25.scad`. No 25 mm plate — mirror the 40 mm
+  policy: the gated plate stays `boss` + `collar` only; shallow is a separate
+  download. **US “1-inch” rod (~25.4 mm)?** Skip these — see the 25.4 note in
+  Parameters.
 
 **Deliverable — two objects, never one fused STL.** `boss` and `collar` print as
 **separate parts**, and the one rule is: keep them as two distinct objects in the
@@ -52,18 +81,26 @@ STL imports as one fused body and welds them together — v1's field-test failur
   what you need and keep them as **separate objects**. The plate is still the
   default-depth holder pair (`boss` + `collar`); grab `collar-shallow` from
   the same Release for the far side of the push-in-deep / drop-in-shallow
-  install. There is **no** multi-object plate `.3mf` on that Release (only
+  install. The gated **25.0 mm** reference trio (`boss-25`, `collar-25`,
+  `collar-shallow-25`) is **not** on v2.0 — it lands on the next tagged
+  Release (and stays disclosed as untested until a real 25 mm coupon print
+  passes); until then take those STLs from the clone path below. There is
+  **no** multi-object plate `.3mf` on that Release (only
   STLs / zip / manifest) — the plate stays a local build artifact (see the
   clone path below). That is a tracked follow-up: the platform release-bundle
-  does not upload the multi-object plate 3MF today.
+  does not upload the multi-object plate 3MF today. Release STLs are as of
+  the tag. The v2.0 collar predates B1 / #989 and has no `seat_detent` or
+  `witness_window`; use the clone path for those features. If this README
+  names any other part or parameter the Release lacks, use the clone path.
 - **Cloned the repo (advanced / local):** `./scripts/plate.sh alcove-rod-socket`
   bundles the two default-depth parts into one multi-object 3MF
-  (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file.
-  For the far-side shallow collar, run `./scripts/gate.sh alcove-rod-socket`
-  (or `--slice`) and take the gated STL at
-  `build/alcove-rod-socket-collar-shallow.stl` — that is the printcheck'd
-  artifact, not a hand-render. Advanced override only: `-D 'part="collar-shallow"'`
-  if you need to re-export outside the gate.
+  (`build/alcove-rod-socket-plate.3mf`) — the same two objects in one file
+  (40 mm only; no 25 mm plate). For the far-side shallow collar or the gated
+  **25 mm** holders, run `./scripts/gate.sh alcove-rod-socket` (or `--slice`)
+  and take the printcheck'd STLs under `build/` (`collar-shallow`,
+  `boss-25`, `collar-25`, `collar-shallow-25`). Advanced override only:
+  `-D 'part="collar-shallow"'` (or a `*-25` part name) if you need to
+  re-export outside the gate.
 
 Either way, saving bed space is fine — lay the two parts **side by side and
 flat** (the plate's `--merge` does exactly that). Don't stack them **one on top
@@ -95,7 +132,18 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   prints the thread slightly fatter, so expect `thread_tol` +0.05–0.1 mm
   vs PLA; ASA shrinks the bore ~0.2–0.4 mm — about the whole slip — so
   print the bore coupon in ASA first and expect +0.1–0.2 mm on
-  `rod_clearance` (a material-specific preset is charter backlog B4).
+  `rod_clearance`. An ASA install should print the **thread** coupon in
+  ASA too — longer engagement, and the taper is unforgiving of a
+  half-percent shrink — still unproven until B4 (a material-specific
+  preset is charter backlog B4). If that ASA coupon binds, the fix is a
+  `thread_tol` change, which needs the clone/source path rather than the
+  Release STLs. The seat detent is line-to-line by design, and its feel is
+  unproven in any material until the B4 proving print (the coupons don't
+  carry it; NOTES.md D13). If the rod stops before bottoming on the boss
+  tip, ease `seat_detent_radial` down (e.g. 0.30 → 0.22–0.25) or set
+  `seat_detent=false` — the boss tip is the seat; the click is a nicety.
+  Leave `rod_clearance` alone for that
+  symptom; it widens the whole bore.
 - **Layer height:** 0.2 mm, 0.4 mm nozzle.
 - **Perimeters:** 3 — the 3.2 mm walls carry the load.
 - **Seam:** Scarf (Bambu Studio) or Back — the default Aligned seam stacks a
@@ -103,20 +151,42 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   locally eat the 0.3 mm radial sliding fit.
 - **Infill:** 20% gyroid.
 - **Supports:** none needed anywhere, by design.
-- **Bed adhesion:** brim the **collar** (and `collar-shallow`), per-object
+- **Bed adhesion:** brim the **collar** (and `collar-shallow`, and the
+  **`*-25` collars**), per-object
   (Bambu Studio and most slicers brim per object — select just the collar).
-  Its first layer is a thin ~2.2 mm annular rim carrying a 40.6 mm tube, the
-  part that can lift; the boss doesn't need it — it prints flange-down on a
-  full Ø58.8 disc, the best contact on the plate. Cheap insurance on the
-  collar rim's own merits (the v1 field failure was *packaging*, not adhesion
-  — see NOTES.md — so the plate is what fixes that; the brim is separate). A
-  per-object collar brim can't reach the ~5.7 mm gap to the boss, so nothing
-  bridges. (Brim the *whole plate* instead and the two brims may meet in one
-  web; it should peel clean, but that is **untested** — predicted, not
-  observed, and the proving print is what confirms it. Per-object avoids the
-  question.) Trim the collar's brim tabs flush and set it on a flat surface
-  to confirm the rim sits flat before threading it onto the boss — the rim
-  is both the bed-contact face and the seating face on the flange.
+  Its first layer is a thin ~2.2 mm annular rim (~1.6 mm of it flat after the
+  chamfers) carrying a 40.6 mm tube, the part that can lift; the **`*-25`
+  collar**'s own first-layer annulus is a Ø32 tube mouth under a ~Ø39 grip
+  band — not the 40 mm page's Ø47 / 40.6 — same per-object brim, same
+  kill-if-lifts. The boss doesn't need a brim — it prints flange-down on a
+  full Ø58.8 disc (the anti-rotation keys are 0.8 mm 45° V-grooves in that
+  disc — inner washer, outer rim, and the lands between still print on the
+  bed). Layer-1 groove mouths print narrower than modeled (elephant foot
+  pinches the 1.6 mm openings) — expected; the lands between still carry the
+  wall, so don't tune flow for it. Coupons need **no brim** — both bodies
+  land on full discs; an auto brim webs the 8 mm gap between them and snaps
+  free. Cheap insurance on the collar rim's own merits (the v1 field failure
+  was *packaging*, not adhesion — see NOTES.md — so the plate is what fixes
+  that; the brim is separate). If the rim's outer edge starts lifting in the
+  first centimeter, kill the print — more brim won't save it mid-run, and a
+  lifted rim is a cocked thread. A per-object collar brim can't reach the
+  ~5.7 mm gap to the boss, so nothing bridges. (Brim the *whole plate*
+  instead and the two brims may meet in one web; it should peel clean, but
+  that is **untested** — predicted, not observed, and the proving print is
+  what confirms it. Per-object avoids the question. There is **no** 25 mm
+  plate — mirror the 40 mm layout and brim only the collar.) Trim the
+  collar's brim tabs flush and set it on a flat surface to confirm the rim
+  sits flat before threading it onto the boss — the rim is both the
+  bed-contact face and the seating face on the flange. A proud ring of brim
+  witness nubs can pass that flat test while standing the collar ~0.1 mm off
+  the flange: one blade pass flat on the rim OD, then re-run the flat test.
+- **Boss print-check (grooved source prints):** after the first layer (or on
+  the finished boss), look at the eight 0.8 × 1.6 mm V-grooves between the
+  inner washer and outer rim — they must still read as open mouths, not fused
+  over by elephant foot. A pea of plastic at a groove **end** counts as
+  filled-in, not "close enough" — a ten-second knife twirl clears it. A
+  filled-in groove ships as a good-looking boss that spins; that failure is
+  silent unless you check.
 - **Orientation:** print every part as rendered — boss flange-down, collar
   (and collar-shallow) rod-mouth-down (the internal thread prints at the top
   of the collar, never on the first layer). Never flip the collar
@@ -124,18 +194,34 @@ collar) fits any 150 mm bed; two pairs want the 256 × 256 mm P2S.
   the collar's first-layer ring lifts, fix it with the brim above — don't
   flip the part.
 - **Print order:** both coupons first, then tune (below), then a pair
-  (deep+shallow: two bosses, one `collar`, one `collar-shallow`).
+  (deep+shallow: two bosses, one `collar`, one `collar-shallow`). The bore
+  and thread coupons prove slip and thread only — **not** the seat catch;
+  print a **full collar** (not just the bore coupon) when you want to try
+  the seat catch on your own rod before you hang it (NOTES.md D13; its feel
+  is unproven until the proving print). For
+  **25 mm:** `thread-coupon-25` + `bore-coupon-25` first, then a full
+  `collar-25` to feel the seat before hanging anything — no 25 mm plate;
+  mirror the 40 mm layout and brim only the collar.
 
 | Coupon | When |
 |---|---|
-| `thread-coupon` / `bore-coupon` | default **40 mm** rod (fit-proven size) |
-| `thread-coupon-25` / `bore-coupon-25` | **25 mm** reference (CI-gated; not field-tested yet) |
+| `thread-coupon` / `bore-coupon` | default **40 mm** rod (coupon-proven size) |
+| `thread-coupon-25` / `bore-coupon-25` | **25.0 mm** reference (CI-gated; not field-tested yet) |
 
-**25 mm and both coupons fit?** Customizer on `alcove-rod-socket.scad`: set
-`rod_d = 25`, export `part` **boss** and **collar** (plus **collar-shallow**
-if you need the deep+shallow install) as separate STLs — grip drops to **32**
-flutes automatically. Gated Release parts for 25 mm holders are backlog **B5b**
-(PM.md).
+**25 mm and both coupons fit at defaults?** The gated `*-25` downloads pin
+`rod_d = 25.0` and ship at default **`thread_tol`** (0.3) and **`rod_clearance`**
+(0.6). If you tuned either coupon away from those values, export plain
+**`boss`** / **`collar`** / **`collar-shallow`** with `rod_d = 25` (or your
+measured barrel) and your tuned tolerances — same separable-object rules as the
+40 mm parts. When defaults match, use the gated **`boss-25`**, **`collar-25`**
+(and **`collar-shallow-25`** for the deep+shallow install) — from the clone
+path until a Release after v2.0 carries them. Grip auto-caps to
+**32** flutes at this collar OD — the capped band prints with finer, softer
+lands than the 40 mm grip (normal at this OD; do not retune without a print
+report). **`boss-25`** is **`screw_count=1`** only (policy: the wrapper pins
+the Customizer default, mirroring the gated 40 mm boss; `screw_count=2`
+grows the flange and remains available on plain `boss` at `rod_d = 25`);
+heavier closet loads want that plain **`boss`** path or a stud.
 
 The gate scores the boss / collar / collar-shallow / thread-coupon set with
 the same thin-wall warning pattern (tessellated thread crests and knurl
@@ -148,7 +234,9 @@ will too.
 ![The thread coupon — male stub and female ring side by side](previews/coupon.png)
 
 Measure your pole with calipers where it will sit and set `rod_d` to that
-barrel reading — "40 mm" is sometimes the finial size, not the pole.
+barrel reading — "40 mm" is sometimes the finial size, not the pole. Take
+two perpendicular readings at the seating end; if the end is swaged or the
+readings differ by more than ~0.2 mm, take the larger.
 
 ## Parameters
 
@@ -164,44 +252,94 @@ you'll export the fused assembly preview instead of a printable part):
 | `engagement_depth` | 28 mm | deep-side rod plug depth (`collar`); far side is the gated `collar-shallow` part at 12 mm |
 | `thread_tol` | 0.3 mm | radial thread fit — dial on the thread coupon |
 | `screw_count` | 1 | 1 central M5, or 2 off-axis (grows the flange; stops boss spin) |
+| `anti_rotate` | on | wall-face 45° V-grooves for a single M5; ignored at `screw_count=2` (source default on for renders; **v2.0 Release STLs ship plain flanges**) |
 | `knurl_flutes` | 36 | grip flute count — guarded to keep flutes printable |
 | `wall` | 3.2 mm | structural wall everywhere |
+| `seat_detent` | on | annular catch at the rod seat — feel "fully in" |
+| `seat_detent_radial` | 0.30 mm | radial height of that catch (line-to-line at defaults); ease to 0.22–0.25 or set `seat_detent=false` if the rod stops dead — leave `rod_clearance` alone |
+| `witness_window` | on | two axial sight slots at the seat — see "fully in" |
 
-**Gated rod sizes:** **40 mm** (fit-proven in the field — production parts +
-40 mm coupons) and **25 mm** (CI-gated `thread-coupon-25` /
-`bore-coupon-25` only — not fit-tested on a real rod yet). Any other barrel
-Ø still needs you to set `rod_d` and print the 40 mm coupon wrappers at that
-override before trusting a boss/collar pair.
+**Gated rod sizes:** **40 mm** (gated production size — coupon-proven; not yet
+field-proven on a hung rod — production parts + 40 mm coupons) and **25 mm**
+(CI-gated `thread-coupon-25` / `bore-coupon-25` + `boss-25` / `collar-25` /
+`collar-shallow-25` — same field-test honesty). Any other barrel Ø still needs
+you to set `rod_d` and print the **40 mm** coupon wrappers
+(`alcove-rod-socket-coupon.scad` / `alcove-rod-socket-bore-coupon.scad`) at
+that override before trusting a boss/collar pair.
 
-**Calipers read ~25.4 mm (common on US “1 inch” rods)?** The 25 mm coupons
-assume a **25.0 mm** barrel and a **25.6 mm** bore (`rod_clearance = 0.6`).
-A 25.4 mm rod in that bore leaves only **0.2 mm** diametral slip — often too
-tight once the hole shrinks. Set `rod_d = 25.4` on the main file (or raise
-`rod_clearance` in the coupon wrapper, e.g. toward **1.0 mm** for a **26.0 mm**
-bore at `rod_d = 25`) before you trust boss/collar exports.
+**Calipers read ~25.4 mm (common on US “1 inch” rods)?** Every `*-25` gated
+part is fixed at a **25.0 mm** barrel and ignores Customizer `rod_d` — at
+default `rod_clearance = 0.6` that is a **25.6 mm** bore. A 25.4 mm rod
+leaves only **0.2 mm** diametral slip — often too tight once the hole shrinks.
+Print the plain **`thread-coupon`** and **`bore-coupon`** wrappers (or the main
+file) with `rod_d = 25.4` and tune `thread_tol` / `rod_clearance` there. Use
+the same `rod_clearance` on plain **`boss`** / **`collar`** / **`collar-shallow`**
+exports (`rod_d = 25.4` or your measured barrel) and the same `thread_tol` on
+**`collar`** / **`collar-shallow`** (the female thread). The holder bore follows
+`rod_clearance`, not the fixed `*-25` downloads.
 
 ## Assembly & use
 
 1. Screw a boss to each facing wall, countersunk M5 head flush in the neck.
-   Screw length: the boss is 18 mm through, so **M5 × 40 mm** into a rated
-   drywall anchor (the anchor card governs the exact pairing), or **M5 ×
-   55 mm** into a stud behind ~13 mm board (18 + 13 leaves ≥ 20 mm in the
-   stud). One M5 in a rated anchor holds a pair to roughly **10 kg** of hung
-   weight — heavier curtains than that want a stud or `screw_count=2`
-   (derivation in NOTES).
+   Print orientation = use orientation (the printed flange face goes against
+   the wall). **v2.0 Release STLs are plain flanges** — no wall grooves; use
+   step 4's hold-the-flange note when you torque or unthread the collar.
+   Bosses printed from source with `anti_rotate` on (default for a single M5)
+   carry eight shallow V-grooves on that wall face — keep them against the
+   wall so they bite into paint or drywall paper. Screw length: the boss is
+   18 mm through, so **M5 × 40 mm** into a rated drywall anchor (the anchor
+   card governs the exact pairing), or **M5 × 55 mm** into a stud behind
+   ~13 mm board (18 + 13 leaves ≥ 20 mm in the stud). One M5 in a rated
+   anchor holds a pair to roughly **10 kg** of hung weight (a reasoned
+   ceiling, not load-tested / not a measurement — derivation in NOTES). On
+   a **grooved** boss those lands take the *spin* of threading the collar so
+   the anchor does not ream out; they do not raise the load rating.
+   **Plain** Release bosses do not — hold the flange when you torque the
+   collar (step 4). Heavier curtains than that want a stud or
+   `screw_count=2`. For `screw_count=2`, use DIN 7991 / ISO 10642 M5 flat
+   heads (Ø9.4–9.5 seat flush in the Ø10.0 cone; heads >Ø10.0 park proud
+   under the collar rim) — lay a straightedge across both recesses before
+   threading the collar; any head above the flange face needs a deeper
+   countersink or a different screw. On tile, masonry, or metal grooves
+   cannot bite — use `screw_count=2` (or `anti_rotate=false` for a flat
+   flange you accept may spin).
 2. Slide the collars over the rod before hanging it — one at each end.
-3. Thread each collar onto its boss until the rim seats on the plate. For a
-   rigid rod between two fixed walls: use one default `collar` (deep) and one
-   `collar-shallow` — push into the deep side, drop the shallow end in,
-   tighten both collars. Measure **wall-to-wall**, then cut the rod ≈ **40 mm
-   shorter** (38–42 mm is the safe band): each end bottoms on its collar
-   shoulder 19 mm from that wall, so the seated rod spans nearly
-   wall-to-wall (mouth-to-mouth **plus** ~38 — both sockets sit recessed
-   into their collars).
+3. Thread each collar onto its boss until the rim seats on the flange.
+   **v2.0 Release collar has no detent and no witness slots** — bottom the
+   rod on the boss tip and trust your cut length (steps 1 and 4 already flag
+   their halves; use the clone path for the seat catch and slots). On a
+   source / post-B1 collar: push each rod end in past the seat ridge until
+   it bottoms on the boss tip. You may feel a click or a scrape at the
+   ridge, but neither is a verified seating indicator — seating feel is
+   **unproven until the week-of-use proving print** (NOTES.md D13; field
+   test log); the slot check below confirms bottomed. Deburr the cut ends
+   (or kiss a small chamfer onto each) before seating — a rolled burr hangs
+   on the detent. Look through the two thin slots at the grip band near
+   the flare: empty dark at the **seat end** of the slot means the tip is
+   still short of the boss; the tip edge appears there only when bottomed
+   (the witness starts 0.3 mm above the boss-tip stop, not the bore
+   transition — a rod ~1 mm short used to fill the window like a seated
+   one). Hold a phone light against the far slot and look through the near
+   one — the tip edge's silhouette means bottomed. For a rigid rod between
+   two fixed walls: use one default `collar` (deep) and one
+   `collar-shallow` — lower the rod between the bosses, slide each collar
+   out to its boss, and thread it on. Measure **wall-to-wall**, then cut the
+   rod ≈ **40 mm shorter** (38–42 mm is the safe band; between sizes, cut
+   long toward 38 and trim). The boss tips sit 18 mm in from each wall, so
+   the rod bottoms only one end at a time: slide it toward one wall until
+   that end bottoms, and the other end then sits 2–6 mm short of its boss
+   tip (that gap is the install slack, and that end's witness slot reads
+   short by design; sliding the rod moves the gap to the other end). The
+   hard stop is wall-to-wall − **36 mm**, the only length that bottoms
+   both ends.
 4. To wash the curtains: unthread the collars (~1¼ turns each — 2-start
-   thread) and lift the rod out — **holding the flange still** as you
-   unthread, because unscrewing friction can walk the single M5 out of the
-   wall over enough wash days. No tools.
+   thread) and lift the rod out. **Grooved bosses** (`anti_rotate` on, a
+   source print): the wall-face lands resist that unthread torque on a
+   single M5 in drywall or wood. **Plain bosses** (v2.0 Release download,
+   or `anti_rotate=false`): the flange can spin — hold it with your other
+   hand while you unthread, especially on tile or other hard walls where
+   nothing bites. No tools. Grooved bosses bite paint and drywall paper by
+   design; removing them may leave marks that need touch-up paint.
 
 If a fit is off, don't resize the parts — reprint the coupon and move the
 tolerance (`thread_tol`, `rod_clearance`) in 0.05–0.1 mm steps; see

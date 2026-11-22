@@ -260,11 +260,24 @@ When the invoker is `backlog-burn.yml`, §6's "Draft PR … then
 `subscribe_pr_activity`" is not yours to do. The agent job runs with
 `github.token` and cannot push; a PAT could have steered more than the
 issue it was handed, so it holds none (issue #863, the #859/#861
-pattern). The agent job's next step writes a git bundle of the commits on
-`claude/issue-<N>-*`; a separate deliver workflow, running no agent code,
-checks out the commit the job started from, verifies that bundle, and only
-then pushes the branch and opens the draft PR. Nothing in the bundle is
-executed. The success comment is posted only after both of these are true:
+pattern). Issue #1022 also denies Bash `gh issue comment`, `gh issue
+edit` (including `--add-label`/`--remove-label`), `gh label …`, and
+non-GET `gh api`/`curl` writes to issue comments/labels — including
+`gh api …/issues/… -f …` with no method (gh's implicit POST) and every
+other body-flag form — do **not** attempt those verbs. Absolute-path /
+`gh -R` / env-prefixed spellings and `.claude/skills/chunk-issue/chunk-helper.sh`
+are denied too, so §8's `ensure-label` / comment path is unavailable here:
+a taste fork or missing contract becomes a `🚢 DEFERRED` stop (trusted
+intents transport is the #862 follow-up), not a helper write. Issues reads
+that need params use the query string (`?per_page=100`), not `-f`. The
+workflow concurrency group, the lock artifact, and a `claude/issue-<N>-*`
+branch claim carry the claim, and `backlog-burn-ship-check.sh` posts an
+explicit `🚢 DEFERRED` stop when the walk ends with no branch. The agent job's next step writes a git
+bundle of the commits on `claude/issue-<N>-*`; a separate deliver
+workflow, running no agent code, checks out the commit the job started
+from, verifies that bundle, and only then pushes the branch and opens
+the draft PR. Nothing in the bundle is executed. The success comment is
+posted only after both of these are true:
 
 - `git ls-remote` returns the tip of your local `claude/issue-<N>-*` branch
 - an open **draft** pull request in this repository, whose `headRefOid` is
@@ -305,9 +318,22 @@ outcome. Before you stop you MUST have either (a) HEAD on
 `claude/issue-<N>-*` with the commits to deliver, or (b) posted an
 explicit first-line stop (`🚢 DECLINED` / `🚦 DECISION NEEDED` /
 `🚢 DEFERRED`). Finishing on `main` (or any other branch) with no stop
-is a failed ship — the workflow's post-agent check will red the run.
-claude-code-action's `subtype: success` only means the model ended
-without an API error; it does not mean the burn delivered.
+is a failed ship. claude-code-action's `subtype: success` only means
+the model ended without an API error; it does not mean the burn
+delivered. The burn's post-agent check (`backlog-burn-ship-check.sh`)
+maps a subtype=success walk that left no branch and no stop to an
+explicit `🚢 DEFERRED` (permission-denial or no-ship-outcome) so settle
+sees declined — never the opaque "neither delivered nor declined"
+failure. Prefer posting the stop yourself; the check is the backstop.
+
+**Permission denial → `🚢 DEFERRED` (issue #962):** if any tool call is
+denied by the permission backstop (for example `WebFetch`, or any other
+tool not on the allow list), do **not** keep walking and do **not** end
+quietly on `main`. Immediately post a stop whose first line is
+`🚢 DEFERRED — permission denial: <tool-name>` (tool name only — never
+inputs, args, URLs, or command text), withdraw any claim you posted
+(§0.6), and stop. Never ask to widen the allow list mid-run — that
+needs a separate security clearance.
 
 Do not call `subscribe_pr_activity`. You do not open the draft PR in step 3.
 The delivery workflow opens it, and that PR does not exist yet when your

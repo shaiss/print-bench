@@ -12,6 +12,9 @@ def test_every_url_counts_as_23_regardless_of_length():
     assert tweet_weight("x https://a.io y") == 2 + 23 + 2  # "x ", url, " y"
     two = "https://github.com/shaiss/print-bench https://example.com/a/very/long/path"
     assert tweet_weight(two) == 23 + 1 + 23
+    # Upper- / mixed-case schemes still meter as one URL.
+    assert tweet_weight("HTTPS://evil.example/x") == 23
+    assert tweet_weight("HtTp://evil.example/x") == 23
 
 
 def test_wide_code_points_count_two():

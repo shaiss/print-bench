@@ -64,11 +64,12 @@ NopSCADlib vitamins (the brief's named source), read at build time:
    over the 2×20 header), not a window — no bridging, and the wall keeps its
    bottom half for stiffness.
 5. **Fan bolts flush to the lid's outer face; the insert bosses are on the
-   inner face.** Intake is a **co-planar grille** in the lid plate (B11): Ø5
-   holes on a 7 mm pitch (2 mm webs), clipped to the vitamin's Ø37 bore
-   (`fan_bore(fan_type)`). Plate material bounds every opening — no bar across
-   the bore span (N4 / outer-face-down print). Measured open area inside the
-   bore: **~40 %** of an unobstructed Ø37 disc (~426 mm² vs 1075 mm²); ~60 %
+   inner face.**    Intake is a **co-planar grille** in the lid plate (B11): Ø5
+   holes on a 7 mm pitch (2 mm webs), fully inside the vitamin's Ø37 bore
+   (`fan_bore(fan_type)` — centres within `r − grille_hole_d/2`, no rim
+   crescents). Plate material bounds every opening — no bar across the bore span
+   (N4 / outer-face-down print). Measured open area inside the bore: **~38 %**
+   of an unobstructed Ø37 disc (~412 mm² vs 1075 mm²); ~62 %
    of the former free hole is now solid web closing the case ceiling over the
    fan bore (the fan sits on the outer face; the grille is not a blade guard
    from outside). Honesty scale: stops fingers and larger dropped objects on the
@@ -372,16 +373,21 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     coupled to the field-test entry. Queued to B11: the finger guard must be a
     co-planar grille in the lid plate, never a bar across the aperture
     (unprintable both ways). Freeze held rounds 3–13, page-only since 2c.
-27. **B11 — co-planar fan grille (2026-10-04).** Replaced the through-bored
-    Ø37 lid cut with `fan_grille_cut2d()` — Ø5 holes, 7 mm pitch, 2 mm webs,
-    clipped to `fan_bore(fan_type)`. Trade: ~40 % of the unobstructed bore's
-    free area retained (Monte Carlo on the parametric grid); case ceiling closed
-    over the fan bore (not a blade guard from outside); dust still enters through
-    the holes (page updated). Page honesty (Drik round 2 on #810): fingers and
-    larger objects only — not screw or wire sealing at Ø5.
+27. **B11 — co-planar fan grille (2026-10-04, merged #810).** Replaced the
+    through-bored Ø37 lid cut with `fan_grille_cut2d()` — Ø5 holes, 7 mm pitch,
+    2 mm webs, inside `fan_bore(fan_type)`. Trade: ~38 % of the unobstructed
+    bore's free area retained (21 full holes, ~412 / 1075 mm²); case ceiling
+    closed over the fan bore (not a blade guard from outside); dust still enters
+    through the holes (page updated). Page honesty (Drik round 2 on #810):
+    fingers and larger objects only — not screw or wire sealing at Ø5.
     Boss pitch and M3 fan screws unchanged; grille stays inside the bore circle,
-    clear of the corner bosses at 16 mm pitch.
-28. **B7 — occupied GPIO-notch clearance (this PR).** Measured from the
+    clear of the corner bosses at 16 mm pitch. **Jane rim-crescent fix
+    (2026-10-12, PR #815):** keep only holes whose centres satisfy
+    `norm(offset) ≤ r − grille_hole_d/2` (was `≤ r + d/2` plus bore clip, which
+    left partial holes at the rim). Hole count 29 → 21; open area ~426 mm²
+    (~40 %) → ~412 mm² (~38 %) — slightly less open area, cleaner FDM webs at
+    the bore edge.
+28. **B7 — occupied GPIO-notch clearance (merged #802).** Measured from the
     committed cut and lid lip, not from a page claim. The +Y notch is 55 mm
     wide × 8.5 mm tall (`gpio_notch_w` × `base_top_z − gpio_notch_bottom`);
     the lid register lip hangs `lip_depth` 2.5 mm into the cavity, so the
@@ -398,6 +404,18 @@ NopSCADlib vitamins (the brief's named source), read at build time:
     `fit-gpio-occupied` (envelope + leads ∩ lid-on shell) interferes;
     `fit-gpio-leads` empty. The notch cut is unchanged — widening it (and/or
     notching the lid lip) is a follow-up needing PM/eng, not a silent reshape.
+29. **B12 — grille tune coupon (2026-10-04).** The fit coupon's −X,+Y lid crop
+    cannot include the fan at (−10, 0) without breaking the corner-nest register
+    test (decision 8), so grille tuning gets its own wrapper
+    (`sbc-case-grille-coupon.scad` → `part="grille-coupon"`): `lid()` at print
+    pose, intersected with a 45 × 45 mm plate crop centred on `fan_center` (Ø37
+    bore + 4 mm margin). The z crop spans only `lid_t` on the plate slab, so the
+    four fan through-holes on **32 mm hole-to-hole spacing** stay in (`fan_pitch`
+    = `fan_hole_pitch(fan_type)` is **16 mm** from `fan_center` along each axis,
+    so opposite holes are 32 mm apart — see `sbc-case.scad`); the inner insert
+    bosses (7 mm below the plate) are clipped out — plate-only, not a miniature
+    lid. Proves hole/web printability and visual open area; not airflow or
+    thermals.
 
 ## Print settings
 
@@ -432,8 +450,22 @@ structure proof:
    steps; sloppy → −0.05. **Do not go below 0.15** on a typical FDM printer.
 3. **Board pilot fit:** an M2.5 cap screw should self-tap the Ø2.05 pilot in
    the standoff sample and hold firm.
-4. Only then print `base` (~2h 46m 37s) and `lid` (~2h 2m 41s) — printcheck
-   sticky on PR #810 tip `4f166d50`; your slicer and material may differ.
+4. Only then print `base` (~2h 46m 47s) and `lid` (~2h 0m 32s) — printcheck
+   sticky on the merge commit; your slicer and material may differ.
+
+**Grille presets (optional, B12):** if you are weighing `grille_hole_d` /
+`grille_web` (PM open decision — Ø5 / 7 mm vs Ø6 / 7.6 mm), print
+`sbc-case-grille-coupon.scad` after the fit coupon. It is the production lid
+plate cropped over the vitamin bore at the same outer-face-down pose as `lid`
+— same `fan_grille_cut2d()` cut, no register lip or corner nest; the four fan
+screw holes are in the crop but not the inner insert bosses (see decision 29).
+Tune the two grille parameters in **`sbc-case.scad`** with **`part =
+grille-coupon`** — the Customizer on the wrapper file does not show them. Compare
+hole size and web feel on the bench; you can also hold a 40 mm fan on the coupon
+and nut through the screw holes to check pattern and frame coverage. It does
+**not** measure airflow, thermals, or fan noise. When a preset wins, reprint the
+full `lid`. Gate slice (printcheck sticky): ~36m 41s, ~4.52 g (PrusaSlicer
+test profile; your slicer and material may differ).
 
 ## Derivations worth keeping
 
