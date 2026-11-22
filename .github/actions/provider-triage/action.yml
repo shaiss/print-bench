@@ -8,13 +8,16 @@ description: >-
   HTTP cause (`model-registry classify`, issue #347), then exposes the aggregate
   `class` (the action bucket) and `reason` (the finer cause) as outputs — plus
   `reset`, the reset time a quota-exhaustion body named (issue #545) — and
-  escalates on the account/config causes. The escalation is shared and
-  reason-keyed (issue #550): every chain that exhausts with the same reason
-  joins one open issue — per-chain detail lines in the body — so one `/decide`
-  resolves the set; the rule lives in `model_registry.escalation`, the same
-  tested unit oracle.yml's own exhaustion leg calls. It is ADVISORY: it never
-  fails the job on a decided outcome — the calling workflow decides whether to
-  red on the class — it only classifies and escalates.
+  escalates on the account/config causes. Optional `ship-outcomes` folds the
+  ship/agent step outcomes in so a walk where no link served cannot report
+  servable/served (class infra / reason no-link-served — issue #897). The
+  escalation is shared and reason-keyed (issue #550): every chain that
+  exhausts with the same reason joins one open issue — per-chain detail lines
+  in the body — so one `/decide` resolves the set; the rule lives in
+  `model_registry.escalation`, the same tested unit oracle.yml's own exhaustion
+  leg calls. It is ADVISORY: it never fails the job on a decided outcome — the
+  calling workflow decides whether to red on the class — it only classifies
+  and escalates.
 
 inputs:
   chain:
@@ -48,23 +51,36 @@ inputs:
       chain.
     required: false
     default: "true"
+  ship-outcomes:
+    description: >-
+      Optional comma-separated GitHub Actions step outcomes for the routine's
+      ship/agent links (success|failure|skipped|cancelled), in walk order.
+      When set, folds them into the provider probe so a walk where no link
+      served cannot report servable/served — class becomes infra / reason
+      no-link-served (issue #897). Empty (default) keeps today's provider-only
+      classification for callers that have no ship walk to feed in.
+    required: false
+    default: ""
 
 outputs:
   class:
-    description: The action bucket — servable | dead | needs-human | transient.
-    value: ${{ steps.classify.outputs.class }}
+    description: >-
+      The action bucket — servable | dead | needs-human | transient | infra.
+      infra is only produced when ship-outcomes is set and no link served
+      while the provider probe claimed servable (issue #897).
+    value: ${{ steps.overlay.outputs.class }}
   reason:
     description: >-
       The finer cause — served | bad-model-id | billing | quota | auth | no-key
-      | rate-limit | outage.
-    value: ${{ steps.classify.outputs.reason }}
+      | rate-limit | outage | no-link-served.
+    value: ${{ steps.overlay.outputs.reason }}
   reset:
     description: >-
       The reset time a quota-exhaustion body named (Z.AI 1310 "Your limit will
       reset at <ts>" / Anthropic usage-cap "You will regain access on <date>"),
       verbatim — empty when the cause named none. Says WHEN the chain comes
-      back (issue #545).
-    value: ${{ steps.classify.outputs.reset }}
+      back (issue #545). Cleared when ship-outcomes demotes servable → infra.
+    value: ${{ steps.overlay.outputs.reset }}
 
 runs:
   using: composite
@@ -93,6 +109,40 @@ runs:
         set -uo pipefail
         /usr/bin/python3 -m model_registry classify "$CHAIN" --gh-output "$GITHUB_OUTPUT"
 
+    # Fold ship-step outcomes into the provider probe (issue #897). Always
+    # runs so outputs.class/reason are authoritative from this step: when
+    # ship-outcomes is empty the overlay is identity (other routines
+    # unchanged); when no link served and the probe claimed servable, class
+    # becomes infra / no-link-served. Uses tools/backlog-burn's tested
+    # classifier — stdlib-only, same PYTHONPATH pattern as classify above.
+    - id: overlay
+      shell: bash
+      env:
+        PYTHONPATH: tools/backlog-burn/src:tools/model-registry/src
+        PYTHONSAFEPATH: "1"
+        PYTHONNOUSERSITE: "1"
+        PATH: /usr/bin:/bin
+        LD_PRELOAD: ""
+        LD_LIBRARY_PATH: ""
+        LD_AUDIT: ""
+        BASH_ENV: ""
+        ENV: ""
+        NODE_OPTIONS: ""
+        CHAIN: ${{ inputs.chain }}
+        SHIP_OUTCOMES: ${{ inputs.ship-outcomes }}
+        PROVIDER_CLASS: ${{ steps.classify.outputs.class }}
+        PROVIDER_REASON: ${{ steps.classify.outputs.reason }}
+        PROVIDER_RESET: ${{ steps.classify.outputs.reset }}
+      run: |
+        set -uo pipefail
+        /usr/bin/python3 -m backlog_burn.cli triage-classify \
+          --outcomes "${SHIP_OUTCOMES:-}" \
+          --provider-class "${PROVIDER_CLASS}" \
+          --provider-reason "${PROVIDER_REASON}" \
+          --provider-reset "${PROVIDER_RESET:-}" \
+          --chain "${CHAIN}" \
+          --gh-output "$GITHUB_OUTPUT"
+
     # needs-human — the account/config problem CI cannot fix (out of credit, out
     # of tokens, or a bad/missing key). Raise it through the decision gate as
     # ONE shared, reason-keyed needs-decision issue (issue #550): a chain that
@@ -101,13 +151,15 @@ runs:
     # escalation and one /decide resolves the whole set, with remediation
     # tailored to the reason. When classify carried a quota reset time (issue
     # #545), pass it through so the escalation body can name WHEN the chain
-    # comes back. dead / transient / servable are the caller's to message. The
-    # whole rule lives in model_registry.escalation (tested, and shared with
-    # oracle.yml's own exhaustion leg, so the two surfaces cannot drift apart);
-    # trusted base-branch Python from the caller's checkout, no PR-head code —
-    # the same trust posture as the classify step above.
+    # comes back. dead / transient / servable / infra are the caller's to
+    # message. The whole rule lives in model_registry.escalation (tested, and
+    # shared with oracle.yml's own exhaustion leg, so the two surfaces cannot
+    # drift apart); trusted base-branch Python from the caller's checkout, no
+    # PR-head code — the same trust posture as the classify step above.
+    # Reads overlay outputs so a ship-outcome demotion to infra cannot escalate
+    # and a preserved needs-human still does.
     - id: escalate
-      if: ${{ inputs.escalate == 'true' && steps.classify.outputs.class == 'needs-human' }}
+      if: ${{ inputs.escalate == 'true' && steps.overlay.outputs.class == 'needs-human' }}
       shell: bash
       env:
         PYTHONPATH: tools/model-registry/src
@@ -122,8 +174,8 @@ runs:
         NODE_OPTIONS: ""
         ESCALATION_TOKEN: ${{ inputs.github-token }}
         CHAIN: ${{ inputs.chain }}
-        REASON: ${{ steps.classify.outputs.reason }}
-        RESET: ${{ steps.classify.outputs.reset }}
+        REASON: ${{ steps.overlay.outputs.reason }}
+        RESET: ${{ steps.overlay.outputs.reset }}
         CONTEXT: ${{ inputs.context }}
         REPO: ${{ github.repository }}
       run: |

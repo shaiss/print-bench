@@ -53,3 +53,68 @@ def test_summary_title_override(tmp_path):
 def test_summary_title_override_design_run(tmp_path):
     out = _run_select(tmp_path, ["--summary-title", "Design run"])
     assert out.startswith("## Design run\n")
+
+
+def test_triage_classify_all_failed_prints_infra(capsys, tmp_path):
+    """CLI behavioral: synthetic all-failure outcomes → infra, not servable."""
+    gh_out = tmp_path / "out"
+    rc = main([
+        "triage-classify",
+        "--outcomes", "failure,failure,failure,failure,failure",
+        "--provider-class", "servable",
+        "--provider-reason", "served",
+        "--chain", "backlog-burn",
+        "--gh-output", str(gh_out),
+    ])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "CLASS backlog-burn: infra" in printed
+    assert "REASON backlog-burn: no-link-served" in printed
+    assert "servable" not in printed
+    body = gh_out.read_text(encoding="utf-8")
+    assert "class=infra\n" in body
+    assert "reason=no-link-served\n" in body
+
+
+def test_triage_classify_one_served_keeps_servable(capsys, tmp_path):
+    gh_out = tmp_path / "out"
+    rc = main([
+        "triage-classify",
+        "--outcomes", "failure,success,skipped,skipped,skipped",
+        "--provider-class", "servable",
+        "--provider-reason", "served",
+        "--gh-output", str(gh_out),
+    ])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "CLASS backlog-burn: servable" in printed
+    assert "REASON backlog-burn: served" in printed
+    assert "class=servable\n" in gh_out.read_text(encoding="utf-8")
+
+
+def test_triage_classify_deferred_disposition_keeps_servable(capsys):
+    """#981: deferred disposition must not demote a served walk to infra."""
+    rc = main([
+        "triage-classify",
+        "--outcomes", "success,skipped,skipped,skipped,skipped",
+        "--provider-class", "servable",
+        "--provider-reason", "served",
+        "--disposition", "deferred",
+    ])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "CLASS backlog-burn: servable" in printed
+    assert "infra" not in printed
+
+
+def test_triage_classify_empty_outcomes_is_identity(capsys):
+    """No ship-outcomes feed → provider signal unchanged (other routines)."""
+    rc = main([
+        "triage-classify",
+        "--outcomes", "",
+        "--provider-class", "servable",
+        "--provider-reason", "served",
+    ])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "CLASS backlog-burn: servable" in printed
