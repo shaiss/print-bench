@@ -1,0 +1,16 @@
+# Boolean fit checks — never printed or sliced, rendered by gate.sh.
+# fit-close: closed clamp (both halves) ∩ a continuing Øbar_d bar long
+#   enough to run past the receiver's full along-bar depth. Zero facets =
+#   the fin clears the bar so the halves can close on a mid-bar ISO 4210
+#   grip section (the Drik blocker that had no gate before).
+# fit-close-ctrl: same boolean with the bar grown 2 mm — real volumetric
+#   overlap into the shell. Mandatory negative control.
+# fit-insert: the buckle travel column (channel cross-section extruded from
+#   fully-out through the seat) ∩ the same continuing bar. Zero facets =
+#   a genuine buckle can slide to the latch with the bar in place.
+# fit-insert-ctrl: same boolean with the bar grown 8 mm — reaches the
+#   pedestal channel. Mandatory negative control.
+fit-close        empty
+fit-close-ctrl   interferes
+fit-insert       empty
+fit-insert-ctrl  interferes
