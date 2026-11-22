@@ -657,8 +657,10 @@ fi
 # backlog-burn agent-diag allowlist (MED-A on #953): denied tool names are
 # exact Claude Code tools or mcp__<ns>__<tool> (else "(other)"); unique names
 # capped at 12; string-denial first-token branch is gone; credential-shaped
-# mcp__ names collapse to "(other)". Wired here so CI /preflight cannot drift
-# from the copies in capture.sh and the upload-diag schema.
+# mcp__ names collapse to "(other)". This runs the producer selftest only;
+# capture.sh and the upload-diag schema keep their own allowlists as a
+# second line of defense (intentional dual check, not a single shared
+# constant — see CodeRabbit on #953).
 echo "-- backlog-burn-agent-diag selftest: scripts/backlog-burn-agent-diag.sh --selftest"
 if ! ./scripts/backlog-burn-agent-diag.sh --selftest; then
   fail=1

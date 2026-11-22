@@ -619,16 +619,26 @@ jobs:
           # Bash, not by this shell's `gh`; drop GH_TOKEN/GITHUB_TOKEN for
           # the probes so they match what an agent subprocess sees under scrub.
           export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1
-          env -u GH_TOKEN -u GITHUB_TOKEN gh auth status >/dev/null 2>&1
+          # Bound each probe so a stalled issue-read cannot burn the ship
+          # walk's budget (CodeRabbit on #953).
+          timeout --signal=TERM --kill-after=5s 20s \
+            env -u GH_TOKEN -u GITHUB_TOKEN gh auth status >/dev/null 2>&1
           auth_rc=$?
-          if [ "$auth_rc" -eq 0 ]; then
+          if [ "$auth_rc" -eq 124 ] || [ "$auth_rc" -eq 137 ]; then
+            auth_rc=124
+            logged_in=timeout
+          elif [ "$auth_rc" -eq 0 ]; then
             logged_in=yes
           else
             logged_in=no
           fi
-          env -u GH_TOKEN -u GITHUB_TOKEN \
+          timeout --signal=TERM --kill-after=5s 20s \
+            env -u GH_TOKEN -u GITHUB_TOKEN \
             gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}" >/dev/null 2>&1
           api_rc=$?
+          if [ "$api_rc" -eq 124 ] || [ "$api_rc" -eq 137 ]; then
+            api_rc=124
+          fi
           set -e
           {
             echo "### backlog-burn gh probe (agent-subprocess env, tokens scrubbed)"
@@ -638,6 +648,18 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice::gh probe: auth_rc=${auth_rc} logged_in=${logged_in} api_rc=${api_rc}"
+
+      - name: Clear execution log before link 1
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.zai_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Z.AI (GLM, chain link 1)
         id: ship_zai_1
@@ -795,11 +817,27 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_1"
           } >> "$GITHUB_OUTPUT"
+          # Drop the shared execution log so a later fallback link cannot
+          # attribute this attempt's denials (CodeRabbit on #953).
+          rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
 
       # The GLM tail (#327): links 2 and 3 of the registry's `backlog-burn`
       # chain, reached only when every earlier link did not succeed — the
       # same env/secret/pin/prompt as link 1, only the model differs.
+      - name: Clear execution log before link 2
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.zai_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
+
       - name: Ship via Z.AI (GLM, chain link 2)
         id: ship_zai_2
         if: >-
@@ -937,7 +975,24 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_2"
           } >> "$GITHUB_OUTPUT"
+          # Drop the shared execution log so a later fallback link cannot
+          # attribute this attempt's denials (CodeRabbit on #953).
+          rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
+
+      - name: Clear execution log before link 3
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.zai_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Z.AI (GLM, chain link 3)
         id: ship_zai_3
@@ -1077,6 +1132,9 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_3"
           } >> "$GITHUB_OUTPUT"
+          # Drop the shared execution log so a later fallback link cannot
+          # attribute this attempt's denials (CodeRabbit on #953).
+          rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
 
       # The cross-provider tail (issue #544): links 4 and 5 of the registry's
@@ -1089,6 +1147,21 @@ jobs:
       # only the model, secret and endpoint differ. Which model runs is the
       # registry's call (the cheap Anthropic tier, since a GLM outage shifts
       # this hourly routine's whole spend here).
+      - name: Clear execution log before link 4
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
+
       - name: Ship via Anthropic (Claude, chain link 4)
         id: ship_anthropic_4
         if: >-
@@ -1225,7 +1298,26 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_4"
           } >> "$GITHUB_OUTPUT"
+          # Drop the shared execution log so a later fallback link cannot
+          # attribute this attempt's denials (CodeRabbit on #953).
+          rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
+
+      - name: Clear execution log before link 5
+        if: >-
+          steps.policy.outputs.enabled == 'true'
+          && steps.select.outputs.issue != ''
+          && steps.policy.outputs.anthropic_key_present == '1'
+          && github.event.inputs.dry_run != 'true'
+          && steps.disable_sudo.outcome == 'success'
+          && steps.preflight_pip.outcome == 'success'
+          && steps.ship_zai_1.outcome != 'success'
+          && steps.ship_zai_2.outcome != 'success'
+          && steps.ship_zai_3.outcome != 'success'
+          && steps.ship_anthropic_4.outcome != 'success'
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Anthropic (Claude, chain link 5)
         id: ship_anthropic_5
@@ -1364,6 +1456,9 @@ jobs:
             cat -- "$diag_out"
             echo "DIAG_EOF_5"
           } >> "$GITHUB_OUTPUT"
+          # Drop the shared execution log so a later fallback link cannot
+          # attribute this attempt's denials (CodeRabbit on #953).
+          rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
 
       # Denial diagnostic artifact upload runs on a FRESH runner (job
@@ -1817,6 +1912,13 @@ jobs:
           bundle_path="${RUNNER_TEMP}/backlog-burn.bundle"
           if [ -f "$bundle_path" ]; then
             captured="$(sha256sum "$bundle_path" | awk '{print $1}')"
+            # Recompute before marking pending so a changed bundle cannot
+            # hand off bytes that do not match the digest (CodeRabbit on #953).
+            recheck="$(sha256sum "$bundle_path" | awk '{print $1}')"
+            if [ -z "$captured" ] || [ "$recheck" != "$captured" ]; then
+              echo "::error::bundle digest unstable before handoff" >&2
+              captured=""
+            fi
           else
             captured=""
           fi
@@ -1830,8 +1932,32 @@ jobs:
             fi
           fi
 
-      - name: Upload the ship bundle
+      - name: Recheck bundle digest before upload
+        id: bundle_verify
         if: steps.bundle.outputs.pending == 'true'
+        env:
+          EXPECT_SHA: ${{ steps.bundle.outputs.sha256 }}
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          bundle_path="${RUNNER_TEMP}/backlog-burn.bundle"
+          if [ -z "${EXPECT_SHA:-}" ] || [ ! -f "$bundle_path" ]; then
+            echo "::error::bundle missing before upload" >&2
+            echo "match=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          got="$(sha256sum "$bundle_path" | awk '{print $1}')"
+          if [ "$got" != "$EXPECT_SHA" ]; then
+            echo "::error::bundle digest changed before upload (${got} != ${EXPECT_SHA})" >&2
+            echo "match=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "match=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the ship bundle
+        if: >-
+          steps.bundle.outputs.pending == 'true'
+          && steps.bundle_verify.outputs.match == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: backlog-burn-bundle
@@ -1842,7 +1968,9 @@ jobs:
           NODE_OPTIONS: ""
 
       - name: Record delivery metadata
-        if: steps.bundle.outputs.pending == 'true'
+        if: >-
+          steps.bundle.outputs.pending == 'true'
+          && steps.bundle_verify.outputs.match == 'true'
         env:
           ISSUE: ${{ steps.select.outputs.issue }}
           START_SHA: ${{ steps.start_ref.outputs.sha }}
@@ -2061,6 +2189,129 @@ jobs:
           PRESENT_5: ${{ needs.burn.outputs.diag_present_5 }}
           DIAG_5: ${{ needs.burn.outputs.diag_5 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          REBUILD_PY: |
+            import json
+            import re
+            import sys
+            from pathlib import Path
+            
+            KNOWN = frozenset(
+                {
+                    "Bash",
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "MultiEdit",
+                    "Glob",
+                    "Grep",
+                    "LS",
+                    "WebFetch",
+                    "WebSearch",
+                    "Task",
+                    "TodoWrite",
+                    "NotebookEdit",
+                    "NotebookRead",
+                    "BashOutput",
+                    "KillBash",
+                    "KillShell",
+                    "ExitPlanMode",
+                    "SlashCommand",
+                    "Agent",
+                    "Skill",
+                }
+            )
+            MCP = re.compile(r"^mcp__[A-Za-z0-9_-]{1,64}__[A-Za-z0-9_-]{1,64}$")
+            
+            
+            def tool_ok(name: str) -> bool:
+                return name == "(other)" or name in KNOWN or MCP.fullmatch(name) is not None
+            
+            
+            ALLOWED = {
+                "label",
+                "log_note",
+                "denied_tools",
+                "denied_tools_extra",
+                "final_assistant_message_len",
+                "final_assistant_message_sha256",
+            }
+            link = int(sys.argv[1])
+            raw_path = Path(sys.argv[2])
+            out = Path(sys.argv[3])
+            with raw_path.open("rb") as fh:
+                raw = fh.read(65537)
+            if len(raw) > 65536:
+                print(f"::warning::link-{link} diag too large — skipped", file=sys.stderr)
+                sys.exit(2)
+            try:
+                obj = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                print(f"::warning::link-{link} diag failed UTF-8 JSON — skipped", file=sys.stderr)
+                sys.exit(2)
+            if not isinstance(obj, dict) or set(obj) != ALLOWED:
+                print(f"::warning::link-{link} diag failed keys schema — skipped", file=sys.stderr)
+                sys.exit(2)
+            if "final_assistant_message_truncated" in obj:
+                print(f"::warning::link-{link} diag carries message text — skipped", file=sys.stderr)
+                sys.exit(2)
+            if not isinstance(obj.get("log_note"), str) or not isinstance(obj.get("label"), str):
+                print(f"::warning::link-{link} diag label/log_note type — skipped", file=sys.stderr)
+                sys.exit(2)
+            note = obj["log_note"]
+            # Map free-text notes to fixed status tokens — never republish agent text.
+            if note == "":
+                log_note = ""
+            elif (
+                note == "execution-log-missing"
+                or note.startswith("execution-log not found")
+                or note.startswith("execution-log-missing")
+            ):
+                log_note = "execution-log-missing"
+            elif "unreadable" in note:
+                log_note = "execution-log-unreadable"
+            else:
+                log_note = "other-note"
+            tools = obj["denied_tools"]
+            if not isinstance(tools, list) or len(tools) > 12:
+                print(f"::warning::link-{link} diag denied_tools schema — skipped", file=sys.stderr)
+                sys.exit(2)
+            clean = []
+            seen = set()
+            for row in tools:
+                if (
+                    not isinstance(row, dict)
+                    or set(row) != {"tool"}
+                    or not isinstance(row["tool"], str)
+                    or not tool_ok(row["tool"])
+                ):
+                    print(f"::warning::link-{link} diag denial-tool schema — skipped", file=sys.stderr)
+                    sys.exit(2)
+                if row["tool"] in seen:
+                    print(f"::warning::link-{link} diag duplicate tools — skipped", file=sys.stderr)
+                    sys.exit(2)
+                seen.add(row["tool"])
+                clean.append({"tool": row["tool"]})
+            extra = obj["denied_tools_extra"]
+            if type(extra) is not int or isinstance(extra, bool) or extra < 0:
+                print(f"::warning::link-{link} diag denied_tools_extra — skipped", file=sys.stderr)
+                sys.exit(2)
+            n = obj["final_assistant_message_len"]
+            if type(n) is not int or isinstance(n, bool) or n < 0:
+                print(f"::warning::link-{link} diag message-len — skipped", file=sys.stderr)
+                sys.exit(2)
+            h = obj["final_assistant_message_sha256"]
+            if not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{64}", h):
+                print(f"::warning::link-{link} diag message-sha — skipped", file=sys.stderr)
+                sys.exit(2)
+            payload = {
+                "label": f"backlog-burn agent diag (link {link})",
+                "log_note": log_note,
+                "denied_tools": clean,
+                "denied_tools_extra": extra,
+                "final_assistant_message_len": n,
+                "final_assistant_message_sha256": h,
+            }
+            out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
@@ -2075,9 +2326,26 @@ jobs:
               continue
             fi
             mkdir -p -- "${stage}/link-${i}"
-            printf '%s\n' "$diag" > "${stage}/link-${i}/diag.json"
-            python3 -I -c "import json,re,sys; from pathlib import Path; KNOWN=frozenset({'Bash','Read','Write','Edit','MultiEdit','Glob','Grep','LS','WebFetch','WebSearch','Task','TodoWrite','NotebookEdit','NotebookRead','BashOutput','KillBash','KillShell','ExitPlanMode','SlashCommand','Agent','Skill'}); MCP=re.compile(r'^mcp__[A-Za-z0-9_-]{1,64}__[A-Za-z0-9_-]{1,64}$'); ok=lambda t: t=='(other)' or t in KNOWN or MCP.fullmatch(t) is not None; ALLOWED={'label','log_note','denied_tools','denied_tools_extra','final_assistant_message_len','final_assistant_message_sha256'}; p=Path(sys.argv[1]); raw=p.read_bytes(); assert len(raw)<=65536, 'diag too large'; obj=json.loads(raw.decode()); assert set(obj)==ALLOWED, 'bad keys'; assert 'final_assistant_message_truncated' not in obj; assert isinstance(obj['denied_tools'], list) and len(obj['denied_tools'])<=12; assert all(isinstance(r, dict) and set(r)=={'tool'} and isinstance(r['tool'], str) and ok(r['tool']) for r in obj['denied_tools']); assert len({r['tool'] for r in obj['denied_tools']})==len(obj['denied_tools']), 'dup tools'; e=obj['denied_tools_extra']; assert type(e) is int and not isinstance(e, bool) and e>=0; n=obj['final_assistant_message_len']; assert type(n) is int and not isinstance(n, bool) and n>=0; h=obj['final_assistant_message_sha256']; assert isinstance(h, str) and re.fullmatch(r'[0-9a-f]{64}', h)" \
-              "${stage}/link-${i}/diag.json"
+            # Rebuild from validated fields on this fresh runner — never upload
+            # the received bytes unchanged (CodeRabbit on #953). Derive label
+            # from the link number and map log_note to a fixed status token.
+            printf '%s\n' "$diag" > "${stage}/link-${i}/diag.raw"
+            printf '%s\n' "$REBUILD_PY" > "${RUNNER_TEMP}/backlog-burn-diag-rebuild.py"
+            set +e
+            python3 -I "${RUNNER_TEMP}/backlog-burn-diag-rebuild.py" \
+              "$i" "${stage}/link-${i}/diag.raw" "${stage}/link-${i}/diag.json"
+            rc=$?
+            set -e
+            rm -f -- "${stage}/link-${i}/diag.raw"
+            if [ "$rc" -ne 0 ]; then
+              rm -f -- "${stage}/link-${i}/diag.json"
+              rmdir -- "${stage}/link-${i}" 2>/dev/null || true
+              if [ "$rc" -eq 2 ]; then
+                continue
+              fi
+              echo "::error::link-${i} diag rebuild failed" >&2
+              exit 1
+            fi
             staged=$((staged + 1))
           done
           while IFS= read -r -d '' f; do
