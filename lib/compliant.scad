@@ -951,6 +951,17 @@ function let_joint_sigma(bar_t, bar_w, gap, theta, E = 2000) =
 
 // Torsion surface shear τ = G·θ·r_c/L (MPa) — the design stress when torsion
 // dominates (let-folding-panel.scad:124-125). θ in radians.
+//
+// KEEP (issue #1061): r_c is the CORNER fiber distance
+//   r_c = sqrt((w/2)² + (t/2)²)
+// matching the harvest site, NOT the textbook mid-side form τ ≈ G·θ·(t/2)/L
+// (or the St-Venant max-at-long-side formula). The corner radius is the
+// farthest surface fiber from the torsion axis, so this is a conservative
+// upper-bound estimate of surface shear — the number the design already
+// treated as its design stress. Switching to the mid-side form would lower
+// the echoed stress without a coupon re-calibration and break prediction
+// parity with let-folding-panel. Keep the harvested form until a coupon
+// shows it is wrong.
 function let_joint_tau(bar_w, bar_t, bar_L, theta, E = 2000, nu = 0.4) =
     assert(bar_w > 0, str("let_joint_tau: bar_w must be positive (got ", bar_w, ")"))
     assert(bar_t > 0, str("let_joint_tau: bar_t must be positive (got ", bar_t, ")"))
