@@ -127,22 +127,48 @@ def test_tau_uses_per_row_theta(tmp_path):
         f"sigma_root should stay the full-fold bound: n1={sig1} n2={sig2}")
 
 
-@needs_openscad
-def test_sigma_tau_reject_nonpositive_dims(tmp_path):
-    """let_joint_sigma / let_joint_tau refuse nonpositive bar dimensions."""
-    scad = tmp_path / "stress_guards.scad"
-    scad.write_text(
-        "use <compliant.scad>\n"
-        "echo(let_joint_sigma(1.2, -2.0, 6, PI / 2));\n"
-        "cube(0.1);\n"
-    )
+def _assert_refuses(tmp_path, stem: str, scad_body: str, expect: str) -> None:
+    """Render a tiny fixture and require OpenSCAD to abort with ``expect``."""
+    scad = tmp_path / f"{stem}.scad"
+    scad.write_text(scad_body)
     env = dict(os.environ, OPENSCADPATH=f"{REPO / 'lib'}:{REPO}")
     cmd = ["xvfb-run", "-a", OPENSCAD,
            *os.environ.get("OPENSCAD_ARGS", "").split(),
            "--export-format", "binstl",
-           "-o", str(tmp_path / "stress_guards.stl"), str(scad)]
+           "-o", str(tmp_path / f"{stem}.stl"), str(scad)]
     run = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
                          env=env, cwd=str(REPO))
     log = run.stdout + run.stderr
-    assert run.returncode != 0, "negative bar_w should abort let_joint_sigma"
-    assert "bar_w must be positive" in log, log[-2000:]
+    assert run.returncode != 0, f"expected refusal ({expect}); log:\n{log[-2000:]}"
+    assert expect in log, log[-2000:]
+
+
+@needs_openscad
+def test_sigma_tau_reject_nonpositive_dims(tmp_path):
+    """let_joint_sigma / let_joint_tau refuse nonpositive bar dimensions.
+
+    Matching coverage for both helpers (issue #1061): sigma already refused
+    a negative bar_w; tau must refuse nonpositive bar_w and bar_t the same
+    way (the asserts added for CodeRabbit on #1057).
+    """
+    _assert_refuses(
+        tmp_path, "sigma_neg_w",
+        "use <compliant.scad>\n"
+        "echo(let_joint_sigma(1.2, -2.0, 6, PI / 2));\n"
+        "cube(0.1);\n",
+        "bar_w must be positive",
+    )
+    _assert_refuses(
+        tmp_path, "tau_zero_w",
+        "use <compliant.scad>\n"
+        "echo(let_joint_tau(0, 1.2, 14, PI / 2));\n"
+        "cube(0.1);\n",
+        "bar_w must be positive",
+    )
+    _assert_refuses(
+        tmp_path, "tau_zero_t",
+        "use <compliant.scad>\n"
+        "echo(let_joint_tau(2.0, 0, 14, PI / 2));\n"
+        "cube(0.1);\n",
+        "bar_t must be positive",
+    )
