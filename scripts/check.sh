@@ -666,6 +666,18 @@ if ! ./scripts/backlog-burn-agent-diag.sh --selftest; then
   fail=1
 fi
 
+# Capture bootstrap and bundle digest recheck selftests (#953): sealed memfd
+# exec, MAX_BYTES+1 bounded read, rule-name-only schema errors, MCP scrub;
+# bundle_verify writes match=true only on a digest match.
+echo "-- backlog-burn-agent-diag-capture selftest: scripts/backlog-burn-agent-diag-capture.sh --selftest"
+if ! ./scripts/backlog-burn-agent-diag-capture.sh --selftest; then
+  fail=1
+fi
+echo "-- backlog-burn-bundle-verify selftest: scripts/backlog-burn-bundle-verify.sh --selftest"
+if ! ./scripts/backlog-burn-bundle-verify.sh --selftest; then
+  fail=1
+fi
+
 # backlog-burn agent Bash deny backstop (issue #1022): loads the real
 # .claude/backlog-burn-settings.json and asserts — under Claude Code's
 # matcher, not a grep — that gh issue comment/edit, gh label, and

@@ -528,6 +528,10 @@ surfaces studies awaiting a read live in
     `provenance.gitstore.scrub` (no guarantee for arbitrary secrets);
     `show_full_output` stays false
     (Refs #885 #886 #889)
+  - `backlog-burn-bundle-verify.sh` — offline mirror of backlog-burn's
+    `bundle_verify` step: rechecks the ship bundle's sha256 before upload and
+    writes `match=true` only on a digest match (`--selftest` run by check.sh;
+    #953)
   - `oracle-ship-contract.sh` — picks the frozen §2 ship contract for Oracle
     context (Gate contract / Acceptance criteria / Design name / Chosen
     approach) from an allowlisted author only (github-actions[bot] or
