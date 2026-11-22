@@ -18,7 +18,7 @@ The parts print separately. The file to slice is the multi-object plate, `build/
 
 The plate holds one rack, which makes a complete five-fin rack: four strips a lane, eight a pull. Print `rack` a second time for the ten fins shown here.
 
-Assembled with two racks it takes 561 × 57 mm of table and stands 58 mm tall; with one rack it is 361 mm long.
+Assembled with two racks it takes 561 × 57 mm of table and stands 58 mm tall without rolls; a full 62 mm roll reaches 67 mm. With one rack it is 361 mm long.
 
 ![The assembled four-view: cradle, racks and end cap as they print; the spindle prints on end](previews/contact-sheet.png)
 
@@ -61,7 +61,7 @@ Measure the core of your own tape roll as well. `core_id` assumes 25.4 mm.
 | `fins_per_rack` | 5 | fins on one rack segment |
 | `tape_w` | 19 mm | tape width, 12 to 25. Narrower tape wants its own render, not a 19 mm print |
 | `core_id` | 25.4 mm | inner diameter of the roll's core |
-| `roll_od_max` | 62 mm | largest roll the cradle clears |
+| `roll_od_max` | 62 mm | largest roll the cradle clears. 47 or more with the default core; the render stops below that |
 | `joint_clear` | 0.2 mm | clearance in the dovetail, each face. The coupon tunes this |
 | `land_ribs` | 3 | ribs per lane on each fin top. Fewer makes a strip easier to peel; 0 makes the top flat, for tape that will not stay put |
 | `fin_h` | 26 mm | height of the tape above the base: room for scissors and fingers |

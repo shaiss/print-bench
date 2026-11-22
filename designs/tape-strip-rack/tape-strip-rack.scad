@@ -157,10 +157,12 @@ bed_ch = 0.5;                   // bed-edge chamfer, horizontal leg
 bed_ch_h = 0.6;                 // bed-edge chamfer, vertical leg (50 deg)
 z_in = floor_t / 2;             // where the cradle's nose and back wall start, inside the floor
 // The side walls are extruded 2D profiles, and OpenSCAD snaps a 2D profile to
-// a fine grid before it extrudes it: a wall drawn from z_in would start
-// 0.000003 mm off the nose block's z_in, and where both meet the nose face
-// the two edges export as zero-area triangles. So the walls start at a depth
-// of their own, a quarter of the floor away from everything else.
+// a grid before it extrudes it: a wall drawn from z_in would start a hair
+// off the nose block's z_in (0.000003 mm on OpenSCAD 2021.01), and where
+// both meet the nose face the Manifold backend's export carries the two
+// edges as zero-area triangles. So the walls start at a depth of their own,
+// a quarter of the floor away from the nose, the back wall and the floor's
+// top.
 z_wall_in = floor_t * 3 / 4;    // 1.8
 joint_ef_h = 0.5;               // height of the joint's first-layer relief
 joint_tip_cut = 0.8;            // key tip corners cut back (corner relief)
@@ -196,6 +198,11 @@ cradle_l = -x_axis + roll_od_max / 2 + 3 + back_t + back_inset;   // 97.7: nose 
 heel_ext = max(heel_l, 0.4);
 heel_round = heel_l >= corner_r + 2;                 // enough pad to round its corners
 z_wall_top = z_axis + r_s + 9;                       // 58
+// Where the rear edge of the saddle slot leaves the top of the wall, and how
+// much wall top is left between it and the wall's rear corner chamfer.
+x_slot_rear = x_axis - r_s * cos(saddle_lean)
+            - (z_wall_top - z_axis + r_s * sin(saddle_lean)) * tan(saddle_lean);
+saddle_land = x_slot_rear - (-cradle_l + 5);         // 8.8
 cradle_in_w = W - 2 * post_w;                        // 48.4
 spindle_play = 1.6;                                  // axial float of the spindle, total
 spindle_l = cradle_in_w + 2 * saddle_pocket - spindle_play;   // 52.4
@@ -254,6 +261,10 @@ assert(rack_l + joint_depth + draft_run(0) <= 210,
        str("a rack segment is ", rack_l + joint_depth + draft_run(0), " mm long — over the brief's 210 mm. Lower fins_per_rack."));
 assert(z_wall_top <= 200, "the cradle is over the 200 mm the test-slice allows");
 assert(floor_t >= 1.2, str("floor_t ", floor_t, " is under 1.2 mm: the cradle's walls would have nothing to stand in"));
+assert(floor_t < base_h, str("floor_t ", floor_t, " is not under base_h (", base_h, "): the floor would bury the nose block"));
+assert(saddle_land >= 1.2,
+       str("only ", saddle_land, " mm of wall top is left behind the saddle slot — under 1.2 mm. Raise roll_od_max",
+           " (now ", roll_od_max, ") or lower core_id (now ", core_id, ")."));
 assert((W - max(joint_bed_w, mouth_bed_w)) / 2 >= 6,
        str("only ", (W - max(joint_bed_w, mouth_bed_w)) / 2, " mm of base beside the socket — under 6 mm.",
            " Narrow the joint (one lane: joint_neck = 6, joint_tip = 13) or widen the lanes."));
@@ -401,8 +412,8 @@ module key_solid() {
 // the same draft; a relief flare at the bed; and a lead-in chamfer round the
 // rim of each. The flare and the lead-ins take chamfered offset corners and
 // start at different heights, so no two pieces' corner edges pass through
-// one point — the Manifold backend exports such a crossing as edges shared
-// by four triangles.
+// one point — an emulation of the Manifold backend (manifold3d, not the
+// nightly) exported such a crossing as edges shared by four triangles.
 module socket_main(clear) {
     hull() {
         joint_slab(-1, draft_run(-1) + clear);
@@ -615,7 +626,8 @@ module spindle(grow = 0) {
               [r, zc(j) - flange_flat / 2 - flange_cone], [rf, zc(j) - flange_flat / 2],
               [rf, zc(j) + flange_flat / 2], [r, zc(j) + flange_flat / 2 + flange_cone]]]
         : [];
-    // a whole number of sides, 3 or more, as rotate_extrude() would take $fn
+    // a whole number of sides, 3 or more, as rotate_extrude() would take a
+    // $fn above zero; with $fn = 0 it is 96, not what $fa and $fs would give
     ring_loft(concat([[r - 0.4, 0], [r, 0.6]], flanges, [[r, spindle_l - 0.6], [r - 0.4, spindle_l]]),
               max(3, floor($fn > 0 ? $fn : 96)));
 }
