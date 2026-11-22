@@ -126,11 +126,14 @@ corner_r = 4;
 ledge_l = 12;
 
 /* [Preview] */
-// Show the rolls and the tape in the assembled preview. Set false for a
-// product shot, where they would render as printed plastic.
+// Show the rolls and the tape in the assembled preview. They are drawn in
+// previews only: an exported STL of the assembly never contains them.
 show_payload = true;
 // Roll diameter drawn in the preview (mm).
 preview_roll_od = 50;
+// How the tape is drawn. "cut": after pressing and cutting, a strip on every
+// fin. "pulled": one taut tape per lane, just pulled and not yet pressed down.
+tape_pose = "cut"; // [cut, pulled]
 // Lift each part off its upstream neighbour by this much (mm) to show how
 // the joint goes together. 0 = assembled.
 explode = 0;
@@ -141,6 +144,9 @@ explode = 0;
 $fn = 96;
 
 /* [Hidden] */
+// Where the cutaway is cut: "lane" = the middle of the first lane, "key" =
+// through the joint's key (just inside a lane when the centre is a post).
+cut_at = "lane";
 // ---------------------------------------------------------------------------
 // Derived
 // ---------------------------------------------------------------------------
@@ -225,6 +231,8 @@ rib_gap = land_ribs > 1 ? (tape_w - 2 * rib_inset - land_ribs * land_rib_w) / (l
 
 // Guards: the brief's numbers and the print floors as render failures.
 assert(lanes >= 1 && lanes == floor(lanes), "lanes must be a whole number, 1 or more");
+assert(tape_pose == "cut" || tape_pose == "pulled", str("tape_pose must be \"cut\" or \"pulled\", not ", tape_pose));
+assert(cut_at == "lane" || cut_at == "key", str("cut_at must be \"lane\" or \"key\", not ", cut_at));
 assert(fins_per_rack >= 1 && fins_per_rack == floor(fins_per_rack), "fins_per_rack must be a whole number, 1 or more");
 assert(racks >= 1 && racks == floor(racks), "racks must be a whole number, 1 or more");
 assert(land_ribs >= 0 && land_ribs == floor(land_ribs), "land_ribs must be a whole number, 0 or more");
@@ -621,10 +629,12 @@ module rolls(od = roll_od_shown) {
             }
 }
 
-// The tape after the cuts: the feed from the roll under the gate to its
-// parked tail past fin 0, one strip centred on every later fin, and the
-// tails on the end cap's ledge. Drawn just under the lintel and a hair
-// above the lands, so it touches neither.
+// The tape. "cut" (the default) is the state after the cuts: the feed from
+// the roll under the gate to its parked tail past fin 0, one strip centred
+// on every later fin, and the tails on the end cap's ledge. "pulled" is the
+// moment before pressing: one taut run from the gate to the ledge, hovering
+// over the fins. Drawn just under the lintel and a hair above the lands, so
+// it touches neither, and 0.3 mm thick so that it shows.
 module tape(od = roll_od_shown) {
     t = 0.3;
     lift = 0.02;
@@ -634,20 +644,26 @@ module tape(od = roll_od_shown) {
     d = sqrt(dx * dx + dz * dz);
     th = atan2(dz, dx) - asin(od / 2 / d);                    // upper tangent off the roll
     tl = sqrt(d * d - od * od / 4);
-    // [x, z of the tape's underside]
-    path = [[px + tl * cos(th), pz + tl * sin(th)], [px - 0.2, pz - t - 0.1],
-            [x_gate - lintel_flat / 2, z_gate - t - lift], [x_gate + lintel_flat / 2, z_gate - t - lift],
-            [fin_x(0), z_land + lift], [fin_x(0) + strip_len / 2 - 1, z_land + lift]];
+    x_tail = fin_x(n) + ledge_l / 2 + 8;                      // where the tails end, past the ledge
+    // [x, z of the tape's underside]: off the roll and under the gate, then
+    // either down onto fin 0, or straight to the near edge of the ledge
+    feed = [[px + tl * cos(th), pz + tl * sin(th)], [px - 0.2, pz - t - 0.1],
+            [x_gate - lintel_flat / 2, z_gate - t - lift], [x_gate + lintel_flat / 2, z_gate - t - lift]];
+    path = concat(feed, tape_pose == "pulled"
+        ? [[fin_x(n) - ledge_l / 2, z_land + lift], [x_tail, z_land + lift]]
+        : [[fin_x(0), z_land + lift], [fin_x(0) + strip_len / 2 - 1, z_land + lift]]);
     for (k = [0 : lanes - 1]) {
         for (s = [0 : len(path) - 2])
             hull() for (p = [path[s], path[s + 1]])
                 translate([p[0], lane_c(k) - tape_w / 2, p[1]]) cube([eps, tape_w, t]);
-        if (n > 1)
-            for (i = [1 : n - 1])
-                translate([fin_x(i) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land + lift])
-                    cube([strip_len - 2, tape_w, t]);
-        translate([fin_x(n) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land + lift])
-            cube([strip_len / 2 - 1 + ledge_l / 2 + 8, tape_w, t]);
+        if (tape_pose == "cut") {
+            if (n > 1)
+                for (i = [1 : n - 1])
+                    translate([fin_x(i) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land + lift])
+                        cube([strip_len - 2, tape_w, t]);
+            translate([fin_x(n) - strip_len / 2 + 1, lane_c(k) - tape_w / 2, z_land + lift])
+                cube([x_tail - (fin_x(n) - strip_len / 2 + 1), tape_w, t]);
+        }
     }
 }
 
@@ -661,31 +677,42 @@ module assembly() {
         translate([racks * rack_l, 0, (racks + 1) * explode]) end_cap();
     }
     color("#8f2029") spindle_use();
-    if (show_payload) {
+    // $preview is false in a full render, which is what writes an STL: the
+    // rolls and the tape are illustration, and must never be exported as
+    // plastic.
+    if (show_payload && $preview) {
         color("#f1ead8") rolls();
         if (explode == 0) color("#ffffff", 0.75) tape();
     }
 }
 
-// Section through the middle of the first lane: the tape path from roll,
-// under the gate, onto the fins.
+// Section along the tape: the path from roll, under the gate, onto the
+// fins. Cut through the middle of the first lane, or (cut_at = "key")
+// through the joint's key — half a millimetre inside the next lane when the
+// centre of the rack is a post, so that lane's tape still shows beyond.
 module cutaway() {
+    y_cut = cut_at == "key" ? W / 2 + (lanes % 2 == 0 ? post_w / 2 + 0.5 : 0) : lane_c(0);
     difference() {
         assembly();
         color("#5a5a5a") translate([-cradle_l - heel_ext - 20, -1, -1])
-            cube([cradle_l + heel_ext + racks * rack_l + cap_l + 40, lane_c(0) + 1, 120]);
+            cube([cradle_l + heel_ext + racks * rack_l + cap_l + 40, y_cut + 1, 120]);
     }
 }
 
 // Two rack segments nested for storage: the second turned over and shifted
 // half a pitch, its fins in the first one's gaps, 0.2 mm of air between
 // them. `shift` exists for the fit proof's control.
-module nested_pair(shift = strip_len / 2) {
-    rack();
+module nested_pose(shift = strip_len / 2) {
     translate([shift, W, 2 * base_h + fin_h + post_rise + 0.2]) rotate([180, 0, 0]) children();
 }
+module nested_pair(shift = strip_len / 2) {
+    rack();
+    nested_pose(shift) children();
+}
+// Drawn in two tones, so the two segments read as two.
 module nested() {
-    color("#c0343c") nested_pair() rack();
+    color("#c0343c") rack();
+    color("#e9b3b7") nested_pose() rack();
 }
 module nest_fit(shift = strip_len / 2) {
     intersection() {

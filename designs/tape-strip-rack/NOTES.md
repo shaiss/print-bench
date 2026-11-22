@@ -92,10 +92,11 @@ Details that exist for a reason:
 - **Nozzle / layer:** 0.4 mm / 0.2 mm.
 - **Perimeters:** 2 or 3.
 - **Infill:** 15–20 %.
-- **Supports:** none. The gate lintel is meant to be bridged.
+- **Supports:** none. The gate lintel is meant to be bridged. Its underside is the surface the tape slides on, so trim any bridge whiskers before the first pull.
+- **Seam:** rear. An aligned seam that lands on a dovetail flank leaves a ridge there, and the coupon then reads it as too little clearance. Printability review, not yet checked on a print.
 - **Bed:** the rack is 207.8 mm long. On a 220 mm bed it leaves 6 mm at each end, so use a skirt distance of 2 mm, or no skirt, or turn the rack 45°.
 - **Order:** the joint coupon first, then the plate.
-- **Slicer estimate** (PrusaSlicer bare defaults, the gate's test-slice: 3 perimeters, 20 % infill): cradle 5 h 21 m / 60 g, spindle 48 m / 12 g, rack 6 h 02 m / 75 g each, end cap 1 h 24 m / 18 g, coupon 44 m / 10 g. Ten-fin set: about 242 g and 19 h 40 m at those settings.
+- **Slicer estimate** (PrusaSlicer bare defaults, the gate's test-slice: 3 perimeters, 20 % infill): cradle 5 h 22 m / 60 g, spindle 47 m / 12 g, rack 6 h 02 m / 75 g each, end cap 1 h 24 m / 18 g, coupon 44 m / 10 g. Ten-fin set: about 242 g and 19 h 40 m at those settings.
 - The end cap printed alone has only three post tips on its last layers; print it on the plate with the rack so the layers have time to cool.
 
 ## Print this first
@@ -125,23 +126,25 @@ The spindle is a loose running fit, not a tuned one, but roll cores vary: measur
 - `roll-fit` — two 62 × 19 mm rolls on a 25.4 mm core, on the spindle in the cradle: empty. `roll-fit-ctrl` — rolls 8 mm larger: interfere with the floor.
 - `nest-fit` — two rack segments nested for storage, 0.2 mm of air between them: empty. `nest-fit-ctrl` — the same without the half-pitch shift: interferes.
 
-## Gate evidence (2026-11-21, OpenSCAD 2021.01, PrusaSlicer 2.7)
+## Gate evidence
 
-`./scripts/gate.sh --slice tape-strip-rack` exits 0 in about 20 s.
+Two backends gate this design, and they do not always agree. The local gate runs OpenSCAD 2021.01. CI's render gate runs openscad-nightly with the Manifold backend, and is the one a merge depends on.
 
-| Part | printcheck | Test-slice |
-|---|---|---|
-| `cradle` | 100/100 | 5 h 22 m, 60.3 g |
-| `spindle` | 100/100 | 48 m, 12.2 g |
-| `rack` | 100/100 | 6 h 02 m, 75.5 g |
-| `end-cap` | 100/100 | 1 h 24 m, 18.1 g |
-| `tape-strip-rack-coupon` | 100/100 (2 bodies, intended) | 44 m, 9.9 g |
+| Part | Local, OpenSCAD 2021.01 | CI, nightly + Manifold, commit 2b96a24 | Test-slice (CI) |
+|---|---|---|---|
+| `cradle` | 100/100 | 100/100 | 5 h 22 m, 60.3 g |
+| `spindle` | 100/100 | 100/100 | 47 m, 12.2 g |
+| `rack` | 100/100 | 100/100 | 6 h 02 m, 75.5 g |
+| `end-cap` | 100/100 | 100/100 | 1 h 24 m, 18.1 g |
+| `tape-strip-rack-coupon` | 100/100 (2 bodies, intended) | 100/100 | 44 m, 9.9 g |
+
+CI's first run, on commit e3eb9f4, scored the cradle 67/100 and the spindle 59/100 while the local gate had both at 100/100: see Bugs caught. CI gates every later push again; the printcheck report on the pull request is the current record.
+
+Locally, `./scripts/gate.sh --slice tape-strip-rack` exits 0 in about 20 s (PrusaSlicer 2.7; its slice estimates are within a minute of CI's).
 
 Eleven fit proofs pass: five `empty`, six `interferes`. Plate: `build/tape-strip-rack-plate.3mf`, 4 separate objects for 4 declared parts. As merged the plate is spread over about 370 × 155 mm, mostly off a 220 mm bed; pressing Arrange in the slicer packs it onto one.
 
 `./scripts/check.sh` (whole tree) exits 0.
-
-These are the local numbers, on OpenSCAD 2021.01. CI gates the same parts on openscad-nightly with the Manifold backend, and its first run (commit e3eb9f4) failed the cradle and the spindle, which had passed here: see Bugs caught.
 
 Layer-by-layer check by review, sections every 0.2 mm against the layer below: the only thing that starts in mid-air on any part is the gate lintel, two regions 2.00 mm wide by 22.000 mm span at z = 37, each anchored at both ends. The slicer prints them as five bridge strands per lane and drops no feature on any part.
 
@@ -178,6 +181,8 @@ Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. 
   - *Spindle.* It was a single `rotate_extrude()` of a profile that touches the axis. The nightly exports a part that is one primitive as that primitive's raw mesh, and its raw revolve carries a zero-area triangle per side at each pole and along the axis: 384 of them, 190 of those duplicates. 2021.01 does not emit them. Fixed by building the spindle as one explicit polyhedron (`ring_loft`): every face a triangle, each end a fan about a centre point, 1,536 triangles with none degenerate and none duplicated. Volume within 0.05 mm³ of the old one.
   - *Why the emulation missed the cradle.* It fed Manifold single-precision meshes, and Manifold takes its merge tolerance from the precision of its input, so it merged the two edges before the union; and it did not round its output the way the STL writer does. Fed double-precision meshes, and with the six-digit rounding, it reproduces the failure on the old geometry — on the same edge, the nose face at z = 1.2, where CI reported it — and is clean on the new, for every part in both union orders. It cannot see the spindle's failure at all: a part that is one primitive never passes through a boolean.
   - The rule taken from it: a coordinate that comes from a 2D profile and one that comes from a 3D primitive must never be meant to coincide on a surface, and a part that is a single primitive must already be a clean mesh.
+  - Confirmed by CI on commit 2b96a24: all five gated meshes 100/100 on the nightly's Manifold backend.
+- **Rolls and tape in the exported STL.** The default render is the assembly with its payload drawn, and a full render exported the rolls and the tape as geometry: 22 of the 27 bodies in the file the site's workbench shows and offers for download. Caught by the owner, on the workbench. The payload is now drawn only when `$preview` is true, so previews keep it and no export can contain it: the default export is five bodies, the printed parts as assembled. It is still a picture of the assembly, not the file to slice; that is the plate.
 - **The carry claim.** "Pick it up by the cradle" was written from the straight-lift proof. Two reviewers independently found the pivot path a hanging rack can take. The claim is now what D3 says.
 - **A flat end-cap ledge** on the lightest, lift-free part (D6), **8 mm of threading room** (D9), and **a coupon narrower than the joint it stands in for** (its socket arms were 4 mm against 14 mm on a rack) — all caught by review, all fixed.
 

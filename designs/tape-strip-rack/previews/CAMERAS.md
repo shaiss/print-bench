@@ -34,6 +34,22 @@ review rounds must align).
   under the rack that is lowered onto it. The socket's shape is on the
   coupon shot.
 - **nested** — two rack segments stored together (`part="nested"`): one
-  turned over and shifted half a pitch, its fins in the other's gaps.
+  turned over and shifted half a pitch, its fins in the other's gaps. The
+  upper segment is drawn lighter so the two read as two (the camera did not
+  move).
 - **coupon** — the print-this-first joint coupon: the key stub (left) and
   the socket stub (right), each as wide as a rack, loose on the bed.
+- **section-pull** — orthographic cut through the joint's key, close on the
+  gate, the first joint and the first two fins (`part="cutaway"`,
+  `cut_at="key"`, `tape_pose="pulled"`; cut faces grey). The cut is half a
+  millimetre inside the second lane, so that lane's tape shows beyond it.
+  The tape is drawn just pulled and not yet pressed: off the roll, under
+  the lintel, then taut toward the end cap, clear of the fin tops. The
+  leaning hairline in the base is the clearance between the cradle's
+  drafted key (left) and the rack's socket (right). The tape is drawn
+  0.3 mm thick so that it shows; real tape is about a sixth of that, so the
+  real gap over the first fin is 2.8 mm against the 2.5 mm drawn.
+- **nested-side** — the nested pair in side elevation (`part="nested"`,
+  orthographic): the lower segment's fins pointing up, the upper segment's
+  pointing down between them, each post tip 0.2 mm short of the other
+  segment's base.

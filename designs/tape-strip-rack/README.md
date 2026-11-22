@@ -29,6 +29,7 @@ Assembled with two racks it takes 561 × 57 mm of table and stands 58 mm tall; w
 - **Perimeters:** 2 or 3
 - **Infill:** 15–20 %
 - **Supports:** none, and leave them off. The gate on the cradle is two 22 mm bridges, which is what it is meant to be
+- **Seam:** rear ("Back" in Bambu Studio). That keeps the seam on a side face and out of the dovetail, where a ridge would read as a tight joint on the coupon
 - **Orientation:** as exported. Cradle, rack and end cap sit on their bases; the spindle stands on end
 - **Bed:** every part fits 220 × 220 mm, but the rack is 208 mm long and leaves 6 mm at each end. On a 220 mm bed set the skirt distance to 2 mm (or print without one), or turn the rack 45°
 - **Filament and time:** about 242 g and 19 h 40 m for the ten-fin set on PrusaSlicer's own slow defaults (3 perimeters, 20 % infill); a rack segment alone is 75 g and 6 hours. Two perimeters and 15 % infill take about 18 % off the filament and 13 % off the time (198 g, 17 h 10 m). Slightly thinner fins would not help: they are already almost all perimeter
@@ -81,11 +82,13 @@ All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer s
 
 **Load.** Slide two rolls onto the spindle, one each side of the flange, with the tape coming off the **top** of each roll toward the rack, sticky side down. A roll put on backwards feeds sticky side up. Hold the rolls, not the spindle, and lower it into the slots in the cradle walls; it goes in up-and-back and comes out the same way.
 
-**Thread.** Let each tape end drop behind the gate, fish it forward through the opening underneath, and stick it to the first fin.
+**Thread.** Before the first use, run a fingernail along the underside of the gate and trim off any bridge whiskers: the tape slides against it on every pull. Then let each tape end drop behind the gate, fish it forward through the opening underneath, and stick it to the first fin.
 
 ![Section through one lane: the tape leaves the roll, passes under the gate and lands on the fins](previews/section.png)
 
 **Pull.** Press down on the palm pad with one hand. With the other, take both tape ends off the first fin, a thumb across both so they stay a lane apart, and pull them along the rack above the posts to just past the end cap. Lower them between the end cap's posts and stick the ends to its ledge. The tape now hovers a millimetre or two over the fins: run a fingertip down each lane to press it onto every fin.
+
+![Just pulled, not yet pressed: the tape runs taut from under the gate and clears the fin tops](previews/section-pull.png)
 
 **Cut.** Snip both tapes midway between each pair of fins, and between the last fin and the end cap. Scissors with 60 mm blades reach across both lanes; shorter ones take one snip a lane, from either side.
 
@@ -97,6 +100,8 @@ All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer s
 
 **Store.** Two rack segments nest: turn one over, shift it half a pitch, and its fins sit in the other's gaps (228 × 57 × 50 mm for the pair).
 
-![Two rack segments nested for storage](previews/nested.png)
+![Two rack segments nested for storage, the upper one drawn lighter](previews/nested.png)
+
+![The same pair from the side: each segment's fins sit in the other's gaps](previews/nested-side.png)
 
 **What it will not do.** It does not cut. With rolls it weighs about as much as two tapes pull (roughly 3 N against 2–8 N), so it slides unless you hold the palm pad; stick-on bumper feet on the flat underside help but do not replace the hand. Changing one roll lifts both. It takes tape on a 1 in core up to 62 mm across; packing tape and 3 in cores do not fit.
