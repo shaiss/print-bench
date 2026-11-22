@@ -1,0 +1,251 @@
+"""Parity + unit tests for the deliverer's protected-path policy port.
+
+The bash ``is_protected_path`` in ``scripts/design-run-deliver.sh`` is the
+source of truth. This suite (a) pins the Python port's own behaviour and
+(b) extracts the bash functions and compares them on a fixture list so the
+two cannot drift silently.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from backlog_burn import protected as prot
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DELIVER_SH = REPO_ROOT / "scripts" / "design-run-deliver.sh"
+
+# Paths the deliverer must refuse / accept. Keep in sync with the case arms
+# in is_protected_path (issues #869 / #879).
+PROTECTED_FIXTURES = [
+    ".github/workflows/ci.yml",
+    ".github",
+    "./.github/workflows/ci.yml",  # leading ./ normalized
+    "sub/.github/x",  # any-depth .github segment
+    "docs/.github/workflows/evil.yml",
+    "scripts/design-run-deliver.sh",
+    "scripts",
+    "tools/backlog-burn/src/backlog_burn/select.py",
+    "tools",
+    ".claude/skills/ship-issue/SKILL.md",
+    "docs/.claude/hooks/evil.sh",
+    "CLAUDE.md",
+    "docs/CLAUDE.md",
+    "CLAUDE.local.md",
+    "AGENTS.md",
+    "site/AGENTS.md",
+    ".mcp.json",
+    "designs/foo/.mcp.json",
+    ".cursorrules",
+    ".cursor/rules/x.md",
+    "docs/.cursor/foo",
+    "../escape",
+    "/etc/passwd",
+]
+
+SAFE_FIXTURES = [
+    "designs/phone-stand/phone-stand.scad",
+    "docs/licensing.md",
+    "docs/contributing/autonomy.md",
+    "lib/printability.scad",
+    "people/reeve.md",
+    "styles/ovodyo/style.scad",
+    "templates/README.md",
+    "PM.md",
+    "LICENSE",
+    "README.md",
+    "printer.conf",
+    "site/index.html",
+]
+
+
+def test_python_marks_protected_fixtures():
+    for path in PROTECTED_FIXTURES:
+        assert prot.is_protected_path(path), f"expected protected: {path!r}"
+
+
+def test_python_keeps_safe_fixtures():
+    for path in SAFE_FIXTURES:
+        assert not prot.is_protected_path(path), f"expected safe: {path!r}"
+
+
+def _extract_bash_functions() -> str:
+    text = DELIVER_SH.read_text(encoding="utf-8")
+    chunks = []
+    for name in ("normalize_repo_path", "is_protected_path"):
+        m = re.search(
+            rf"^{name}\(\)\s*\{{.*?\n\}}\n",
+            text,
+            re.MULTILINE | re.DOTALL,
+        )
+        assert m, f"{name} missing from {DELIVER_SH}"
+        chunks.append(m.group(0))
+    return "\n".join(chunks)
+
+
+def test_python_matches_bash_deliverer():
+    """Parity against the live bash functions (single source of truth)."""
+    fns = _extract_bash_functions()
+    script = textwrap.dedent(
+        """\
+        set -euo pipefail
+        %s
+        path="$1"
+        if is_protected_path "$path"; then
+          echo protected
+        else
+          echo safe
+        fi
+        """
+    ) % fns
+    for path in PROTECTED_FIXTURES + SAFE_FIXTURES:
+        proc = subprocess.run(
+            ["bash", "-c", script, "_", path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, (
+            f"bash is_protected_path failed for {path!r}: {proc.stderr}"
+        )
+        bash_verdict = proc.stdout.strip()
+        py_verdict = "protected" if prot.is_protected_path(path) else "safe"
+        assert py_verdict == bash_verdict, (
+            f"drift on {path!r}: python={py_verdict} bash={bash_verdict}"
+        )
+
+
+def test_extract_scope_paths_from_touches():
+    paths = prot.extract_scope_paths(
+        "thicken the brim",
+        "Touches: designs/phone-stand/phone-stand.scad\n",
+    )
+    assert paths == {"designs/phone-stand/phone-stand.scad"}
+
+
+def test_extract_scope_paths_none_when_empty():
+    assert prot.extract_scope_paths("improve something", "no paths here") is None
+
+
+def test_extract_scope_paths_none_on_glob():
+    assert prot.extract_scope_paths("x", "Touches: docs/**\n") is None
+
+
+def test_bare_top_dir_word_is_not_a_free_text_path():
+    # Prose "scripts" / "tools" must not extract; a real path still does.
+    assert prot.extract_scope_paths(
+        "improve the scripts", "we need better tools for this"
+    ) is None
+    assert prot.extract_scope_paths(
+        "fix", "edit scripts/design-run-deliver.sh please"
+    ) == {"scripts/design-run-deliver.sh"}
+
+
+def test_dotted_and_nested_protected_prefixes_extract():
+    # Bugbot on #953: lookbehind used to treat ``/`` as a path char, so
+    # ``./scripts/...``, ``./CLAUDE.md``, and ``sub/.github/...`` never
+    # extracted — a safe Touches line plus one of those still selected.
+    assert prot.extract_scope_paths("x", "edit ./scripts/gate.sh") == {
+        "./scripts/gate.sh"
+    }
+    assert prot.extract_scope_paths("x", "see ./CLAUDE.md") == {"./CLAUDE.md"}
+    assert prot.extract_scope_paths(
+        "x", "also sub/.github/workflows/ci.yml"
+    ) == {"sub/.github/workflows/ci.yml"}
+    assert prot.extract_scope_paths("x", "nested sub/CLAUDE.md") == {
+        "sub/CLAUDE.md"
+    }
+    # Nested ``foo/scripts/bar`` must NOT look like a repo-root scripts/ path.
+    assert (
+        prot.extract_scope_paths("x", "mention foo/scripts/bar casually")
+        is None
+    )
+
+
+def test_safe_touches_plus_dotted_protected_still_skips():
+    reason = prot.protected_scope_reason(
+        "docs fix",
+        "Touches: docs/licensing.md\nPlease also update ./scripts/check.sh\n",
+    )
+    assert reason is not None
+    assert "protected path" in reason
+
+
+def test_touches_bare_scripts_still_counts():
+    # An explicit Touches line may name a bare top-dir; that IS a path.
+    assert prot.extract_scope_paths("x", "Touches: scripts\n") == {"scripts"}
+
+
+def test_path_scan_over_cap_returns_none_fail_closed():
+    # LOW-A on #953: over the cap must return None (fail closed), never
+    # truncate and miss a protected path past the cut. Reviewer's probe
+    # shape: benign path + padding + protected path after the cap.
+    import time
+
+    pad = "x " * 10240
+    body = "docs/readme.md\n" + pad + "\nscripts/design-run-deliver.sh\n"
+    assert len(body) > prot._PATH_SCAN_CAP
+    t0 = time.perf_counter()
+    assert prot.extract_scope_paths("x", body) is None
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 1.0, f"over-cap should return None quickly: {elapsed:.3f}s"
+
+
+def test_path_scan_over_cap_worst_case_shapes_are_fast():
+    # Reviewer probe_cap.py: '!' / '*' / U+200B at 64KB must not scan.
+    import time
+
+    for ch in ("!", "*", "\u200b"):
+        body = ch * 65536
+        t0 = time.perf_counter()
+        assert prot.extract_scope_paths("x", body) is None
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 1.0, (
+            f"over-cap {ch!r} body too slow: {elapsed:.3f}s"
+        )
+
+
+def test_path_scan_at_cap_worst_case_regex_shape():
+    # LOW-1 on #953: real worst-case regex input at the cap (not abcd/ x N).
+    # Reviewer accepts a remaining 3–4s worst case below the cap.
+    import time
+
+    prefix = "please edit scripts/design-run-deliver.sh before the noise\n"
+    for ch in ("!", "*", "\u200b"):
+        body = (prefix + (ch * prot._PATH_SCAN_CAP))[: prot._PATH_SCAN_CAP]
+        assert len(body) == prot._PATH_SCAN_CAP
+        t0 = time.perf_counter()
+        paths = prot.extract_scope_paths("x", body)
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 5.0, (
+            f"at-cap {ch!r} scan too slow: {elapsed:.3f}s"
+        )
+        assert paths == {"scripts/design-run-deliver.sh"}
+
+
+def test_protected_scope_reason_safe():
+    assert (
+        prot.protected_scope_reason(
+            "docs fix", "Touches: docs/licensing.md\n"
+        )
+        is None
+    )
+
+
+def test_protected_scope_reason_protected():
+    reason = prot.protected_scope_reason(
+        "CLAUDE.md: restore newline", ""
+    )
+    assert reason is not None
+    assert "protected path" in reason
+
+
+def test_protected_scope_reason_unknown():
+    reason = prot.protected_scope_reason("mystery", "no paths")
+    assert reason is not None
+    assert "could not be determined" in reason

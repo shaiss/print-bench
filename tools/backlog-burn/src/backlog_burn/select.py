@@ -65,6 +65,16 @@ no PR, no decline, re-picked every hour). It is a decline *for picking
 purposes only*: the settle job still goes red on that death, and the
 cooldown **expires** so a later firing can retry. Owner activity re-arms.
 
+A sixth exclusion: an issue whose scope (title / ``Touches:`` / body path
+tokens) resolves to a path ``scripts/design-run-deliver.sh`` refuses —
+``.github/**`` (any depth), ``**/.claude/**``, ``scripts/**``, ``tools/**``,
+and the agent-instruction files — is skipped, because the agent can
+"succeed" while the deliverer pushes nothing and settle turns the run red
+(the #885 / #886 / #889 shape). Fail closed for every required label: when
+the path set cannot be determined the issue is skipped too, so an opaque
+brief cannot burn a firing the deliverer would refuse. See
+:mod:`backlog_burn.protected`.
+
 The skill re-verifies all of this before it touches a line of code, so this
 module is a best-effort *pre-filter*. Its only jobs are to never hand the run
 an issue that is plainly already taken, and — the hard cap — to never hand it
@@ -77,6 +87,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+from .protected import extract_scope_paths, is_protected_path
 
 # The label a human must add for an issue to be eligible for unattended
 # shipping. Nothing is eligible until someone opts it in, so the routine is
@@ -470,6 +482,15 @@ def exclusion_reason(
     dependencies), then burn-cooldown (neither delivered nor declined). (A
     declined thread usually carries a withdrawn lock, which is why the lock
     guard passes it through to here.)
+
+    The protected-path guard sits just after the opt-in / decision checks and
+    ahead of the claim guards: a brief that can only touch paths the
+    deliverer refuses should never burn a firing, even when nothing else
+    claims it. A positively identified protected path is refused for every
+    routine that shares this selector. Fail-closed unknown scope (no
+    concrete paths / only globs) applies for EVERY required label — an
+    opaque brief cannot burn a firing the deliverer would refuse (Security
+    on #953; previously only ``autonomy-ok`` failed closed).
     """
     number = issue["number"]
     labels = issue.get("labels", []) or []
@@ -477,6 +498,22 @@ def exclusion_reason(
         return f"not labelled {required_label!r}"
     if decision_label in labels:
         return f"awaiting a human decision ({decision_label})"
+    scope_paths = extract_scope_paths(
+        issue.get("title", "") or "",
+        issue.get("body", "") or "",
+    )
+    if scope_paths is None:
+        return (
+            "scope paths could not be determined "
+            "(fail closed — title/Touches/body name no concrete paths)"
+        )
+    for path in sorted(scope_paths):
+        if is_protected_path(path):
+            return (
+                f"touches protected path {path!r} "
+                "(deliverer refuses .github/**, **/.claude/**, scripts/**, "
+                "tools/**, and agent-instruction files)"
+            )
     if _has_issue_branch(branches, number, branch_ahead_by):
         return f"a claude/issue-{number}-* branch already exists"
     if _open_pr_claims(open_prs, number):

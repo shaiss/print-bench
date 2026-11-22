@@ -654,6 +654,16 @@ if ! ./scripts/backlog-burn-ship-check.sh --selftest; then
   fail=1
 fi
 
+# backlog-burn agent-diag allowlist (MED-A on #953): denied tool names are
+# exact Claude Code tools or mcp__<ns>__<tool> (else "(other)"); unique names
+# capped at 12; string-denial first-token branch is gone; credential-shaped
+# mcp__ names collapse to "(other)". Wired here so CI /preflight cannot drift
+# from the copies in capture.sh and the upload-diag schema.
+echo "-- backlog-burn-agent-diag selftest: scripts/backlog-burn-agent-diag.sh --selftest"
+if ! ./scripts/backlog-burn-agent-diag.sh --selftest; then
+  fail=1
+fi
+
 # backlog-burn agent Bash deny backstop (issue #1022): loads the real
 # .claude/backlog-burn-settings.json and asserts — under Claude Code's
 # matcher, not a grep — that gh issue comment/edit, gh label, and
