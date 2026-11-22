@@ -1,0 +1,3 @@
+# Hold every part to a 220 x 220 mm bed, the brief's target, so a parameter
+# change cannot quietly outgrow it (printcheck's default is 250 x 210 x 220).
+--build-volume 220x220x250

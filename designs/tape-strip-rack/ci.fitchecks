@@ -1,0 +1,39 @@
+# Boolean fit checks — rendered by gate.sh, never printed or sliced.
+# Each `empty` proof is real volume clearance, not a surface kiss, and the
+# manifest carries controls that must interfere or the proofs prove nothing.
+#
+# The joint, on two stubs carrying the production key and socket:
+# joint-fit: posed as joined (end faces joint_gap apart). Zero facets =
+#   joint_clear (0.2 mm per face) of air all round the drafted dovetail.
+# joint-fit-ctrl: the socket cut at -0.15 mm clearance — must interfere.
+# joint-pull: the socket stub pulled 3 mm off along the tape — must
+#   interfere: the key's tip is wider than the socket's mouth, so the joint
+#   cannot pull apart.
+# joint-lift: the key stub lifted 3 mm with the socket stub left behind —
+#   must interfere: a straight lift of a key part catches the socket part.
+# joint-drop: the socket stub lifted 3 mm — must be empty: that is the one
+#   way the joint comes apart.
+joint-fit         empty
+joint-fit-ctrl    interferes
+joint-pull        interferes
+joint-lift        interferes
+joint-drop        empty
+# spindle-fit: the spindle laid in its saddle pockets, against the whole
+#   cradle. Zero facets = it seats (0.3 mm radial, 0.8 mm at each end).
+# spindle-fit-ctrl: the hub grown 1.2 mm on diameter — twice the saddle
+#   clearance — must jam in the pockets.
+spindle-fit       empty
+spindle-fit-ctrl  interferes
+# roll-fit: two rolls at the brief's maximum (62 mm outer, 25.4 mm core,
+#   19 mm wide) on the spindle in the cradle. Zero facets = they clear the
+#   floor, both walls, the gate and the spindle flange.
+# roll-fit-ctrl: rolls 8 mm larger, which must hit the floor.
+roll-fit          empty
+roll-fit-ctrl     interferes
+# nest-fit: two rack segments nested for storage — one turned over and
+#   shifted half a pitch, 0.2 mm of air between them. Zero facets = the
+#   fins of each sit in the gaps of the other.
+# nest-fit-ctrl: the same pair without the half-pitch shift — fin on fin,
+#   must interfere.
+nest-fit          empty
+nest-fit-ctrl     interferes

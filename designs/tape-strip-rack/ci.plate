@@ -1,0 +1,16 @@
+# Production parts for the multi-object 3MF plate deliverable,
+# build/tape-strip-rack-plate.3mf (scripts/plate.sh, gate.sh --check).
+#
+# The parts print SEPARATELY and assemble by hand. A single STL of the
+# assembly imports into a slicer as one fused body and prints welded, so the
+# plate — four distinct objects — is the deliverable and the assembled render
+# stays a preview.
+#
+# One of each: cradle + spindle + one rack + end-cap is a complete, working
+# five-fin rack. Duplicate `rack` in the slicer (or print it again) for the
+# ten-fin assembly the preview shows. The joint coupon and the fit proofs are
+# not plate parts.
+cradle
+spindle
+rack
+end-cap

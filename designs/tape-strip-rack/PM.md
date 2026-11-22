@@ -1,0 +1,111 @@
+# tape-strip-rack — product charter
+
+## The product, in one paragraph
+
+A desk rack that turns one pull of tape into a row of equal strips, for someone wrapping a pile of gifts with one hand holding the paper down. Two rolls ride a spindle at one end; both tapes run under a hold-down gate and along ten fins; scissors cut mid-gap; each strip stays stuck by its middle to a fin with both ends free. The one thing it must do well: **a strip is there to grab, one-handed, when the other hand is busy.**
+
+## Non-negotiables
+
+| # | Constraint | Number | Source | Reopens if |
+|---|---|---|---|---|
+| N1 | Blade-free. The page never says or implies it cuts tape | 0 printed cutters; "scissors" on the page | brief #1062; D1 in NOTES | a field-tested tear edge exists (B1) |
+| N2 | Every part prints upright and without supports | 4 parts, 0 supports; the only bridge is the 22 mm gate lintel | brief #1062 | never |
+| N3 | Every part fits a 220 mm bed, and the page says how tight the rack is | longest part 207.8 mm; `printcheck.args` holds 220 × 220 | brief #1062; print review | the owner names a smaller bed |
+| N4 | The joint is a parameter with a print-this-first coupon | `joint_clear` 0.2 mm; coupon 44 min, 10 g | repo convention | never — it is the design's one tuned fit |
+| N5 | The deliverable is the multi-object plate, never the assembled render | 4 objects in `build/tape-strip-rack-plate.3mf` | the multi-part-fuse field test | never |
+| N6 | The page claims only what was measured: it needs scissors, a steadying hand and a 1 in core; a hanging rack is held by friction; the tape must be pressed down | stated in Print settings and Assembly & use | reviews for #1062 | a field test supports a stronger claim |
+| N7 | No name or logo, and no measured dimension, taken from the commercial reference. The fin count (10) and the pitch (40 mm, about twice the tape width) are estimates read off the owner's photo; every other number is a stated default | 0 names, 0 logos, 0 measurements; 2 photo estimates | brief #1062, Open questions | never |
+
+## Out of scope
+
+**Deferred** — ranked in the backlog below.
+
+**Never** — a metal blade (it would need hardware and a guard, and the page would have to carry a safety warning for a gift-wrapping tool); a merged single STL of the parts (N5); a claim that printed teeth cut polypropylene tape without a field test that shows it.
+
+## v1 — definition of done
+
+- [x] `gate.sh --slice tape-strip-rack` green, locally and on CI's nightly Manifold backend (commits 2b96a24 to 2029a9e): cradle, spindle, rack, end-cap and the joint coupon all 100/100 and sliced
+- [x] `ci.fitchecks`: eleven proofs — joint as joined, pulled, lifted and dropped; spindle; rolls; nesting — with their controls
+- [x] `build/tape-strip-rack-plate.3mf` builds as 4 distinct objects
+- [x] Every *Must fit / hold* row of the brief re-derived from the exported meshes (NOTES, Brief audit)
+- [x] Three independent reviews of the built geometry (layer-by-layer print truth, use walkthrough, code) with every should-fix item closed
+- [x] "Print this first" procedure in NOTES and on the page
+- [x] Frozen previews committed and `readme-gate.sh` green
+- [ ] One real print recorded in NOTES — the six questions under Session-resume context (post-merge; nothing has been printed)
+- [ ] The owner's publish decision (Open decisions)
+
+## Product page & shots (art direction)
+
+**Page promise.** Pull once, press, snip, and eighteen strips are waiting — and it says plainly which of those steps are yours.
+
+**Mechanism honesty.** Nothing folds, snaps or prints in place, and every part but the spindle is shown as it prints: the assembled hero is also the print orientation of three of the four parts, and the spindle prints on end. The design ships `ci.fitchecks`, so `readme-gate.sh` requirement 12 applies and the `contact-sheet` is embedded. The `joint` shot shows the parts lifted apart, so the page cannot hide how they go together.
+
+**Shot list — tier 1 (real renders).**
+
+| Shot | What it sells | View | Look | Pose (`-D`) |
+|---|---|---|---|---|
+| product-hero | the whole rack as an object you would want on the table | 3/4 from the roll end | red, satin | `show_payload=false` |
+| hero | what one pull leaves behind: two tapes, eighteen strips | 3/4 | preview colours | `show_payload=true` |
+| cradle | rolls, spindle and the gate the tapes pass under | close 3/4 | preview colours | `show_payload=true` |
+| pad | the palm pad the steadying hand presses | from behind and above the rolls | preview colours | `show_payload=true` |
+| section | the tape path: roll, under the gate, onto the fins | side, orthographic | preview colours | `part="cutaway" show_payload=true` |
+| fins | ribbed lands and guide posts | close 3/4 | preview colours | `show_payload=false` |
+| joint | the drafted dovetail key, under a rack lifted off it | low, from the side | preview colours | `explode=16 show_payload=false` |
+| nested | two rack segments stored fin-into-gap, in two tones | 3/4 | preview colours | `part="nested"` |
+| nested-side | the same pair, read as two combs | side, orthographic | preview colours | `part="nested"` |
+| section-pull | the tape just pulled, clear of the fin tops, and the drafted key in its socket | side, orthographic, close | preview colours | `part="cutaway" cut_at="key" tape_pose="pulled" show_payload=true` |
+| joint-pair | the joint as a whole pair: key on the table, socket lifted straight off it | 3/4 from the key side | two tones | `part="joint-pair"` |
+| coupon | what to print first | 3/4 | plain | coupon wrapper |
+| contact-sheet | the assembled four-view; three of the four parts as they print | standard | preview colours | default |
+
+The product hero carries no scale cue on purpose: it is the clean studio look, and the assembled size is stated on the page under *What you get* (triage, round 2).
+
+**AI tiers.** None: no `product-still.conf`, `lifestyle.conf` or `motion.conf`.
+
+## Backlog, ranked by user value
+
+Rows are in rank order. The B numbers are names, kept from the first ranking so that earlier reviews still point at the right item.
+
+| # | Item | Why this rank | Cost |
+|---|---|---|---|
+| B3 | A presser that seats both tapes on a fin in one push | the press is what makes the product: an unpressed strip is tape lying on a fin, and the first snip frees it. Twenty fingertip presses a pull, across ribs made to grip; a two-finger sweep catches the post tips | one small part, with its own fit questions; after the first print. Fallback if it never lands: rounder post tips |
+| B1 | A pull-over tear edge on the cradle nose, shipped as a coupon experiment first | scissors are the one thing the user must bring, and put down between gifts; matte and paper tape may tear on a printed edge | one coupon, a field test, then a cradle change |
+| B2 | A positive latch on the joint (a snap detent on the flanks) | a hanging rack is held by friction only, and the end cap must be held down while its tails are peeled | a flexure in the socket, a second tuned fit, a coupon. A cheaper candidate for the end cap alone: a thumb-width flat to press on |
+| B4 | Independent hubs with a centre wall | changing one empty roll currently lifts both | a second spindle part and a cradle variant |
+| B7 | Debossed load-direction mark on the cradle walls | a roll loaded backwards feeds sticky side up and fails several steps later, in the middle of a pull, with only a sentence on the page to prevent it | text or icon; thin-wall risk in printcheck |
+| B5 | A coin ballast trough in the palm pad | the rack is about 3.3 N with rolls against a 2–8 N pull; ballast helps but two lanes still need a hand | a trough and a lid |
+| B6 | Taller entry posts on the end cap, or a two-tape pull tab | both tapes must be landed 26.4 mm apart in a funnel that forgives 2.9 mm | geometry on one part |
+
+## Open decisions
+
+| Question | Blocking? | Assumption if unanswered |
+|---|---|---|
+| The reference appears to be a commercial product whose listings carry patent claims (unconfirmed, from search-result text). Should a functional look-alike be published on the public site? | The owner's call at merge | Built as an independent parametric model with no branding and no copied dimensions; not merged by the build session |
+| 40 mm or 50 mm strips as the default? | No | 40 mm, as estimated from the photo |
+| Is 26 mm of fin height enough for the owner's scissors? | No | Yes; `fin_h` is a parameter |
+
+## Decision log
+
+| Date | Decision | Reason |
+|---|---|---|
+| 2026-11-21 | No printed cutter; scissors cut mid-gap | The reference is very likely blade-free, and printed teeth were estimated not to press-cut polypropylene tape |
+| 2026-11-21 | Every part prints upright | With no teeth, the on-side rack had no remaining advantage and forced an unprintable socket on the cradle |
+| 2026-11-21 | Drafted drop-in dovetail, key on the downstream end | One clearance for every joint; it cannot pull apart along the rack |
+| 2026-11-21 | Hold-down gate 3 mm above the tape plane | A level pull clears the fins; the tape cannot lift the spindle. The price is a fingertip pass to press the tape down |
+| 2026-11-21 | Style `none` | The style pack's required rounding does not apply to a spindle or a finned rack, and there is no waiver |
+| 2026-11-21 | Feet recommended, not modelled | A foot recess is a flagged overhang; a flat underside takes stick-on dots |
+| 2026-11-21 | Palm pad, rounded free ends and a nesting proof added | The owner asked for the design to be refined; the rack slides unless held and a hand on the cradle lands on the rolls |
+| 2026-11-21 | Joint draft 10° to 8°; carrying claim withdrawn | Review found a hanging rack is held by friction only; a shallower taper holds better, and the page now says to carry it from underneath |
+| 2026-11-21 | 20 mm between the largest roll and the gate | Review measured 8 mm, with solid walls either side: no room to thread a full roll |
+| 2026-11-21 | End-cap ledge ribbed like the fins | Review measured the flat ledge at ten times a fin's contact on the lightest, lift-free part |
+| 2026-11-22 | Walls start at a depth of their own; the spindle is one lofted polyhedron | CI's Manifold backend scored the cradle 67 and the spindle 59 on parts the local gate passed. The cradle is the same solid; the spindle is within 0.05 mm³ |
+| 2026-11-22 | Presser (B3) up to second, load mark (B7) up to fifth | The customer review walked one session: twenty presses a pull against ten snips; and a backwards roll fails silently, steps later |
+| 2026-11-22 | Seam at the rear and a whisker-trim step on the page; two preview shots added (`section-pull`, `nested-side`), `nested` drawn in two tones | Printability review: an aligned seam in the dovetail reads as a tight joint; the gate's underside is a working surface; the nested shot read as one part and no shot showed the tape before pressing |
+| 2026-11-22 | Presser (B3) first, ahead of the tear edge (B1) | Second customer review: the press is the step that makes a strip a strip, so it outranks the tool the user already owns. This reverses the first round's ruling that B1 stays first |
+| 2026-11-22 | The page says what the coupon cannot test, what the gate bridge will look like, and to suspect the seam before `hub_clear` | Triage, round 2: three places where a stranger would otherwise tune or reprint for the wrong reason |
+| 2026-11-22 | No scale cue in the product hero | The clean studio shot is the intent; both reviewers asked to leave the frozen camera alone |
+| 2026-11-22 | Rolls and tape are off by default (`show_payload = false`) | The owner found them in the STL the site's workbench exports, and asked for a switch that defaults to off. The default render holds printed parts only; the shots that show the tape ask for it |
+| 2026-11-22 | Page truthing, round 3: the hover as calculated (2.8 mm down to 0.2), "stuck by its middle" for "hanging", the second rack's cost where it is chosen, the end cap not printed alone, one rack and a tape test after the coupon, the gate's underside as two steps, where the rack lives | Triage, round 3: each is a place where the page said less, or other, than the model does |
+| 2026-11-22 | `land_ribs` advice written by contact area, the other way round from the review's sentence | More ribs is more grip (2.4 mm each under a 19 mm tape) and the flat top is all of it, so a strip that lifts off wants more ribs or 0, not fewer |
+| 2026-11-22 | One new shot, `joint-pair`; no reviewed camera moved | The printability review found `joint` cuts off both ends of the pair. Declined, so they are not raised again: reframing `joint`, `section-pull`, `cradle` or `pad` (frozen); any change to the palm pad's 30 mm (deliberate: the hand lands on plastic, not on the rolls); a press-as-you-go sentence for curling tape; B7 above fifth |
+| 2026-11-22 | `lanes` is 1 or 2; the spindle's end play is guarded | Automated review: a third roll cannot pass a flange on a one-piece spindle, and a shallow saddle pocket lets the spindle's far end out |

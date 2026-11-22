@@ -1,0 +1,9 @@
+# Printable parts to render and gate in CI. The default render is the
+# assembled preview, never a deliverable. Every part is exported in its print
+# orientation: cradle, rack and end-cap as they stand in use, the spindle on
+# end. The joint coupon is auto-discovered by filename
+# (tape-strip-rack-coupon.scad) and needs no line here.
+cradle
+spindle
+rack
+end-cap
