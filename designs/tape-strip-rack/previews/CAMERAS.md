@@ -33,7 +33,7 @@ review rounds must align).
   lifted 16 mm off its upstream neighbour (`explode=16`): the drafted
   dovetail key standing on the table, wider at the bed than at the top,
   under the rack that is lowered onto it. The socket's shape is on the
-  coupon shot.
+  joint-pair shot and the coupon shot.
 - **nested** — two rack segments stored together (`part="nested"`): one
   turned over and shifted half a pitch, its fins in the other's gaps. The
   upper segment is drawn lighter so the two read as two (the camera did not
@@ -54,3 +54,11 @@ review rounds must align).
   orthographic): the lower segment's fins pointing up, the upper segment's
   pointing down between them, each post tip 0.2 mm short of the other
   segment's base.
+- **joint-pair** — the joint as a complete pair (`part="joint-pair"`): the
+  coupon's two stubs, which carry the production key and socket. The key
+  stub stands on the table, its dovetail key whole from neck to tip. The
+  socket stub is lifted 20 mm straight off it, the one way the joint comes
+  apart, and drawn lighter so the two read as two; its socket shows whole,
+  open at the end face and at the top. Added for the printability review,
+  which found that `joint` cuts off both ends of the pair; `joint` stays as
+  it was.

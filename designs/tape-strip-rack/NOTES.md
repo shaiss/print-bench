@@ -2,7 +2,7 @@
 
 ## Goal
 
-A blade-free multi-strip tape rack for gift wrapping: two rolls on a drop-in spindle, a row of thin fins, and eighteen 40 mm strips per pull — snipped mid-gap with scissors and left hanging by their middles, ready to grab one-handed.
+A blade-free multi-strip tape rack for gift wrapping: two rolls on a drop-in spindle, a row of thin fins, and eighteen 40 mm strips per pull — snipped mid-gap with scissors and left on the fins, each stuck by its middle with both ends free, ready to grab one-handed.
 
 Brief: issue #1062, filed from a product photo the owner supplied. Built in the same session at the owner's instruction, with no interview round: every number in the brief is a stated default. The owner then asked for the design to be refined; the palm pad, the rounded free ends and the nesting check come from that request.
 
@@ -34,7 +34,7 @@ One entry file, `tape-strip-rack.scad`, with a `part` selector. The default, `as
 - Deliverable: the four of them as one multi-object plate, `build/tape-strip-rack-plate.3mf` (`ci.plate`). One of each is already a working five-fin rack; print `rack` twice for the ten fins the preview shows.
 - Coupon: `tape-strip-rack-coupon.scad` sets `part = "joint-coupon"`.
 - Fit proofs, never printed (`ci.fitchecks`): `joint-fit`, `joint-pull`, `joint-lift`, `joint-drop`, `spindle-fit`, `roll-fit`, `nest-fit`, and their `-ctrl` twins.
-- `cutaway`, `nested`, and the `explode`, `show_payload`, `tape_pose` and `cut_at` parameters exist only for the preview cameras.
+- `cutaway`, `nested`, `joint-pair`, and the `explode`, `show_payload`, `tape_pose` and `cut_at` parameters exist only for the preview cameras.
 
 ## Key decisions
 
@@ -56,7 +56,7 @@ Details that exist for a reason:
 - the key's tip corners are cut back 0.8 mm and the socket's are left sharp, so a seam blob in the corner has room;
 - the socket rim has a 0.5 mm lead-in.
 
-**D4 — A hold-down gate at the cradle nose.** Both tapes pass under a lintel between the rolls and the first fin. The tape then meets the rack at a fixed height whatever the roll diameter, and the pull on the spindle runs downhill to the gate, into the seat, so an open saddle is enough (an assert holds the tape at least 5° below the saddle's lean). The gate sits 3 mm *above* the tape plane (`gate_rise`), so a level pull clears every fin. The cost is that the tape does not lie on the fins by itself: lowered onto the end cap's ledge, a taut tape hovers 2.8 mm over the first fin and 0.3 mm over the last until a fingertip presses it down. A gate below the tape plane would lay the tape on every fin, but it would also drag the adhesive across the first fin during the pull. The lintel is a 2 mm flat flared at 50°, so it prints as two 22 mm bridges, one per lane, and then grows.
+**D4 — A hold-down gate at the cradle nose.** Both tapes pass under a lintel between the rolls and the first fin. The tape then meets the rack at a fixed height whatever the roll diameter, and the pull on the spindle runs downhill to the gate, into the seat, so an open saddle is enough (an assert holds the tape at least 5° below the saddle's lean). The gate sits 3 mm *above* the tape plane (`gate_rise`), so a level pull clears every fin. The cost is that the tape does not lie on the fins by itself: lowered onto the end cap's ledge, a taut tape hovers 2.8 mm over the first fin and 0.2 mm over the tenth until a fingertip presses it down (the tape's underside runs straight from the lintel's edge at x = −5, where it is the tape's 0.05 mm below the lintel's 37, to the ledge's near edge at x = 414, z = 34; with one rack it is 2.6 mm over the first fin and 0.5 mm over the fifth). Earlier versions of these notes gave the last figure as 0.3. A gate below the tape plane would lay the tape on every fin, but it would also drag the adhesive across the first fin during the pull. The lintel is a 2 mm flat flared at 50°, so it prints as two 22 mm bridges, one per lane, and then grows.
 
 **D5 — Tapered fins with buttress posts.** A fin is loaded across its layer lines, the weak direction. It is 3.2 mm at the land and 5.2 mm at the root, and each guide post is a column 7.2 mm long at the root that runs past the land into an 8 mm horn. Each post is one lofted solid.
 
@@ -64,7 +64,7 @@ Details that exist for a reason:
 
 **D7 — An end cap with a tail ledge, one pitch past the last fin.** The two tape tails need somewhere to be stuck down so both hands are free to press and cut. Putting the ledge a full pitch past the last fin means the last fin still yields a full-length strip.
 
-**D8 — One spindle, blind saddle pockets.** A plain 24.6 mm hub for a 25.4 mm core, a 29 mm flange between the rolls with 40° shoulders, standing on end to print. The saddles are 2.8 mm pockets in 4.4 mm walls; the 1.6 mm skin stops the spindle walking out sideways. The slots lean back 25°. The spindle has 1.6 mm of end play in total, because it goes in blind with a roll on each side.
+**D8 — One spindle, blind saddle pockets.** A plain 24.6 mm hub for a 25.4 mm core, a 29 mm flange between the rolls with 40° shoulders, standing on end to print. The saddles are 2.8 mm pockets in 4.4 mm walls; the 1.6 mm skin stops the spindle walking out sideways. The slots lean back 25°. The spindle has 1.6 mm of end play in total, because it goes in blind with a roll on each side. Pushed to one side it keeps 1.2 mm of its other end in that pocket; the render stops if that would be no more than the 0.6 mm end chamfer. Being one piece, it takes one roll or two: a third would sit between two flanges that its core cannot pass, so `lanes` is 1 or 2.
 
 **D9 — 20 mm between the largest roll and the gate.** Review measured the first cut of this at 8.1 mm and pointed out that the side walls are solid, so that slot is the only way to the back of the gate with the rolls seated. It is now a finger's width for a full 62 mm roll.
 
@@ -92,10 +92,10 @@ Details that exist for a reason:
 - **Nozzle / layer:** 0.4 mm / 0.2 mm.
 - **Perimeters:** 2 or 3.
 - **Infill:** 15–20 %.
-- **Supports:** none. The gate lintel is meant to be bridged, 22 mm per lane, strands running from post to post (bridging angle 90° with the cradle as exported, if the slicer does not choose it). A slight wave underneath is expected. Its underside is the surface the tape slides on, so trim any bridge whiskers before the first pull.
+- **Supports:** none. The gate lintel is meant to be bridged, 22 mm per lane, strands running from post to post (bridging angle 90° with the cradle as exported, if the slicer does not choose it). A slight wave underneath is expected. Its underside is the surface the back of the tape slides on, so trim any bridge whiskers before the first pull, then run a spare length of tape under it and scrape down anything that catches. The strands of the bridge lie across the tape's path.
 - **Seam:** rear. An aligned seam that lands on a dovetail flank leaves a ridge there, and the coupon then reads it as too little clearance. The same ridge on the spindle's hub takes up some of the 0.4 mm of air under a roll's core, so a tight roll means look at the seam before `hub_clear`. Printability review, not yet checked on a print.
 - **Bed:** the rack is 207.8 mm long. On a 220 mm bed it leaves 6 mm at each end, so use a skirt distance of 2 mm, or no skirt, or turn the rack 45°.
-- **Order:** the joint coupon first, then the plate.
+- **Order:** the joint coupon first; then one rack on its own, to try the tape on it (75 g and 6 hours against 242 g and 19 h 40 m for the set); then the rest.
 - **Slicer estimate** (PrusaSlicer bare defaults, the gate's test-slice: 3 perimeters, 20 % infill): cradle 5 h 22 m / 60 g, spindle 47 m / 12 g, rack 6 h 02 m / 75 g each, end cap 1 h 24 m / 18 g, coupon 44 m / 10 g. Ten-fin set: about 242 g and 19 h 40 m at those settings.
 - The end cap printed alone has only three post tips on its last layers; print it on the plate with the rack so the layers have time to cool.
 
@@ -130,7 +130,7 @@ The spindle is a loose running fit, not a tuned one, but roll cores vary: measur
 
 Two backends gate this design, and they do not always agree. The local gate runs OpenSCAD 2021.01. CI's render gate runs openscad-nightly with the Manifold backend, and is the one a merge depends on.
 
-| Part | Local, OpenSCAD 2021.01 | CI, nightly + Manifold, commit 2b96a24 | Test-slice (CI) |
+| Part | Local, OpenSCAD 2021.01 | CI, nightly + Manifold, commits 2b96a24 to 2029a9e | Test-slice (CI) |
 |---|---|---|---|
 | `cradle` | 100/100 | 100/100 | 5 h 22 m, 60.3 g |
 | `spindle` | 100/100 | 100/100 | 47 m, 12.2 g |
@@ -138,7 +138,7 @@ Two backends gate this design, and they do not always agree. The local gate runs
 | `end-cap` | 100/100 | 100/100 | 1 h 24 m, 18.1 g |
 | `tape-strip-rack-coupon` | 100/100 (2 bodies, intended) | 100/100 | 44 m, 9.9 g |
 
-CI's first run, on commit e3eb9f4, scored the cradle 67/100 and the spindle 59/100 while the local gate had both at 100/100: see Bugs caught. CI gates every later push again; the printcheck report on the pull request is the current record.
+CI's first run, on commit e3eb9f4, scored the cradle 67/100 and the spindle 59/100 while the local gate had both at 100/100: see Bugs caught. CI's render gate gave the same five scores on each of the five commits from 2b96a24 to 2029a9e, and the whole CI run finished green on 8e3aa78 and on 2029a9e. No gated mesh has changed since 2b96a24: later commits changed the page, the previews and the parameter guards, and the exports are the same triangles. A commit cannot record its own CI result, so for the head the printcheck report on the pull request is the record.
 
 Locally, `./scripts/gate.sh --slice tape-strip-rack` exits 0 in about 20 s (PrusaSlicer 2.7; its slice estimates are within a minute of CI's).
 
@@ -165,7 +165,7 @@ Sections and bounding boxes taken from the gated STLs with trimesh.
 | Largest part | ≤ 210 long, ≤ 200 tall | rack 207.75 × 57.20 × 42.00; cradle 58.00 tall |
 | Assembled length | about 500 | 30 + 97.7 + 200 + 200 + 33 = 560.7 |
 | Strip length a parameter, 30–60 | 30–60 | 40–60 as shipped, 36 with `ledge_l = 8`; under 35.2 breaks the brief's own 28 mm gap |
-| "A taut tape lies on every fin top in one pull" | lies on the fins | not met, by design: it hovers 2.8 mm over the first fin and 0.3 mm over the last until pressed (D4) |
+| "A taut tape lies on every fin top in one pull" | lies on the fins | not met, by design: it hovers 2.8 mm over the first fin and 0.2 mm over the tenth until pressed (D4) |
 | "Snug enough to carry the chain when lifted" | carries the chain | a straight lift catches at 1.4 mm; a hanging rack is held by friction only, untested (D3) |
 
 Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. The fin nearest the rolls keeps the feed parked; each of the other nine fins holds one 40 mm strip per lane; the ledge keeps a tail of about 26 mm plus whatever was in the fingers. Nine strips a lane, eighteen a pull. The plate as shipped, with one rack, gives four a lane, eight a pull.
@@ -183,6 +183,7 @@ Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. 
   - The rule taken from it: a coordinate that comes from a 2D profile and one that comes from a 3D primitive must never be meant to coincide on a surface, unless the value is one every grid holds exactly, as with x = 0 on the nose face; and a part that is a single primitive must already be a clean mesh.
   - Confirmed by CI on commit 2b96a24: all five gated meshes 100/100 on the nightly's Manifold backend. The first CI run to finish green end to end is on commit 8e3aa78; the one on 2b96a24 was cut short by the next push after its render gate had passed.
   - A later review of the fix found two parameters with no guard: a `roll_od_max` under 47 mm with the default core, or a 3 in core, thinned the wall behind the saddle slot to a sliver, or cut through it, and still scored 100/100. The render now stops when less than 1.2 mm of wall top is left there, and when `floor_t` reaches `base_h`.
+- **Two more parameters with no guard,** found by an automated review of the pull request. `lanes = 3` passed every assert and drew a spindle with two flanges, and the middle roll's 25.4 mm core passes neither 29 mm flange: a part that scores 100/100 and cannot be loaded. `lanes` is now 1 or 2. And a `saddle_pocket` at or under the spindle's end play let the spindle's far end out of its pocket when pushed to one side; the render now stops unless more than the end chamfer stays in. Neither touches a default.
 - **Rolls and tape in the exported STL.** The default render was the assembly with its payload drawn, and a full render exported the rolls and the tape as geometry: 22 of the 27 bodies in the file the site's workbench shows and offers for download. Caught by the owner, on the workbench. `show_payload` now defaults to false, as the owner asked: the default render, the workbench and its download hold the five printed bodies, and the preview shots that show the tape ask for it in `cameras.conf`. A first fix drew the payload only when `$preview` was true; it kept the previews as they were but left the workbench's `show_payload` switch doing nothing, because the workbench only ever does full renders. The default export is still a picture of the assembly, not the file to slice; that is the plate.
 - **The carry claim.** "Pick it up by the cradle" was written from the straight-lift proof. Two reviewers independently found the pivot path a hanging rack can take. The claim is now what D3 says.
 - **A flat end-cap ledge** on the lightest, lift-free part (D6), **8 mm of threading room** (D9), and **a coupon narrower than the joint it stands in for** (its socket arms were 4 mm against 14 mm on a rack) — all caught by review, all fixed.
@@ -190,11 +191,11 @@ Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. 
 ## Session-resume context
 
 - Entry: `tape-strip-rack.scad`. Coupon: `tape-strip-rack-coupon.scad`. Style: none.
-- Branch `ccr-8541794c-mwyuwk`; the draft PR closes #1062.
+- Branch `ccr-8541794c-mwyuwk`; PR #1063 closes #1062.
 - Nothing has been printed. The first field test should answer, in this order:
   1. does the joint coupon fit at 0.20, with about 0.6 mm of push-pull play;
   2. assemble cradle and one rack, lift by the cradle and shake: does the rack stay on;
-  3. does a strip stay on a ribbed land through the cut, and does rolling it off sideways lift the rack or the end cap;
+  3. does a strip stay on a ribbed land through the cut, and does rolling it off sideways lift the rack or the end cap; then leave one strip parked on a fin for a week and try it again (does it still come off cleanly, and has any strip let go by itself). One rack printed alone answers this before the full set. `land_ribs` is the knob: each rib is 2.4 mm of contact under a 19 mm tape, so 1 to 5 ribs is 13 % to 63 %, and 0 is a flat top, all of it;
   4. does the lintel bridge cleanly;
   5. can both lanes be cut in one snip with your scissors (the far tape's far edge is 51 mm in), or is it one snip a lane;
   6. does the rack need feet on your table.

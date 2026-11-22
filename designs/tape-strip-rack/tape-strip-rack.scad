@@ -15,7 +15,7 @@
 // What to render: the assembled preview, one of the four printable parts,
 // the print-this-first joint coupon, a boolean fit proof (ci.fitchecks —
 // never printed), or a preview-only pose.
-part = "assembly"; // [assembly, cradle, spindle, rack, end-cap, joint-coupon, joint-fit, joint-fit-ctrl, joint-pull, joint-lift, joint-drop, spindle-fit, spindle-fit-ctrl, roll-fit, roll-fit-ctrl, nest-fit, nest-fit-ctrl, nested, cutaway]
+part = "assembly"; // [assembly, cradle, spindle, rack, end-cap, joint-coupon, joint-fit, joint-fit-ctrl, joint-pull, joint-lift, joint-drop, spindle-fit, spindle-fit-ctrl, roll-fit, roll-fit-ctrl, nest-fit, nest-fit-ctrl, nested, joint-pair, cutaway]
 
 /* [Tape — what it must hold] */
 // Tape width (mm). 19 = 3/4 in desk tape. The lane formula takes 12 to 25;
@@ -26,8 +26,9 @@ tape_w = 19;
 core_id = 25.4;
 // Largest roll outer diameter the cradle clears (mm).
 roll_od_max = 62;
-// Rolls side by side (count). Each gets its own lane. One lane needs a
-// narrower joint: -D joint_neck=6 -D joint_tip=13.
+// Rolls side by side: 1 or 2. Each gets its own lane. The spindle is one
+// piece, so it cannot take a third. One lane needs a narrower joint:
+// -D joint_neck=6 -D joint_tip=13.
 lanes = 2;
 
 /* [Strips] */
@@ -206,6 +207,7 @@ saddle_land = x_slot_rear - (-cradle_l + 5);         // 8.8
 cradle_in_w = W - 2 * post_w;                        // 48.4
 spindle_play = 1.6;                                  // axial float of the spindle, total
 spindle_l = cradle_in_w + 2 * saddle_pocket - spindle_play;   // 52.4
+spindle_end_ch = 0.6;                                // length of the chamfer on each end of the spindle
 flange_d = core_id + 3.6;                            // 29
 flange_flat = 1.2;
 flange_cone = (flange_d - hub_d) / 2 / tan(40);      // 2.62: a 40-deg-from-vertical shoulder
@@ -238,7 +240,12 @@ rib_inset = 1.2;                // outermost land rib to the tape edge
 rib_gap = land_ribs > 1 ? (tape_w - 2 * rib_inset - land_ribs * land_rib_w) / (land_ribs - 1) : tape_w;
 
 // Guards: the brief's numbers and the print floors as render failures.
-assert(lanes >= 1 && lanes == floor(lanes), "lanes must be a whole number, 1 or more");
+// The spindle is one piece with a flange between each pair of rolls, and a
+// roll cannot pass a flange: with three lanes the middle roll could not be
+// put on at all.
+assert(lanes == 1 || lanes == 2,
+       str("lanes must be 1 or 2, not ", lanes, ": the spindle is one piece, and a roll between two of its",
+           " flanges could not be put on"));
 assert(tape_pose == "cut" || tape_pose == "pulled", str("tape_pose must be \"cut\" or \"pulled\", not ", tape_pose));
 assert(cut_at == "lane" || cut_at == "key", str("cut_at must be \"lane\" or \"key\", not ", cut_at));
 assert(fins_per_rack >= 1 && fins_per_rack == floor(fins_per_rack), "fins_per_rack must be a whole number, 1 or more");
@@ -279,6 +286,13 @@ assert(joint_reach + 3 <= strip_len / 2 - post_root_l / 2,
 assert(joint_reach + 3 <= strip_len / 2 - cap_post_root_l / 2,
        str("the socket runs under the end cap's ledge — lower ledge_l (now ", ledge_l, ") or joint_depth"));
 assert(post_w - saddle_pocket >= 1.2, str("only ", post_w - saddle_pocket, " mm of wall outside the saddle pocket — under 1.2 mm"));
+// Pushed against one wall, the spindle keeps saddle_pocket - spindle_play of
+// its other end in that pocket. More than the end chamfer must stay in, or
+// the end rests on its chamfer, or on nothing.
+assert(round(1000 * (saddle_pocket - spindle_play - spindle_end_ch)) > 0,     // compared in whole microns
+       str("pushed against one wall, the spindle has ", saddle_pocket - spindle_play, " mm of its other end in the",
+           " saddle pocket; it needs more than its ", spindle_end_ch, " mm end chamfer. Deepen saddle_pocket (now ",
+           saddle_pocket, ") or lower spindle_play (now ", spindle_play, ")."));
 assert(lane_w <= 30, str("the gate bridges ", lane_w, " mm per lane — over 30 mm it will sag without support"));
 assert(z_gate - base_h >= 15, "the threading window under the gate is under 15 mm tall");
 assert(max(tape_elev(core_id + 4), tape_elev(roll_od_max)) <= saddle_lean - 5,
@@ -628,7 +642,8 @@ module spindle(grow = 0) {
         : [];
     // a whole number of sides, 3 or more, as rotate_extrude() would take a
     // $fn above zero; with $fn = 0 it is 96, not what $fa and $fs would give
-    ring_loft(concat([[r - 0.4, 0], [r, 0.6]], flanges, [[r, spindle_l - 0.6], [r - 0.4, spindle_l]]),
+    ring_loft(concat([[r - 0.4, 0], [r, spindle_end_ch]], flanges,
+                     [[r, spindle_l - spindle_end_ch], [r - 0.4, spindle_l]]),
               max(3, floor($fn > 0 ? $fn : 96)));
 }
 // The spindle laid in its saddles.
@@ -762,6 +777,15 @@ module joint_coupon() {
     translate([18 + joint_reach + 6, coupon_w / 2, 0]) socket_stub();
 }
 
+// Preview only: the same two stubs as a pair, the socket stub lifted
+// straight off the key stub — the one way the joint comes apart — and
+// drawn lighter, so the key and the socket each read whole.
+joint_pair_lift = 20;
+module joint_pair() {
+    color("#c0343c") key_stub();
+    color("#e9b3b7") translate([0, 0, joint_pair_lift]) socket_stub();
+}
+
 // Fit proofs for the joint, on the two stubs posed as joined.
 // As joined: empty at the production clearance; a negative clearance is the
 // control that must interfere.
@@ -811,6 +835,7 @@ else if (part == "roll-fit-ctrl") roll_fit(2 * roll_floor_clear + 2);
 else if (part == "nest-fit") nest_fit();
 else if (part == "nest-fit-ctrl") nest_fit(shift = 0);
 else if (part == "nested") nested();
+else if (part == "joint-pair") joint_pair();
 else if (part == "cutaway") cutaway();
 else if (part == "assembly") assembly();
 else assert(false, str("unknown part: ", part));

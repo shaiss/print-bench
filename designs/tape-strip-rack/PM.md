@@ -24,7 +24,7 @@ A desk rack that turns one pull of tape into a row of equal strips, for someone 
 
 ## v1 — definition of done
 
-- [x] `gate.sh --slice tape-strip-rack` green, locally and on CI's nightly Manifold backend (commit 2b96a24): cradle, spindle, rack, end-cap and the joint coupon all 100/100 and sliced
+- [x] `gate.sh --slice tape-strip-rack` green, locally and on CI's nightly Manifold backend (commits 2b96a24 to 2029a9e): cradle, spindle, rack, end-cap and the joint coupon all 100/100 and sliced
 - [x] `ci.fitchecks`: eleven proofs — joint as joined, pulled, lifted and dropped; spindle; rolls; nesting — with their controls
 - [x] `build/tape-strip-rack-plate.3mf` builds as 4 distinct objects
 - [x] Every *Must fit / hold* row of the brief re-derived from the exported meshes (NOTES, Brief audit)
@@ -54,6 +54,7 @@ A desk rack that turns one pull of tape into a row of equal strips, for someone 
 | nested | two rack segments stored fin-into-gap, in two tones | 3/4 | preview colours | `part="nested"` |
 | nested-side | the same pair, read as two combs | side, orthographic | preview colours | `part="nested"` |
 | section-pull | the tape just pulled, clear of the fin tops, and the drafted key in its socket | side, orthographic, close | preview colours | `part="cutaway" cut_at="key" tape_pose="pulled" show_payload=true` |
+| joint-pair | the joint as a whole pair: key on the table, socket lifted straight off it | 3/4 from the key side | two tones | `part="joint-pair"` |
 | coupon | what to print first | 3/4 | plain | coupon wrapper |
 | contact-sheet | the assembled four-view; three of the four parts as they print | standard | preview colours | default |
 
@@ -67,11 +68,11 @@ Rows are in rank order. The B numbers are names, kept from the first ranking so 
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
-| B3 | A presser that seats both tapes on a fin in one push | the press is what makes the product: an unpressed strip is tape lying on a fin, and the first snip frees it. Twenty fingertip presses a pull, across ribs made to grip | one small part, with its own fit questions; after the first print |
+| B3 | A presser that seats both tapes on a fin in one push | the press is what makes the product: an unpressed strip is tape lying on a fin, and the first snip frees it. Twenty fingertip presses a pull, across ribs made to grip; a two-finger sweep catches the post tips | one small part, with its own fit questions; after the first print. Fallback if it never lands: rounder post tips |
 | B1 | A pull-over tear edge on the cradle nose, shipped as a coupon experiment first | scissors are the one thing the user must bring, and put down between gifts; matte and paper tape may tear on a printed edge | one coupon, a field test, then a cradle change |
-| B2 | A positive latch on the joint (a snap detent on the flanks) | a hanging rack is held by friction only, and the end cap must be held down while its tails are peeled | a flexure in the socket, a second tuned fit, a coupon |
+| B2 | A positive latch on the joint (a snap detent on the flanks) | a hanging rack is held by friction only, and the end cap must be held down while its tails are peeled | a flexure in the socket, a second tuned fit, a coupon. A cheaper candidate for the end cap alone: a thumb-width flat to press on |
 | B4 | Independent hubs with a centre wall | changing one empty roll currently lifts both | a second spindle part and a cradle variant |
-| B7 | Debossed load-direction mark on the cradle walls | a roll loaded backwards feeds sticky side up and fails several steps later, with only a sentence on the page to prevent it | text or icon; thin-wall risk in printcheck |
+| B7 | Debossed load-direction mark on the cradle walls | a roll loaded backwards feeds sticky side up and fails several steps later, in the middle of a pull, with only a sentence on the page to prevent it | text or icon; thin-wall risk in printcheck |
 | B5 | A coin ballast trough in the palm pad | the rack is about 3.3 N with rolls against a 2–8 N pull; ballast helps but two lanes still need a hand | a trough and a lid |
 | B6 | Taller entry posts on the end cap, or a two-tape pull tab | both tapes must be landed 26.4 mm apart in a funnel that forgives 2.9 mm | geometry on one part |
 
@@ -104,3 +105,7 @@ Rows are in rank order. The B numbers are names, kept from the first ranking so 
 | 2026-11-22 | The page says what the coupon cannot test, what the gate bridge will look like, and to suspect the seam before `hub_clear` | Triage, round 2: three places where a stranger would otherwise tune or reprint for the wrong reason |
 | 2026-11-22 | No scale cue in the product hero | The clean studio shot is the intent; both reviewers asked to leave the frozen camera alone |
 | 2026-11-22 | Rolls and tape are off by default (`show_payload = false`) | The owner found them in the STL the site's workbench exports, and asked for a switch that defaults to off. The default render holds printed parts only; the shots that show the tape ask for it |
+| 2026-11-22 | Page truthing, round 3: the hover as calculated (2.8 mm down to 0.2), "stuck by its middle" for "hanging", the second rack's cost where it is chosen, the end cap not printed alone, one rack and a tape test after the coupon, the gate's underside as two steps, where the rack lives | Triage, round 3: each is a place where the page said less, or other, than the model does |
+| 2026-11-22 | `land_ribs` advice written by contact area, the other way round from the review's sentence | More ribs is more grip (2.4 mm each under a 19 mm tape) and the flat top is all of it, so a strip that lifts off wants more ribs or 0, not fewer |
+| 2026-11-22 | One new shot, `joint-pair`; no reviewed camera moved | The printability review found `joint` cuts off both ends of the pair. Declined, so they are not raised again: reframing `joint`, `section-pull`, `cradle` or `pad` (frozen); any change to the palm pad's 30 mm (deliberate: the hand lands on plastic, not on the rolls); a press-as-you-go sentence for curling tape; B7 above fifth |
+| 2026-11-22 | `lanes` is 1 or 2; the spindle's end play is guarded | Automated review: a third roll cannot pass a flange on a one-piece spindle, and a shallow saddle pocket lets the spindle's far end out |

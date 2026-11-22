@@ -1,8 +1,8 @@
 # tape-strip-rack — eighteen tape strips from one pull
 
-A desk rack for wrapping a pile of gifts. Pull two tapes once along a row of fins, press them down, snip between the fins with scissors, and eighteen equal strips are left hanging by their middles — each one ready to grab with one hand while the other holds the paper. It is blade-free: nothing on it cuts, so you need scissors. Eighteen is with two rack segments, as pictured; the plate prints one, which gives eight.
+A desk rack for wrapping a pile of gifts. Pull two tapes once along a row of fins, press them down, snip between the fins with scissors, and eighteen equal strips are left on the fins, each stuck by its middle with both ends free — ready to grab with one hand while the other holds the paper. It is blade-free: nothing on it cuts, so you need scissors. Eighteen is with two rack segments, as pictured; the plate prints one, which gives eight.
 
-![The assembled rack: cradle, two rack segments and the end cap](previews/product-hero.png)
+![The assembled rack in red PLA: cradle, two rack segments and the end cap](previews/product-hero.png)
 
 ![One pull, cut: two tapes parked at the first fin and a strip on every fin after it](previews/hero.png)
 
@@ -10,7 +10,7 @@ A desk rack for wrapping a pile of gifts. Pull two tapes once along a row of fin
 
 - `cradle` — holds the spindle and both rolls, with a gate the tapes pass under and a palm pad behind the rolls (136 × 57 × 58 mm)
 - `spindle` — one hub for two rolls on a 1 in (25.4 mm) core (Ø 29 × 52 mm)
-- `rack` — five fins at a 40 mm pitch; print it twice for ten fins (208 × 57 × 42 mm)
+- `rack` — five fins at a 40 mm pitch (208 × 57 × 42 mm). Print it twice for ten fins; each one is about 75 g and 6 hours
 - `end-cap` — closes the last joint and gives the two tape tails a ledge to stick to (33 × 57 × 42 mm)
 - `tape-strip-rack-coupon` — the print-this-first joint coupon (44 minutes, 10 g)
 
@@ -31,9 +31,10 @@ Assembled with two racks it takes 561 × 57 mm of table and stands 58 mm tall wi
 - **Supports:** none, and leave them off. The gate on the cradle is two 22 mm bridges, which is what it is meant to be. Its underside may come out with a slight wave; that is normal for a bridge this long. The strands should run from post to post, across the lane: if your slicer lays them on a diagonal, set its bridging angle to 90° with the cradle as exported
 - **Seam:** rear ("Back" in Bambu Studio). That keeps the seam on a side face and out of the dovetail, where a ridge would read as a tight joint on the coupon
 - **Orientation:** as exported. Cradle, rack and end cap sit on their bases; the spindle stands on end
+- **End cap:** print it on the plate with the other parts, not alone. Its last layers are three post tips 1.6 mm square, and with nothing else on the bed they get no time to cool
 - **Bed:** every part fits 220 × 220 mm, but the rack is 208 mm long and leaves 6 mm at each end. On a 220 mm bed set the skirt distance to 2 mm (or print without one), or turn the rack 45°
 - **Filament and time:** about 242 g and 19 h 40 m for the ten-fin set on PrusaSlicer's own slow defaults (3 perimeters, 20 % infill); a rack segment alone is 75 g and 6 hours. Two perimeters and 15 % infill take about 18 % off the filament and 13 % off the time (198 g, 17 h 10 m). Slightly thinner fins would not help: they are already almost all perimeter
-- **Print the joint coupon first** (below)
+- **Print the joint coupon first, then one rack** (below)
 
 Nothing here has been printed yet. The geometry passes the repo's printability gate and a test-slice, and was checked layer by layer for anything that starts in mid-air. The fits are calculated, not field-tested.
 
@@ -43,13 +44,18 @@ Nothing here has been printed yet. The geometry passes the repo's printability g
 
 The parts join with a drop-in dovetail, and its clearance is the one fit worth tuning to your printer.
 
+![The joint as a pair: the key stub on the table and the socket stub, drawn lighter, lifted straight off it](previews/joint-pair.png)
+
 1. Print `tape-strip-rack-coupon.scad`. It gives you a key stub and a socket stub.
 2. Lower the socket stub onto the key stub. It should drop on under light finger pressure.
 3. With both flat on the table, push and pull the socket stub along the joint. About 0.6 mm of play is right.
 4. Will not go on: raise `joint_clear` by 0.05 mm and reprint. Clearly more than 1 mm of play: lower it by 0.05.
-5. Print the plate at the value that worked.
+5. At the value that worked, print one `rack` on its own and try your tape on it (below).
+6. Then print the plate. Its rack is your second segment; delete it from the plate if five fins are enough.
 
 The coupon tunes the fit of the dovetail and nothing else. It cannot tell you whether a rack hanging off a lifted cradle stays on: that is held by friction, and a stub is too short to load the joint the way a rack does. The first full print answers it.
+
+The coupon also says nothing about the tape, which is why step 5 prints one `rack` (75 g, 6 hours) before the rest. Lay a length of your tape over its five fins, press it down, snip between the fins, and roll a strip off sideways. That is the one thing this design is for, a strip that stays on through the cut and comes off cleanly in one hand, and nothing here has measured it. The rack is under a third of the set's filament, and it is a part you need anyway.
 
 Measure the core of your own tape roll as well. `core_id` assumes 25.4 mm.
 
@@ -63,11 +69,11 @@ Measure the core of your own tape roll as well. `core_id` assumes 25.4 mm.
 | `core_id` | 25.4 mm | inner diameter of the roll's core |
 | `roll_od_max` | 62 mm | largest roll the cradle clears. 47 or more with the default core; the render stops below that |
 | `joint_clear` | 0.2 mm | clearance in the dovetail, each face. The coupon tunes this |
-| `land_ribs` | 3 | ribs per lane on each fin top. Fewer makes a strip easier to peel; 0 makes the top flat, for tape that will not stay put |
+| `land_ribs` | 3 | ribs per lane on each fin top, 0 to 5. Each rib is 2.4 mm of grip under a 19 mm tape: fewer makes a strip easier to peel, more holds it harder, and 0 makes the top flat, which holds hardest |
 | `fin_h` | 26 mm | height of the tape above the base: room for scissors and fingers |
 | `heel_l` | 30 mm | length of the palm pad behind the rolls; 0 removes it |
 | `show_payload` | false | draws the rolls and the tape on the assembly, to see how the tape runs. Leave it off for any file you export: they are not parts |
-| `lanes` | 2 | rolls side by side. One lane needs a narrower joint (`joint_neck=6`, `joint_tip=13`); the render stops and says so |
+| `lanes` | 2 | rolls side by side: 1 or 2. The spindle is one piece, so a third roll could not be put on, and the render stops at 3. One lane needs a narrower joint (`joint_neck=6`, `joint_tip=13`); the render stops and says so |
 
 All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer sections; override on the command line, for example `-D strip_len=50 -D fins_per_rack=4`. The fit proofs and the cutaway are selected with `part`.
 
@@ -85,11 +91,16 @@ All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer s
 
 **Load.** Slide two rolls onto the spindle, one each side of the flange, with the tape coming off the **top** of each roll toward the rack, sticky side down. A roll put on backwards feeds sticky side up. Hold the rolls, not the spindle, and lower it into the slots in the cradle walls; it goes in up-and-back and comes out the same way. If a roll feels tight on the spindle, suspect a seam ridge on the hub before you change `hub_clear`.
 
-**Thread.** Before the first use, run a fingernail along the underside of the gate and trim off any bridge whiskers: the tape slides against it on every pull. Then let each tape end drop behind the gate, fish it forward through the opening underneath, and stick it to the first fin.
+**Before the first use.** The underside of the gate is a bridge, and the back of the tape slides against it on every pull.
+
+- Run a fingernail along it and trim off any bridge whiskers.
+- Pull a spare length of your tape under the gate a few times. A bridge's strands leave ridges across the tape's path: if the tape catches or scuffs, scrape the underside with the edge of a card until it runs clean.
+
+**Thread.** Let each tape end drop behind the gate, fish it forward through the opening underneath, and stick it to the first fin.
 
 ![Section through one lane: the tape leaves the roll, passes under the gate and lands on the fins](previews/section.png)
 
-**Pull.** Press down on the palm pad with one hand. With the other, take both tape ends off the first fin, a thumb across both so they stay a lane apart, and pull them along the rack above the posts to just past the end cap. Lower them between the end cap's posts and stick the ends to its ledge. The tape now hovers a millimetre or two over the fins: run a fingertip down each lane to press it onto every fin.
+**Pull.** Press down on the palm pad with one hand. With the other, take both tape ends off the first fin, a thumb across both so they stay a lane apart, and pull them along the rack above the posts to just past the end cap. Lower them between the end cap's posts and stick the ends to its ledge. The tape now hovers over the fins, about 2.8 mm above the first and sloping down to 0.2 mm, a near touch, above the tenth (with one rack, 2.6 mm down to 0.5 above the fifth): run a fingertip down each lane to press it onto every fin.
 
 ![Just pulled, not yet pressed: the tape runs taut from under the gate and clears the fin tops](previews/section-pull.png)
 
@@ -99,7 +110,11 @@ All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer s
 
 **Grab.** Take a strip by a free end and roll it off its fin sideways. Hold the end cap down with a fingertip when you peel the tails off its ledge: it is the lightest part and lifts straight off.
 
+If the strips do not behave, `land_ribs` is the knob. A strip, or a parked tape end, that slides or lifts off its fin wants more grip: 4 or 5 ribs, or 0 for a flat top. A strip that will not let go, or lifts the rack when you peel it, wants less: 2 ribs, or 1.
+
 ![Fin tops: three ribs per lane and a guide post at each lane edge](previews/fins.png)
+
+**Where it lives.** While it holds strips, keep it at the back of the table, against a wall. A sleeve dragged across the fins takes strips with it.
 
 **Store.** Two rack segments nest: turn one over, shift it half a pitch, and its fins sit in the other's gaps (228 × 57 × 50 mm for the pair).
 
