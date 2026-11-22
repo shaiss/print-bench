@@ -1,6 +1,6 @@
 # tape-strip-rack — eighteen tape strips from one pull
 
-A desk rack for wrapping a pile of gifts. Pull two tapes once along a row of fins, press them down, snip between the fins with scissors, and eighteen equal strips are left hanging by their middles — each one ready to grab with one hand while the other holds the paper. It is blade-free: nothing on it cuts, so you need scissors.
+A desk rack for wrapping a pile of gifts. Pull two tapes once along a row of fins, press them down, snip between the fins with scissors, and eighteen equal strips are left hanging by their middles — each one ready to grab with one hand while the other holds the paper. It is blade-free: nothing on it cuts, so you need scissors. Eighteen is with two rack segments, as pictured; the plate prints one, which gives eight.
 
 ![The assembled rack: cradle, two rack segments and the end cap](previews/product-hero.png)
 
@@ -17,6 +17,8 @@ A desk rack for wrapping a pile of gifts. Pull two tapes once along a row of fin
 The parts print separately. The file to slice is the multi-object plate, `build/tape-strip-rack-plate.3mf`: four separate objects, each already in its print orientation. Press **Arrange** after opening it; the four then fit a 220 mm bed.
 
 The plate holds one rack, which makes a complete five-fin rack: four strips a lane, eight a pull. Print `rack` a second time for the ten fins shown here.
+
+Assembled with two racks it takes 561 × 57 mm of table and stands 58 mm tall; with one rack it is 361 mm long.
 
 ![The assembled four-view: cradle, racks and end cap as they print; the spindle prints on end, and the rolls and tape are not printed](previews/contact-sheet.png)
 

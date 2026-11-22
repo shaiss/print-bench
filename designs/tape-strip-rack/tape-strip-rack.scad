@@ -148,7 +148,13 @@ eps = 0.01;
 ov = 0.4;                       // union overlap: pieces overlap by volume, never just touch
 bed_ch = 0.5;                   // bed-edge chamfer, horizontal leg
 bed_ch_h = 0.6;                 // bed-edge chamfer, vertical leg (50 deg)
-z_in = floor_t / 2;             // where the cradle's upper pieces start, inside the floor
+z_in = floor_t / 2;             // where the cradle's nose and back wall start, inside the floor
+// The side walls are extruded 2D profiles, and OpenSCAD snaps a 2D profile to
+// a fine grid before it extrudes it: a wall drawn from z_in would start
+// 0.000003 mm off the nose block's z_in, and where both meet the nose face
+// the two edges export as zero-area triangles. So the walls start at a depth
+// of their own, a quarter of the floor away from everything else.
+z_wall_in = floor_t * 3 / 4;    // 1.8
 joint_ef_h = 0.5;               // height of the joint's first-layer relief
 joint_tip_cut = 0.8;            // key tip corners cut back (corner relief)
 mouth_relief = 1.6;             // how far each socket lip is squared back
@@ -308,6 +314,26 @@ module rect_loft(rings) {
                  [4 * i + k, 4 * (i + 1) + k, 4 * (i + 1) + (k + 1) % 4, 4 * i + (k + 1) % 4]];
     top = 4 * (n - 1);
     polyhedron(pts, concat([[0, 1, 2, 3]], sides, [[top + 3, top + 2, top + 1, top]]));
+}
+
+// One closed solid of revolution about Z, through a profile of [radius, z]
+// stations (radius above zero, z rising), with n sides. Every face is a
+// triangle and each end is a fan about a centre point. It replaces
+// rotate_extrude() for a part that is nothing but the revolved shape: a
+// revolved profile that touches the axis carries a zero-area triangle per
+// side at each pole, and with no boolean after it to clean them up they are
+// exported as they are.
+module ring_loft(prof, n) {
+    m = len(prof);
+    function v(i, k) = i * n + k % n;
+    pts = concat([for (p = prof) for (k = [0 : n - 1])
+                      [p[0] * cos(360 * k / n), p[0] * sin(360 * k / n), p[1]]],
+                 [[0, 0, prof[0][1]], [0, 0, prof[m - 1][1]]]);
+    bottom = [for (k = [0 : n - 1]) [m * n, v(0, k), v(0, k + 1)]];
+    sides = [for (i = [0 : m - 2]) for (k = [0 : n - 1]) each
+                 [[v(i, k), v(i + 1, k), v(i + 1, k + 1)], [v(i, k), v(i + 1, k + 1), v(i, k + 1)]]];
+    top = [for (k = [0 : n - 1]) [m * n + 1, v(m - 1, k + 1), v(m - 1, k)]];
+    polyhedron(pts, concat(bottom, sides, top));
 }
 
 // ---------------------------------------------------------------------------
@@ -470,13 +496,14 @@ module end_cap() {
 }
 
 // Cradle side-wall profile in (x, z): tall round the saddle, sloping down
-// to the gate. It starts inside the floor (z_in), which carries the bed
-// chamfer, and stops at the wall ends, short of the floor's back edge.
+// to the gate. It starts inside the floor, which carries the bed chamfer —
+// at z_wall_in, a depth no other piece uses — and stops at the wall ends,
+// short of the floor's back edge.
 module cradle_wall_2d() {
     // top of the hook in front of the saddle slot, 6 mm clear of the slot
     x_slot_top = x_axis + r_s * cos(saddle_lean)
                - (z_wall_top - z_axis - r_s * sin(saddle_lean)) * tan(saddle_lean);
-    polygon([[-cradle_l, z_in], [0, z_in], [0, z_gate_top],
+    polygon([[-cradle_l, z_wall_in], [0, z_wall_in], [0, z_gate_top],
              [x_gate - lintel_w / 2 - 0.5, z_gate_top],
              [x_slot_top + 6, z_wall_top],
              [-cradle_l + 5, z_wall_top], [-cradle_l, z_wall_top - 5]]);
@@ -561,7 +588,7 @@ module cradle() {
 
 // The spindle, standing on end (its print orientation): one hub for every
 // roll, a small flange with 40-degree shoulders between each pair. One
-// revolved profile, so there is no union to seam. `grow` oversizes the hub
+// lofted solid, so there is no union to seam. `grow` oversizes the hub
 // for the fit proof's negative control.
 module spindle(grow = 0) {
     r = (hub_d + grow) / 2;
@@ -573,9 +600,8 @@ module spindle(grow = 0) {
               [r, zc(j) - flange_flat / 2 - flange_cone], [rf, zc(j) - flange_flat / 2],
               [rf, zc(j) + flange_flat / 2], [r, zc(j) + flange_flat / 2 + flange_cone]]]
         : [];
-    rotate_extrude()
-        polygon(concat([[0, 0], [r - 0.4, 0], [r, 0.6]], flanges,
-                       [[r, spindle_l - 0.6], [r - 0.4, spindle_l], [0, spindle_l]]));
+    ring_loft(concat([[r - 0.4, 0], [r, 0.6]], flanges, [[r, spindle_l - 0.6], [r - 0.4, spindle_l]]),
+              $fn > 0 ? $fn : 96);
 }
 // The spindle laid in its saddles.
 module spindle_use(grow = 0) {

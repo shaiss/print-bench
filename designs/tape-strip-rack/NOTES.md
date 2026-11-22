@@ -127,11 +127,11 @@ The spindle is a loose running fit, not a tuned one, but roll cores vary: measur
 
 ## Gate evidence (2026-11-21, OpenSCAD 2021.01, PrusaSlicer 2.7)
 
-`./scripts/gate.sh --slice tape-strip-rack` exits 0 in 17 s.
+`./scripts/gate.sh --slice tape-strip-rack` exits 0 in about 20 s.
 
 | Part | printcheck | Test-slice |
 |---|---|---|
-| `cradle` | 100/100 | 5 h 21 m, 60.3 g |
+| `cradle` | 100/100 | 5 h 22 m, 60.3 g |
 | `spindle` | 100/100 | 48 m, 12.2 g |
 | `rack` | 100/100 | 6 h 02 m, 75.5 g |
 | `end-cap` | 100/100 | 1 h 24 m, 18.1 g |
@@ -140,6 +140,8 @@ The spindle is a loose running fit, not a tuned one, but roll cores vary: measur
 Eleven fit proofs pass: five `empty`, six `interferes`. Plate: `build/tape-strip-rack-plate.3mf`, 4 separate objects for 4 declared parts. As merged the plate is spread over about 370 × 155 mm, mostly off a 220 mm bed; pressing Arrange in the slicer packs it onto one.
 
 `./scripts/check.sh` (whole tree) exits 0.
+
+These are the local numbers, on OpenSCAD 2021.01. CI gates the same parts on openscad-nightly with the Manifold backend, and its first run (commit e3eb9f4) failed the cradle and the spindle, which had passed here: see Bugs caught.
 
 Layer-by-layer check by review, sections every 0.2 mm against the layer below: the only thing that starts in mid-air on any part is the gate lintel, two regions 2.00 mm wide by 22.000 mm span at z = 37, each anchored at both ends. The slicer prints them as five bridge strands per lane and drops no feature on any part.
 
@@ -170,7 +172,12 @@ Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. 
 - **A dovetail socket on the upright cradle's end face.** Scored 100/100 and would have printed with a drooping lip. Caught by an independent printability review slicing a mock, not by the gate. Led to D2 and D3.
 - **Zero-area triangles on the cradle.** Where one piece's edge ended part-way along a coplanar face of another (the floor's top edge under the wall ends, the back wall's top edge across them), the export carried collinear triangles and printcheck took 8 points. Fixed by never letting a piece's edge end on another's coplanar face: the floor runs past the wall ends, the back wall is set in 0.8 mm, inner pieces start inside the floor and stop inside the walls.
 - **Feather edges at the socket mouth.** A bed chamfer on the joint's end face met the socket's flare and left slivers 0.05 mm thick; squaring the lips first left a second sliver between the mouth and the flank. Joint end faces now have no bed chamfer and the squared mouth runs past the flank at every height.
-- **Socket cutter corner edges crossing at a point.** The cutter's loft, flare and lead-ins were hulls of one profile with different offset laws, so their mitred corner edges passed through single points. OpenSCAD 2021.01 exported that as vertex pairs 0.00001 mm apart and still scored 100/100; an emulation of CI's Manifold kernel (manifold3d over the same operands, not the nightly itself) exported the rack and end cap non-watertight. Caught by code review. Fixed by chamfering the offset corners of the flare and lead-ins and starting the two lead-ins at different heights; the same emulation is now watertight for every part in both union orders, and the gated meshes have no vertex pair closer than 0.001 mm.
+- **Socket cutter corner edges crossing at a point.** The cutter's loft, flare and lead-ins were hulls of one profile with different offset laws, so their mitred corner edges passed through single points. OpenSCAD 2021.01 exported that as vertex pairs 0.00001 mm apart and still scored 100/100; an emulation of CI's Manifold kernel (manifold3d over the same operands, not the nightly itself) exported the rack and end cap non-watertight. Caught by code review. Fixed by chamfering the offset corners of the flare and lead-ins and starting the two lead-ins at different heights; that emulation then came out watertight for every part in both union orders — wrongly for the cradle, as CI showed (next entry). The meshes gated locally have no vertex pair closer than 0.001 mm.
+- **CI's first run failed the cradle (67/100) and the spindle (59/100), which the local gate and the emulation had both passed.** Caught by CI's real backend, nothing earlier. Two separate causes.
+  - *Cradle.* OpenSCAD snaps a 2D profile to a fine grid before it extrudes it. The side walls are extruded profiles and the nose block is a cube; both started at `z_in` = 1.2, but the walls' 1.2 came out as 1.1999969. Where both meet the nose face, the Manifold kernel kept the two edges, 0.000003 mm apart, as real geometry, and the STL writer, which prints six significant digits, then wrote them as one line: four zero-area triangles and a mesh that was no longer watertight. OpenSCAD 2021.01's kernel merges the coplanar faces first and leaves no trace of either edge, so the local gate cannot see it. Fixed by starting the walls at a depth of their own (`z_wall_in`, 1.8). The solid did not change: the symmetric difference against the old cradle is 0.000 mm³.
+  - *Spindle.* It was a single `rotate_extrude()` of a profile that touches the axis. The nightly exports a part that is one primitive as that primitive's raw mesh, and its raw revolve carries a zero-area triangle per side at each pole and along the axis: 384 of them, 190 of those duplicates. 2021.01 does not emit them. Fixed by building the spindle as one explicit polyhedron (`ring_loft`): every face a triangle, each end a fan about a centre point, 1,536 triangles with none degenerate and none duplicated. Volume within 0.05 mm³ of the old one.
+  - *Why the emulation missed the cradle.* It fed Manifold single-precision meshes, and Manifold takes its merge tolerance from the precision of its input, so it merged the two edges before the union; and it did not round its output the way the STL writer does. Fed double-precision meshes, and with the six-digit rounding, it reproduces the failure on the old geometry — on the same edge, the nose face at z = 1.2, where CI reported it — and is clean on the new, for every part in both union orders. It cannot see the spindle's failure at all: a part that is one primitive never passes through a boolean.
+  - The rule taken from it: a coordinate that comes from a 2D profile and one that comes from a 3D primitive must never be meant to coincide on a surface, and a part that is a single primitive must already be a clean mesh.
 - **The carry claim.** "Pick it up by the cradle" was written from the straight-lift proof. Two reviewers independently found the pivot path a hanging rack can take. The claim is now what D3 says.
 - **A flat end-cap ledge** on the lightest, lift-free part (D6), **8 mm of threading room** (D9), and **a coupon narrower than the joint it stands in for** (its socket arms were 4 mm against 14 mm on a rack) — all caught by review, all fixed.
 
@@ -185,7 +192,7 @@ Strip count, traced by review on the assembly: cuts fall at x = 40, 80 … 400. 
   4. does the lintel bridge cleanly;
   5. can both lanes be cut in one snip with your scissors (the far tape's far edge is 51 mm in), or is it one snip a lane;
   6. does the rack need feet on your table.
-- CI's render gate uses openscad-nightly with the Manifold backend, which could not be installed in the build session. The emulation above is the nearest check made; the first CI run is the first time this geometry meets the real backend.
+- CI's render gate uses openscad-nightly with the Manifold backend, which cannot be installed in a build session (its download hosts are blocked). The local gate runs OpenSCAD 2021.01 and cannot see what that backend does differently: the first CI run failed two parts it had passed (Bugs caught). The nearest local check is the emulation described there — manifold3d, each piece exported from 2021.01 as binary STL and loaded in double precision, the result rounded to six significant digits — and it is still not the nightly.
 - Open, for the owner: whether to publish a functional look-alike of a commercial product (`PM.md`, Open decisions).
 
 ## Field test log
