@@ -157,9 +157,11 @@ runs:
     # drift apart); trusted base-branch Python from the caller's checkout, no
     # PR-head code — the same trust posture as the classify step above.
     # Reads overlay outputs so a ship-outcome demotion to infra cannot escalate
-    # and a preserved needs-human still does.
+    # and a preserved needs-human still does. Empty class is also escalated
+    # (Cipher LOW #994): overlay CLI fills needs-human, and this `if:` still
+    # matches '' so a missing output cannot silently skip the human path.
     - id: escalate
-      if: ${{ inputs.escalate == 'true' && steps.overlay.outputs.class == 'needs-human' }}
+      if: ${{ inputs.escalate == 'true' && (steps.overlay.outputs.class == 'needs-human' || steps.overlay.outputs.class == '') }}
       shell: bash
       env:
         PYTHONPATH: tools/model-registry/src
@@ -180,6 +182,12 @@ runs:
         REPO: ${{ github.repository }}
       run: |
         set -uo pipefail
+        # Empty-class fallback may arrive with an empty reason; escalate only
+        # accepts billing|quota|auth|no-key — default to no-key (config/probe).
+        REASON="${REASON:-}"
+        if [ -z "$REASON" ]; then
+          REASON=no-key
+        fi
         extra=()
         if [ -n "${RESET:-}" ]; then
           extra+=(--reset "$RESET")
