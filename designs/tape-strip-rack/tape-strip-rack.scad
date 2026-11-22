@@ -327,13 +327,19 @@ module rect_loft(rings) {
 
 // One closed solid of revolution about Z, through a profile of [radius, z]
 // stations (radius above zero, z rising), with n sides. Every face is a
-// triangle and each end is a fan about a centre point. It replaces
-// rotate_extrude() for a part that is nothing but the revolved shape: a
-// revolved profile that touches the axis carries a zero-area triangle per
-// side at each pole, and with no boolean after it to clean them up they are
-// exported as they are.
+// triangle, listed clockwise seen from outside, and each end is a fan about
+// a centre point. It replaces rotate_extrude() for a part that is nothing
+// but the revolved shape. A revolved profile that touches the axis carries
+// four zero-area triangles per side: one at each pole and two along the
+// axis. openscad-nightly writes a part that is a single primitive to STL as
+// it stands, so they reach the gate; OpenSCAD 2021.01 builds the same mesh
+// but its STL writer leaves them out, which is why the local gate cannot
+// see them.
 module ring_loft(prof, n) {
     m = len(prof);
+    assert(n == floor(n) && n >= 3, str("ring_loft: n must be a whole number, 3 or more, not ", n));
+    assert(m >= 2 && min([for (p = prof) p[0]]) > 0, "ring_loft: the profile needs two or more stations, every radius above zero");
+    assert(min([for (i = [0 : m - 2]) prof[i + 1][1] - prof[i][1]]) > 0, "ring_loft: the profile's z must rise from each station to the next");
     function v(i, k) = i * n + k % n;
     pts = concat([for (p = prof) for (k = [0 : n - 1])
                       [p[0] * cos(360 * k / n), p[0] * sin(360 * k / n), p[1]]],
@@ -609,8 +615,9 @@ module spindle(grow = 0) {
               [r, zc(j) - flange_flat / 2 - flange_cone], [rf, zc(j) - flange_flat / 2],
               [rf, zc(j) + flange_flat / 2], [r, zc(j) + flange_flat / 2 + flange_cone]]]
         : [];
+    // a whole number of sides, 3 or more, as rotate_extrude() would take $fn
     ring_loft(concat([[r - 0.4, 0], [r, 0.6]], flanges, [[r, spindle_l - 0.6], [r - 0.4, spindle_l]]),
-              $fn > 0 ? $fn : 96);
+              max(3, floor($fn > 0 ? $fn : 96)));
 }
 // The spindle laid in its saddles.
 module spindle_use(grow = 0) {

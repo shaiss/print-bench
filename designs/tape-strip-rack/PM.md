@@ -57,6 +57,8 @@ A desk rack that turns one pull of tape into a row of equal strips, for someone 
 | coupon | what to print first | 3/4 | plain | coupon wrapper |
 | contact-sheet | the assembled four-view; three of the four parts as they print | standard | preview colours | default |
 
+The product hero carries no scale cue on purpose: it is the clean studio look, and the assembled size is stated on the page under *What you get* (triage, round 2).
+
 **AI tiers.** None: no `product-still.conf`, `lifestyle.conf` or `motion.conf`.
 
 ## Backlog, ranked by user value
@@ -65,8 +67,8 @@ Rows are in rank order. The B numbers are names, kept from the first ranking so 
 
 | # | Item | Why this rank | Cost |
 |---|---|---|---|
+| B3 | A presser that seats both tapes on a fin in one push | the press is what makes the product: an unpressed strip is tape lying on a fin, and the first snip frees it. Twenty fingertip presses a pull, across ribs made to grip | one small part, with its own fit questions; after the first print |
 | B1 | A pull-over tear edge on the cradle nose, shipped as a coupon experiment first | scissors are the one thing the user must bring, and put down between gifts; matte and paper tape may tear on a printed edge | one coupon, a field test, then a cradle change |
-| B3 | A presser that seats both tapes on a fin in one push | twenty fingertip presses per pull, more than the ten snips: the most repeated fine action after grabbing a strip | one small part |
 | B2 | A positive latch on the joint (a snap detent on the flanks) | a hanging rack is held by friction only, and the end cap must be held down while its tails are peeled | a flexure in the socket, a second tuned fit, a coupon |
 | B4 | Independent hubs with a centre wall | changing one empty roll currently lifts both | a second spindle part and a cradle variant |
 | B7 | Debossed load-direction mark on the cradle walls | a roll loaded backwards feeds sticky side up and fails several steps later, with only a sentence on the page to prevent it | text or icon; thin-wall risk in printcheck |
@@ -98,4 +100,7 @@ Rows are in rank order. The B numbers are names, kept from the first ranking so 
 | 2026-11-22 | Walls start at a depth of their own; the spindle is one lofted polyhedron | CI's Manifold backend scored the cradle 67 and the spindle 59 on meshes the local gate passed. Neither solid changed shape |
 | 2026-11-22 | Presser (B3) up to second, load mark (B7) up to fifth | The customer review walked one session: twenty presses a pull against ten snips; and a backwards roll fails silently, steps later |
 | 2026-11-22 | Seam at the rear and a whisker-trim step on the page; two preview shots added (`section-pull`, `nested-side`), `nested` drawn in two tones | Printability review: an aligned seam in the dovetail reads as a tight joint; the gate's underside is a working surface; the nested shot read as one part and no shot showed the tape before pressing |
+| 2026-11-22 | Presser (B3) first, ahead of the tear edge (B1) | Second customer review: the press is the step that makes a strip a strip, so it outranks the tool the user already owns. This reverses the first round's ruling that B1 stays first |
+| 2026-11-22 | The page says what the coupon cannot test, what the gate bridge will look like, and to suspect the seam before `hub_clear` | Triage, round 2: three places where a stranger would otherwise tune or reprint for the wrong reason |
+| 2026-11-22 | No scale cue in the product hero | The clean studio shot is the intent; both reviewers asked to leave the frozen camera alone |
 | 2026-11-22 | Rolls and tape are off by default (`show_payload = false`) | The owner found them in the STL the site's workbench exports, and asked for a switch that defaults to off. The default render holds printed parts only; the shots that show the tape ask for it |

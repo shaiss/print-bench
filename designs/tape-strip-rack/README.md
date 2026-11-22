@@ -24,11 +24,11 @@ Assembled with two racks it takes 561 × 57 mm of table and stands 58 mm tall; w
 
 ## Print settings
 
-- **Material:** PLA
+- **Material:** PLA. The gate is a 22 mm bridge, and PLA bridges that more cleanly than PETG
 - **Layer height:** 0.2 mm, 0.4 mm nozzle
 - **Perimeters:** 2 or 3
 - **Infill:** 15–20 %
-- **Supports:** none, and leave them off. The gate on the cradle is two 22 mm bridges, which is what it is meant to be
+- **Supports:** none, and leave them off. The gate on the cradle is two 22 mm bridges, which is what it is meant to be. Its underside may come out with a slight wave; that is normal for a bridge this long. The strands should run from post to post, across the lane: if your slicer lays them on a diagonal, set its bridging angle to 90° with the cradle as exported
 - **Seam:** rear ("Back" in Bambu Studio). That keeps the seam on a side face and out of the dovetail, where a ridge would read as a tight joint on the coupon
 - **Orientation:** as exported. Cradle, rack and end cap sit on their bases; the spindle stands on end
 - **Bed:** every part fits 220 × 220 mm, but the rack is 208 mm long and leaves 6 mm at each end. On a 220 mm bed set the skirt distance to 2 mm (or print without one), or turn the rack 45°
@@ -48,6 +48,8 @@ The parts join with a drop-in dovetail, and its clearance is the one fit worth t
 3. With both flat on the table, push and pull the socket stub along the joint. About 0.6 mm of play is right.
 4. Will not go on: raise `joint_clear` by 0.05 mm and reprint. Clearly more than 1 mm of play: lower it by 0.05.
 5. Print the plate at the value that worked.
+
+The coupon tunes the fit of the dovetail and nothing else. It cannot tell you whether a rack hanging off a lifted cradle stays on: that is held by friction, and a stub is too short to load the joint the way a rack does. The first full print answers it.
 
 Measure the core of your own tape roll as well. `core_id` assumes 25.4 mm.
 
@@ -81,7 +83,7 @@ All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer s
 
 ![The palm pad behind the rolls](previews/pad.png)
 
-**Load.** Slide two rolls onto the spindle, one each side of the flange, with the tape coming off the **top** of each roll toward the rack, sticky side down. A roll put on backwards feeds sticky side up. Hold the rolls, not the spindle, and lower it into the slots in the cradle walls; it goes in up-and-back and comes out the same way.
+**Load.** Slide two rolls onto the spindle, one each side of the flange, with the tape coming off the **top** of each roll toward the rack, sticky side down. A roll put on backwards feeds sticky side up. Hold the rolls, not the spindle, and lower it into the slots in the cradle walls; it goes in up-and-back and comes out the same way. If a roll feels tight on the spindle, suspect a seam ridge on the hub before you change `hub_clear`.
 
 **Thread.** Before the first use, run a fingernail along the underside of the gate and trim off any bridge whiskers: the tape slides against it on every pull. Then let each tape end drop behind the gate, fish it forward through the opening underneath, and stick it to the first fin.
 
