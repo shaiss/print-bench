@@ -423,15 +423,25 @@ _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     # a blanket 48+ url-safe class — that redacts SHA-256 digests (64 hex).
     # Leading lookbehind is hex-only so a non-hex letter prefix still redacts;
     # trailing lookahead omits '.' so ``key.`` (key then a dot) still redacts.
-    (r"(?i)(?:ANTHROPIC_AUTH_TOKEN|ZAI_KEY)\s*[=:]\s*[0-9a-f]{32}\.[A-Za-z0-9]{16}", "***"),
+    # Optional quotes around key and value for JSON/YAML dumps (Cipher on #953).
+    (
+        r"(?i)['\"]?(?:ANTHROPIC_AUTH_TOKEN|ZAI_KEY)['\"]?"
+        r"\s*[=:]\s*"
+        r"['\"]?[0-9a-f]{32}\.[A-Za-z0-9]{16}['\"]?",
+        "***",
+    ),
     (r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{32}\.[A-Za-z0-9]{16}(?![A-Za-z0-9])", "***"),
     # Explicitly labelled AWS secret values first (CodeRabbit on #953): when
     # an access-key id is followed by a 40-char request id AND a labelled
     # secret, prefer redacting the labelled secret so the request id is not
     # consumed by a nearby-pair rule (which would leave the secret).
+    # Optional quotes around the key and around the value so compact/pretty
+    # JSON and quoted YAML do not leak the 40-char secret (Cipher on #953;
+    # regression from f8ca6d45's nearby-AKIA 40-char consumption).
     (
-        r"(?i)(?:aws_?secret_?access_?key|secret_?access_?key)\s*[=:]\s*"
-        r"[A-Za-z0-9/+]{40}",
+        r"(?i)['\"]?(?:aws_?secret_?access_?key|secret_?access_?key)['\"]?"
+        r"\s*[=:]\s*"
+        r"['\"]?[A-Za-z0-9/+]{40}['\"]?",
         "***",
     ),
     # AWS secret access key sitting near an access-key id. Require a
@@ -442,13 +452,15 @@ _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     (
         r"(?i)(?:AKIA|ASIA)[0-9A-Z]{16}"
         r"(?:[\s\S]{0,80}?)"
-        r"(?:aws_?)?secret(?:_?access_?key)?\s*[=:]\s*"
-        r"[A-Za-z0-9/+]{40}",
+        r"['\"]?(?:aws_?)?secret(?:_?access_?key)?['\"]?"
+        r"\s*[=:]\s*"
+        r"['\"]?[A-Za-z0-9/+]{40}['\"]?",
         "***",
     ),
     (
-        r"(?i)(?:aws_?)?secret(?:_?access_?key)?\s*[=:]\s*"
-        r"[A-Za-z0-9/+]{40}"
+        r"(?i)['\"]?(?:aws_?)?secret(?:_?access_?key)?['\"]?"
+        r"\s*[=:]\s*"
+        r"['\"]?[A-Za-z0-9/+]{40}['\"]?"
         r"(?:[\s\S]{0,80}?)"
         r"(?:AKIA|ASIA)[0-9A-Z]{16}",
         "***",

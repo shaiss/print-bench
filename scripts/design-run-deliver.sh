@@ -4524,43 +4524,100 @@ EOF
     echo "selftest: expected 5 burn Capture denied tools steps, found ${burn_capture_n}" >&2
     exit 1
   }
+  # Active YAML only; uncommented unset GIT_DIR… must precede the first git
+  # invocation in the step (CodeRabbit eSri / Cipher on #953).
   burn_cap_git_n="$(awk '
     function flush() {
-      if (in_step && has_dir && has_exec && has_unset_dir && has_unset_exec) ok++
+      if (in_step && has_dir && has_exec && has_unset_dir && has_unset_exec && unset_before_git) ok++
       in_step = 0; has_dir = 0; has_exec = 0; has_unset_dir = 0; has_unset_exec = 0
+      unset_before_git = 0; saw_git = 0; in_run = 0
     }
     /^      - name: Capture denied tools \(link/ { flush(); in_step = 1; next }
     in_step && /^      - name:/ { flush(); next }
-    # Active YAML/env/run lines only — a commented-out assignment must not
-    # count (CodeRabbit on #953).
     in_step && /^[[:space:]]+GIT_DIR: ""[[:space:]]*$/ { has_dir = 1 }
     in_step && /^[[:space:]]+GIT_EXEC_PATH: ""[[:space:]]*$/ { has_exec = 1 }
-    in_step && /unset GIT_DIR GIT_WORK_TREE/ && $0 !~ /^[[:space:]]*#/ { has_unset_dir = 1 }
-    in_step && /GIT_EXEC_PATH \|\| true/ && $0 !~ /^[[:space:]]*#/ { has_unset_exec = 1 }
+    in_step && /^        run: \|/ { in_run = 1; next }
+    in_step && in_run && /unset GIT_DIR GIT_WORK_TREE/ && $0 !~ /^[[:space:]]*#/ {
+      has_unset_dir = 1
+      if (!saw_git) unset_before_git = 1
+    }
+    in_step && in_run && /GIT_EXEC_PATH \|\| true/ && $0 !~ /^[[:space:]]*#/ { has_unset_exec = 1 }
+    in_step && in_run && /(^|[[:space:]])git([[:space:]]|$)|\/usr\/bin\/git/ && $0 !~ /^[[:space:]]*#/ {
+      saw_git = 1
+    }
     END { flush(); print ok+0 }
   ' "$burn")"
   [ "$burn_cap_git_n" -eq 5 ] || {
-    echo "selftest: expected 5 burn Capture steps with GIT_DIR/GIT_EXEC_PATH blank+unset, found ${burn_cap_git_n}" >&2
+    echo "selftest: expected 5 burn Capture steps with GIT_DIR/GIT_EXEC_PATH blank+unset-before-git, found ${burn_cap_git_n}" >&2
     exit 1
   }
   # Negative control: commenting out one required GIT_EXEC_PATH blank must
   # drop the protected-capture count (behavioral, not a grep of the check).
   burn_cap_git_neg="$(awk '
     function flush() {
-      if (in_step && has_dir && has_exec && has_unset_dir && has_unset_exec) ok++
+      if (in_step && has_dir && has_exec && has_unset_dir && has_unset_exec && unset_before_git) ok++
       in_step = 0; has_dir = 0; has_exec = 0; has_unset_dir = 0; has_unset_exec = 0
+      unset_before_git = 0; saw_git = 0; in_run = 0
     }
     /^      - name: Capture denied tools \(link/ { flush(); in_step = 1; next }
     in_step && /^      - name:/ { flush(); next }
     in_step && /^[[:space:]]+GIT_DIR: ""[[:space:]]*$/ { has_dir = 1 }
     in_step && /^[[:space:]]+GIT_EXEC_PATH: ""[[:space:]]*$/ { has_exec = 1 }
-    in_step && /unset GIT_DIR GIT_WORK_TREE/ && $0 !~ /^[[:space:]]*#/ { has_unset_dir = 1 }
-    in_step && /GIT_EXEC_PATH \|\| true/ && $0 !~ /^[[:space:]]*#/ { has_unset_exec = 1 }
+    in_step && /^        run: \|/ { in_run = 1; next }
+    in_step && in_run && /unset GIT_DIR GIT_WORK_TREE/ && $0 !~ /^[[:space:]]*#/ {
+      has_unset_dir = 1
+      if (!saw_git) unset_before_git = 1
+    }
+    in_step && in_run && /GIT_EXEC_PATH \|\| true/ && $0 !~ /^[[:space:]]*#/ { has_unset_exec = 1 }
+    in_step && in_run && /(^|[[:space:]])git([[:space:]]|$)|\/usr\/bin\/git/ && $0 !~ /^[[:space:]]*#/ {
+      saw_git = 1
+    }
     END { flush(); print ok+0 }
-  ' <(sed '0,/^[[:space:]]\+GIT_EXEC_PATH: ""[[:space:]]*$/s//# GIT_EXEC_PATH: ""/' "$burn")"
-  )"
+  ' <(sed '0,/^[[:space:]]\+GIT_EXEC_PATH: ""[[:space:]]*$/s//# GIT_EXEC_PATH: ""/' "$burn"))"
   [ "$burn_cap_git_neg" -lt 5 ] || {
     echo "selftest: commenting out GIT_EXEC_PATH: \"\" did not drop the capture git-protect count (${burn_cap_git_neg})" >&2
+    exit 1
+  }
+  # Negative control: move unset after the first git invocation — must fail.
+  burn_cap_git_order_neg="$(awk '
+    function flush() {
+      if (in_step && has_dir && has_exec && has_unset_dir && has_unset_exec && unset_before_git) ok++
+      in_step = 0; has_dir = 0; has_exec = 0; has_unset_dir = 0; has_unset_exec = 0
+      unset_before_git = 0; saw_git = 0; in_run = 0
+    }
+    /^      - name: Capture denied tools \(link/ { flush(); in_step = 1; next }
+    in_step && /^      - name:/ { flush(); next }
+    in_step && /^[[:space:]]+GIT_DIR: ""[[:space:]]*$/ { has_dir = 1 }
+    in_step && /^[[:space:]]+GIT_EXEC_PATH: ""[[:space:]]*$/ { has_exec = 1 }
+    in_step && /^        run: \|/ { in_run = 1; next }
+    in_step && in_run && /unset GIT_DIR GIT_WORK_TREE/ && $0 !~ /^[[:space:]]*#/ {
+      has_unset_dir = 1
+      if (!saw_git) unset_before_git = 1
+    }
+    in_step && in_run && /GIT_EXEC_PATH \|\| true/ && $0 !~ /^[[:space:]]*#/ { has_unset_exec = 1 }
+    in_step && in_run && /(^|[[:space:]])git([[:space:]]|$)|\/usr\/bin\/git/ && $0 !~ /^[[:space:]]*#/ {
+      saw_git = 1
+    }
+    END { flush(); print ok+0 }
+  ' <(awk '
+    BEGIN { moved = 0; hold = "" }
+    /^      - name: Capture denied tools \(link 1\)/ { in1 = 1 }
+    in1 && /^      - name:/ && !/^      - name: Capture denied tools \(link 1\)/ { in1 = 0 }
+    in1 && /unset GIT_DIR GIT_WORK_TREE/ && !moved {
+      hold = $0
+      moved = 1
+      next
+    }
+    in1 && moved && hold != "" && /\/usr\/bin\/git/ {
+      print
+      print hold
+      hold = ""
+      next
+    }
+    { print }
+  ' "$burn"))"
+  [ "$burn_cap_git_order_neg" -lt 5 ] || {
+    echo "selftest: unset-after-git still counted as protected (${burn_cap_git_order_neg})" >&2
     exit 1
   }
   grep -q 'name: Require ship branch or explicit decline' "$burn" || {

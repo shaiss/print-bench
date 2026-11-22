@@ -659,6 +659,13 @@ jobs:
           && steps.preflight_pip.outcome == 'success'
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Z.AI (GLM, chain link 1)
@@ -836,6 +843,13 @@ jobs:
           && steps.ship_zai_1.outcome != 'success'
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Z.AI (GLM, chain link 2)
@@ -992,6 +1006,13 @@ jobs:
           && steps.ship_zai_2.outcome != 'success'
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Z.AI (GLM, chain link 3)
@@ -1160,6 +1181,13 @@ jobs:
           && steps.ship_zai_3.outcome != 'success'
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Anthropic (Claude, chain link 4)
@@ -1317,6 +1345,13 @@ jobs:
           && steps.ship_anthropic_4.outcome != 'success'
         env:
           RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: rm -f -- "${RUNNER_TEMP}/claude-execution-output.json"
 
       - name: Ship via Anthropic (Claude, chain link 5)
@@ -1938,8 +1973,17 @@ jobs:
         env:
           EXPECT_SHA: ${{ steps.bundle.outputs.sha256 }}
           RUNNER_TEMP: ${{ runner.temp }}
+          PATH: /usr/bin:/bin
+          LD_PRELOAD: ""
+          LD_LIBRARY_PATH: ""
+          LD_AUDIT: ""
+          BASH_ENV: ""
+          ENV: ""
+        shell: /usr/bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           set -euo pipefail
+          # match=true only on digest equality; false or absent otherwise
+          # (Cipher on #953 — custom if: on consumers drops implicit success()).
           bundle_path="${RUNNER_TEMP}/backlog-burn.bundle"
           if [ -z "${EXPECT_SHA:-}" ] || [ ! -f "$bundle_path" ]; then
             echo "::error::bundle missing before upload" >&2
@@ -2011,7 +2055,11 @@ jobs:
           ' "$meta" >/dev/null
 
       - name: Upload the delivery metadata
-        if: steps.bundle.outputs.pending == 'true'
+        # Custom if: drops implicit success() — also require digest match so a
+        # failed bundle_verify cannot still publish ready metadata (Cipher on #953).
+        if: >-
+          steps.bundle.outputs.pending == 'true'
+          && steps.bundle_verify.outputs.match == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: backlog-burn-meta
@@ -2027,7 +2075,11 @@ jobs:
         # step's success, read back from the jobs API, as the provenance
         # of backlog-burn-meta. An earlier upload by the agent makes the
         # trusted upload fail and this step does not run.
-        if: steps.bundle.outputs.pending == 'true'
+        # Custom if: drops implicit success() — gate on digest match too so
+        # ready=true cannot land after a failed bundle_verify (Cipher on #953).
+        if: >-
+          steps.bundle.outputs.pending == 'true'
+          && steps.bundle_verify.outputs.match == 'true'
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Note the agent window end

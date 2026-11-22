@@ -554,6 +554,43 @@ _PATTERN_FIXTURES = [
         "aws-id-then-reqid-then-labelled-secret",
         "*** request=" + _AWS_REQ + " ***",
     ),
+    # Quoted JSON / YAML must not leak the 40-char secret (Cipher on #953).
+    (
+        '{"aws_access_key_id":"'
+        + "AKIA"
+        + ("I" * 16)
+        + '","aws_secret_access_key":"'
+        + _AWS_SECRET
+        + '"}',
+        "aws-compact-json",
+        '{"aws_access_key_id":"***",***}',
+    ),
+    (
+        '{\n  "aws_access_key_id": "'
+        + "AKIA"
+        + ("I" * 16)
+        + '",\n  "aws_secret_access_key": "'
+        + _AWS_SECRET
+        + '"\n}',
+        "aws-pretty-json",
+        '{\n  "aws_access_key_id": "***",\n  ***\n}',
+    ),
+    (
+        'aws_secret_access_key: "' + _AWS_SECRET + '"',
+        "aws-quoted-yaml",
+        "***",
+    ),
+    # Quoted ANTHROPIC_AUTH_TOKEN / ZAI_KEY (JSON + YAML).
+    (
+        '{"ANTHROPIC_AUTH_TOKEN":"' + ("c" * 32) + "." + ("D" * 16) + '"}',
+        "zai-json-quoted",
+        "{***}",
+    ),
+    (
+        'ZAI_KEY: "' + ("c" * 32) + "." + ("D" * 16) + '"',
+        "zai-yaml-quoted",
+        "***",
+    ),
     ("Authorization: Bearer " + ("m" * 48), "auth-bearer", "Authorization: Bearer ***"),
     ("Bearer " + ("n" * 48), "bare-bearer", "Bearer ***"),
     ("https://user:passw0rd@github.com/x", "url-userpass", "https://***:***@github.com/x"),

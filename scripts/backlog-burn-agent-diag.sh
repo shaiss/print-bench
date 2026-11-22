@@ -237,6 +237,56 @@ PY
     echo "FAIL  selftest: missing-log case exited non-zero"; fails=$((fails + 1))
   fi
 
+  # Secret-shaped --label must not appear raw on stdout (::notice:: uses label_s).
+  mkdir -p -- "$tmp/secret_label"
+  secret_label="ghp_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  printf '%s\n' '{"type":"result","permission_denials":[],"result":""}' \
+    >"$tmp/secret_label.exec.json"
+  if bash -- "$0" --provenance-src "$prov_src" \
+      --execution-log "$tmp/secret_label.exec.json" \
+      --out-dir "$tmp/secret_label" --label "$secret_label" \
+      >"$tmp/secret_label.stdout" 2>"$tmp/secret_label.stderr"; then
+    if grep -qF "$secret_label" "$tmp/secret_label.stdout" "$tmp/secret_label.stderr" \
+        "$tmp/secret_label/diag.json" 2>/dev/null; then
+      echo "FAIL  selftest: secret-shaped --label leaked"; fails=$((fails + 1))
+    else
+      echo "ok    selftest: secret-shaped --label scrubbed from stdout/diag"
+    fi
+  else
+    echo "FAIL  selftest: secret-label case exited non-zero"; fails=$((fails + 1))
+  fi
+
+  # Lone-surrogate UnicodeEncodeError fallback still writes diag (eSrZ).
+  mkdir -p -- "$tmp/surrogate"
+  python3 -I - "$tmp/surrogate.exec.json" <<'PY'
+import json, sys
+# JSON can carry an escaped lone surrogate; strict utf-8 encode then fails.
+payload = [
+    {
+        "type": "result",
+        "permission_denials": [{"tool_name": "Read"}],
+        "result": "ok\ud800",
+    }
+]
+open(sys.argv[1], "w", encoding="utf-8").write(json.dumps(payload))
+PY
+  if bash -- "$0" --provenance-src "$prov_src" \
+      --execution-log "$tmp/surrogate.exec.json" \
+      --out-dir "$tmp/surrogate" \
+      >"$tmp/surrogate.stdout" 2>"$tmp/surrogate.stderr"; then
+    if [ -f "$tmp/surrogate/diag.json" ] \
+        && python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["denied_tools"]==[{"tool":"Read"}]; assert len(d["final_assistant_message_sha256"])==64' \
+          "$tmp/surrogate/diag.json"; then
+      echo "ok    selftest: lone-surrogate message still writes diag+denials"
+    else
+      echo "FAIL  selftest: lone-surrogate diag missing or lost denials"
+      fails=$((fails + 1))
+    fi
+  else
+    echo "FAIL  selftest: lone-surrogate case exited non-zero"; cat "$tmp/surrogate.stderr" >&2
+    fails=$((fails + 1))
+  fi
+
   if [ "$fails" -ne 0 ]; then
     echo "backlog-burn-agent-diag --selftest: $fails failure(s)" >&2
     return 1
@@ -246,6 +296,7 @@ PY
 }
 
 link=""
+label_arg=""
 execution_log="${RUNNER_TEMP:+$RUNNER_TEMP/claude-execution-output.json}"
 out_dir="${RUNNER_TEMP:+$RUNNER_TEMP/backlog-burn-agent-diag}"
 summary_path="${GITHUB_STEP_SUMMARY:-}"
@@ -256,6 +307,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --selftest) selftest; exit $? ;;
     --link) link="${2:?}"; shift 2 ;;
+    --label) label_arg="${2:?}"; shift 2 ;;
     --execution-log) execution_log="${2:?}"; shift 2 ;;
     --out-dir) out_dir="${2:?}"; shift 2 ;;
     --summary) summary_path="${2:?}"; shift 2 ;;
@@ -311,8 +363,12 @@ else
   } >"$secrets_file"
 fi
 
-label="backlog-burn agent diag"
-[ -n "$link" ] && label="$label (link $link)"
+if [ -n "$label_arg" ]; then
+  label="$label_arg"
+else
+  label="backlog-burn agent diag"
+  [ -n "$link" ] && label="$label (link $link)"
+fi
 
 # Fail loud on import — do not fall back to the worktree.
 # python3 -I ignores PYTHONPATH, so the pinned path is passed as argv and
@@ -343,9 +399,9 @@ provenance_src, log_path, secrets_path, out_dir, label, summary_path = sys.argv[
 sys.path.insert(0, str(Path(provenance_src)))
 try:
     from provenance.gitstore import credential_env, scrub  # noqa: E402
-except ImportError as exc:
+except ImportError:
     print(
-        f"::error::backlog-burn-agent-diag: provenance.gitstore import failed: {exc}",
+        "::error::backlog-burn-agent-diag: provenance.gitstore import failed",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -662,5 +718,5 @@ if summary_path:
     with open(summary_path, "a", encoding="utf-8") as fh:
         fh.write(block)
         fh.write("\n")
-print(f"::notice::{label}: wrote {out_path} ({len(uniq)} denied tool(s))")
+print(f"::notice::{label_s}: wrote {out_path} ({len(uniq)} denied tool(s))")
 PY

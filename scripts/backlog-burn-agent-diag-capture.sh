@@ -17,9 +17,133 @@
 #   START_SHA=… DIAG_SHA256=… PROV_ARCHIVE_SHA256=… RUNNER_TEMP=…
 #   SECRETS_FILE=… DIAG_OUT=…
 #     /tmp/XXXX-capture.sh <link>
+# Offline: ./scripts/backlog-burn-agent-diag-capture.sh --selftest
 set -euo pipefail
 
-link="${1:?usage: backlog-burn-agent-diag-capture.sh <link>}"
+selftest() {
+  local fails=0
+  # Memfd sealing: write after F_ADD_SEALS must fail (Cipher on #953).
+  if ! python3 -I - <<'PY'
+import errno
+import fcntl
+import os
+import sys
+
+if not hasattr(os, "memfd_create") or not hasattr(os, "MFD_ALLOW_SEALING"):
+    print("FAIL  selftest: memfd sealing unavailable", file=sys.stderr)
+    sys.exit(1)
+
+fd = os.memfd_create("bb-diag-selftest", os.MFD_ALLOW_SEALING)
+try:
+    os.write(fd, b"#!/bin/sh\necho sealed\n")
+    os.lseek(fd, 0, os.SEEK_SET)
+    seals = (
+        fcntl.F_SEAL_WRITE
+        | fcntl.F_SEAL_GROW
+        | fcntl.F_SEAL_SHRINK
+        | fcntl.F_SEAL_SEAL
+    )
+    fcntl.fcntl(fd, fcntl.F_ADD_SEALS, seals)
+    try:
+        os.write(fd, b"x")
+    except OSError as exc:
+        if exc.errno in (errno.EPERM, errno.EACCES):
+            print("ok    selftest: write after memfd seal fails")
+            sys.exit(0)
+        print(f"FAIL  selftest: unexpected errno {exc.errno}", file=sys.stderr)
+        sys.exit(1)
+    print("FAIL  selftest: write after seal succeeded", file=sys.stderr)
+    sys.exit(1)
+finally:
+    os.close(fd)
+PY
+  then
+    fails=$((fails + 1))
+  fi
+
+  # Validator unit checks (MAX_BYTES, schema rule-name-only, MCP scrub).
+  local prov_src
+  prov_src="$(cd "$(dirname "$0")/.." && pwd)/tools/provenance/src"
+  if ! python3 -I - "$prov_src" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+ALLOWED = {
+    "label",
+    "log_note",
+    "denied_tools",
+    "denied_tools_extra",
+    "final_assistant_message_len",
+    "final_assistant_message_sha256",
+}
+MAX_BYTES = 64 * 1024
+
+prov = Path(sys.argv[1])
+sys.path.insert(0, str(prov))
+from provenance.gitstore import scrub  # noqa: E402
+
+fails = 0
+
+def validate_bytes(raw: bytes):
+    if len(raw) > MAX_BYTES:
+        return ["::error::diag.json too large (>%d bytes)" % MAX_BYTES], None
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ["::error::diag.json failed UTF-8 JSON schema rule"], None
+    if not isinstance(obj, dict) or set(obj.keys()) != ALLOWED:
+        return ["::error::diag.json failed allowlisted-keys schema rule"], None
+    return [], obj
+
+oversized = b"{" + (b"a" * (MAX_BYTES + 1))
+errs, _ = validate_bytes(oversized)
+if not errs or "too large" not in errs[0]:
+    print("FAIL  selftest: MAX_BYTES+1 not rejected", file=sys.stderr)
+    fails += 1
+else:
+    print("ok    selftest: MAX_BYTES+1 rejected")
+
+bad = json.dumps({"evil_key": "SECRET_VALUE_SHOULD_NOT_APPEAR", "label": "x"}).encode()
+errs, _ = validate_bytes(bad)
+joined = "\n".join(errs)
+if "allowlisted-keys schema rule" not in joined:
+    print("FAIL  selftest: missing allowlisted-keys rule name", file=sys.stderr)
+    fails += 1
+elif "evil_key" in joined or "SECRET_VALUE" in joined:
+    print("FAIL  selftest: schema error echoed rejected key/value", file=sys.stderr)
+    fails += 1
+else:
+    print("ok    selftest: schema errors report rule name only")
+
+secret = "ghs_" + ("A" * 36)
+scrubbed = scrub("mcp__x__" + secret, [secret])
+if secret in scrubbed:
+    print("FAIL  selftest: MCP scrub left secret intact", file=sys.stderr)
+    fails += 1
+else:
+    print("ok    selftest: MCP tool-name scrub collapses secrets")
+
+sys.exit(fails)
+PY
+  then
+    fails=$((fails + 1))
+  fi
+
+  if [ "$fails" -ne 0 ]; then
+    echo "backlog-burn-agent-diag-capture --selftest: $fails failure(s)" >&2
+    return 1
+  fi
+  echo "selftest: ok"
+  return 0
+}
+
+if [ "${1:-}" = "--selftest" ]; then
+  selftest
+  exit $?
+fi
+
+link="${1:?usage: backlog-burn-agent-diag-capture.sh <link>|--selftest}"
 
 : "${START_SHA:?START_SHA required}"
 : "${DIAG_SHA256:?DIAG_SHA256 required}"
@@ -79,6 +203,7 @@ prov_src="$(
   PROV_ROOT="$prov_root" \
   EXEC_LOG_JSON="$(printf '%s\n' "${execution_log_args[@]+"${execution_log_args[@]}"}" | python3 -I -c 'import json,sys; print(json.dumps([l for l in sys.stdin.read().splitlines() if l]))')" \
   python3 -I - <<'PY'
+import fcntl
 import hashlib
 import json
 import os
@@ -139,9 +264,11 @@ if not os.path.isdir(os.path.join(prov_src, "provenance")):
     die(f"pinned provenance archive missing provenance package at {prov_src}")
 
 # Bind execution to the verified diag bytes via memfd (Linux runners).
-if not hasattr(os, "memfd_create"):
-    die("memfd_create unavailable — cannot bind diag execution to verified bytes")
-fd = os.memfd_create("backlog-burn-agent-diag", 0)
+# MFD_ALLOW_SEALING + F_SEAL_* after rehash so the bytes cannot change
+# under /proc/<pid>/fd exec (Cipher on #953).
+if not hasattr(os, "memfd_create") or not hasattr(os, "MFD_ALLOW_SEALING"):
+    die("memfd_create/MFD_ALLOW_SEALING unavailable — cannot seal diag bytes")
+fd = os.memfd_create("backlog-burn-agent-diag", os.MFD_ALLOW_SEALING)
 try:
     os.write(fd, diag_data)
     os.lseek(fd, 0, os.SEEK_SET)
@@ -150,6 +277,13 @@ try:
     if got != diag_sha:
         die("memfd diag bytes drifted from the pre-agent pin before launch")
     os.lseek(fd, 0, os.SEEK_SET)
+    seals = (
+        fcntl.F_SEAL_WRITE
+        | fcntl.F_SEAL_GROW
+        | fcntl.F_SEAL_SHRINK
+        | fcntl.F_SEAL_SEAL
+    )
+    fcntl.fcntl(fd, fcntl.F_ADD_SEALS, seals)
     env = {
         k: v
         for k, v in os.environ.items()
