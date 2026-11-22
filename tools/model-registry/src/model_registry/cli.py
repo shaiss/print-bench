@@ -158,6 +158,13 @@ def cmd_classify(args: argparse.Namespace) -> int:
     lines, klass, reason, reset = smoke_mod.diagnose_chain(reg, args.chain, os.environ)
     for line in lines:
         print(line)
+    # $GITHUB_OUTPUT is line-oriented and the `_reset_at` patterns can span a
+    # newline in a provider body, so a multi-line reset could inject `class=`
+    # / `reason=` keys GitHub parses before the overlay sanitizer ever runs
+    # (CodeRabbit / Grid on #1067, Cipher LOW #994). Keep the first non-empty
+    # line only, at this writer.
+    reset = next(
+        (ln.strip() for ln in (reset or "").splitlines() if ln.strip()), "")
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")
     if gh_output:
         with open(gh_output, "a", encoding="utf-8") as fh:
