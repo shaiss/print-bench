@@ -285,7 +285,10 @@ surfaces studies awaiting a read live in
   `compliant.scad` (flexure primitives — the bistable snap-through arch,
   weld-safe flexure-root fillets, the small-length flexural pivot, the
   cross-axis flexure pivot and the LET joint, harvested from the compliant
-  designs; issue #202 stage 3),
+  designs; issue #202 stage 4),
+  `compliant-coupon.scad` (printable stiffness coupon — t-ladder plus
+  production twins for every compliant.scad module; predicted-K protocol
+  tied to FIELD-TEST; issue #1049),
   `spaceframe.scad` (parametric space-frame trusses — warren/pratt/vierendeel
   topologies, cosine taper to needle ends, a separate core/web split for
   two-tone exports),

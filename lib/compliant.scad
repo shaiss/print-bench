@@ -2,12 +2,15 @@
 // All dimensions in millimeters. Use from a design with:
 //   use <compliant.scad>
 //
-// Issue #202, STAGE 3 of 4 (harvest-first order, owner ruling; stage 1 was
+// Issue #202, STAGE 4 of 4 (harvest-first order, owner ruling; stage 1 was
 // the bistable arch + root fillet — #758; stage 2 the small-length and
-// cross-axis flexure pivots — #1047/#1052). This stage adds the LET
-// (lamina-emergent torsional) joint. The stiffness coupon is the remaining
-// stage (#1049). The knowledge behind every number here is
-// docs/advanced-techniques.md, Domain 1.
+// cross-axis flexure pivots — #1047/#1052; stage 3 the LET joint —
+// #1048/#1057). This stage is the stiffness coupon (#1049): printable
+// specimens in lib/compliant-coupon.scad that make the echoed K / f_s / u_tr
+// trustworthy against a real print (torque-vs-angle + cycles-to-failure at
+// θ_max; protocol in the coupon header, tied to templates/FIELD-TEST.md).
+// The knowledge behind every number here is docs/advanced-techniques.md,
+// Domain 1.
 //
 // HARVESTED, NOT INVENTED. Every module below is lifted from a design that
 // already proves it on the gate; the guards are the asserts those designs
