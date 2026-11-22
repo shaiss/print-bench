@@ -93,6 +93,22 @@ def test_delivered_disposition_keeps_provider_signal():
     assert (klass, reason) == ("servable", "served")
 
 
+def test_settled_disposition_keeps_provider_signal_without_success():
+    """Settled dispositions must keep servable even when no link succeeded.
+
+    The existing deferred/declined/delivered cases all use a walk that starts
+    with ``success``, so ``any_link_served`` alone would return the provider
+    pair. Without this case, deleting ``_SETTLED_DISPOSITIONS`` would still
+    leave those tests green. ``_ALL_FAILED`` + settled is the guard that
+    fails if the disposition short-circuit is removed (CodeRabbit / #994).
+    """
+    for disp in ("deferred", "declined", "delivered"):
+        klass, reason = classify_with_ship_outcomes(
+            _ALL_FAILED, "servable", "served", disposition=disp,
+        )
+        assert (klass, reason) == ("servable", "served"), disp
+
+
 def test_mixed_failure_then_deferred_success_without_disposition_keeps_servable():
     """A success outcome means a link served at the Actions layer — keep today.
 

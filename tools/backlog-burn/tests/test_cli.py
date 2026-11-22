@@ -118,3 +118,55 @@ def test_triage_classify_empty_outcomes_is_identity(capsys):
     assert rc == 0
     printed = capsys.readouterr().out
     assert "CLASS backlog-burn: servable" in printed
+
+
+def test_triage_classify_empty_class_escalates_needs_human(capsys, tmp_path):
+    """Cipher #994: empty/missing class must become needs-human, not stay blank."""
+    gh_out = tmp_path / "out"
+    rc = main([
+        "triage-classify",
+        "--outcomes", "",
+        "--provider-class", "",
+        "--provider-reason", "",
+        "--gh-output", str(gh_out),
+    ])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "CLASS backlog-burn: needs-human" in printed
+    body = gh_out.read_text(encoding="utf-8")
+    assert "class=needs-human\n" in body
+    assert "reason=no-key\n" in body
+
+
+def test_triage_classify_empty_class_keeps_billing_reason(capsys, tmp_path):
+    """Empty class with a needs-human reason keeps that reason for escalate."""
+    gh_out = tmp_path / "out"
+    rc = main([
+        "triage-classify",
+        "--outcomes", "",
+        "--provider-class", "",
+        "--provider-reason", "billing",
+        "--gh-output", str(gh_out),
+    ])
+    assert rc == 0
+    body = gh_out.read_text(encoding="utf-8")
+    assert "class=needs-human\n" in body
+    assert "reason=billing\n" in body
+
+
+def test_triage_classify_multiline_reset_sanitized_to_single_line(tmp_path):
+    """Cipher #994: multi-line reset must not inject extra GITHUB_OUTPUT keys."""
+    gh_out = tmp_path / "out"
+    rc = main([
+        "triage-classify",
+        "--outcomes", "success,skipped,skipped,skipped,skipped",
+        "--provider-class", "needs-human",
+        "--provider-reason", "quota",
+        "--provider-reset", "2026-11-06T00:00:00Z\ninjected=evil\n",
+        "--gh-output", str(gh_out),
+    ])
+    assert rc == 0
+    body = gh_out.read_text(encoding="utf-8")
+    assert "reset=2026-11-06T00:00:00Z\n" in body
+    assert "injected=" not in body
+    assert "evil" not in body

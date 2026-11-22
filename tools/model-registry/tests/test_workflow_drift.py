@@ -3656,9 +3656,21 @@ def test_provider_triage_action_declares_the_io_its_callers_use():
         "provider-triage no longer overlays ship outcomes via "
         "`backlog_burn.cli triage-classify` — issue #897's servable-when-dead "
         "misclassification would return")
-    assert "steps.overlay.outputs.class" in action, (
-        "provider-triage escalate/outputs must read the ship-outcome overlay, "
+    # Exact output mappings (CodeRabbit / #994): a bare substring match on
+    # `steps.overlay.outputs.class` also hits the escalate `if:`, so a revert
+    # of the class output to steps.classify would still pass. Pin each mapping.
+    assert "value: ${{ steps.overlay.outputs.class }}" in action, (
+        "provider-triage class output must read the ship-outcome overlay, "
         "not the raw provider classify step")
+    assert "value: ${{ steps.overlay.outputs.reason }}" in action, (
+        "provider-triage reason output must read the ship-outcome overlay")
+    assert "steps.overlay.outputs.class == 'needs-human'" in action, (
+        "provider-triage escalate condition must read the ship-outcome overlay")
+    # Cipher LOW #994: empty-class fallback — escalate still fires when class
+    # is missing/empty, not only on the filled-in needs-human token.
+    assert "steps.overlay.outputs.class == ''" in action, (
+        "provider-triage escalate must also fire on empty overlay class "
+        "(Cipher empty-class fallback, issue #994)")
 
 
 def test_triage_wiring_guard_discriminates_a_wrong_chain():

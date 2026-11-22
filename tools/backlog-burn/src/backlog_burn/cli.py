@@ -117,16 +117,34 @@ def cmd_triage_classify(args: argparse.Namespace) -> int:
         outcomes = None
     else:
         outcomes = [p.strip() for p in str(raw).split(",") if p.strip()]
+    prov_class = (args.provider_class or "").strip()
+    prov_reason = (args.provider_reason or "").strip()
     klass, reason = classify_with_ship_outcomes(
         outcomes,
         args.provider_class,
         args.provider_reason,
         disposition=args.disposition or None,
     )
-    reset = (args.provider_reset or "").strip()
+    # Single-line sanitize: $GITHUB_OUTPUT is line-oriented. A multi-line
+    # reset (provider body noise) would inject extra keys (Cipher LOW #994).
+    # Take the first non-empty line only; drop the rest.
+    reset = next(
+        (ln.strip() for ln in (args.provider_reset or "").splitlines() if ln.strip()),
+        "",
+    )
     # A demotion to infra drops a provider quota reset — it no longer applies.
-    if (klass, reason) != (args.provider_class.strip(), args.provider_reason.strip()):
+    # Compare before the empty-class fallback so filling in needs-human does
+    # not look like a demotion and wipe a still-valid reset.
+    if (klass, reason) != (prov_class, prov_reason):
         reset = ""
+    # Cipher LOW (#994 / #990 CWC): an empty/missing class would skip the
+    # escalate `if:` (needs-human only) and silently drop a human-fixable
+    # failure. Force needs-human; reason must be one escalate accepts.
+    _NEEDS_HUMAN_REASONS = ("billing", "quota", "auth", "no-key")
+    if not klass:
+        klass = "needs-human"
+        if reason not in _NEEDS_HUMAN_REASONS:
+            reason = "no-key"
     for line in format_report_lines(args.chain, klass, reason, reset=reset):
         print(line)
     gh_output = args.gh_output or os.environ.get("GITHUB_OUTPUT")

@@ -832,3 +832,21 @@ def test_cli_classify_writes_reset_to_gh_output(tmp_path, capsys, monkeypatch):
     assert "reason=quota\n" in written
     assert "reset=2026-09-04 18:30:53\n" in written
     assert "RESET review: 2026-09-04 18:30:53" in capsys.readouterr().out
+
+
+def test_cli_classify_sanitizes_multiline_reset_in_gh_output(tmp_path, capsys, monkeypatch):
+    # #1067 / #994: a reset spanning lines must not inject extra keys into
+    # $GITHUB_OUTPUT at the classify writer (GitHub parses classify's outputs
+    # before provider-triage's overlay sanitizer runs).
+    p = tmp_path / "registry.conf"
+    p.write_text(textwrap.dedent(REG), encoding="utf-8")
+    gh = tmp_path / "gh_output"
+    monkeypatch.setattr(
+        smoke, "diagnose_chain",
+        lambda reg, chain, env: (
+            [], "needs-human", "quota",
+            "2026-09-04 18:30:53\nclass=servable\nreason=served"))
+    assert main(["--path", str(p), "classify", "review", "--gh-output", str(gh)]) == 0
+    written = gh.read_text(encoding="utf-8")
+    assert written == (
+        "class=needs-human\nreason=quota\nreset=2026-09-04 18:30:53\n")
