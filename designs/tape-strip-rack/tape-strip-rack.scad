@@ -126,9 +126,10 @@ corner_r = 4;
 ledge_l = 12;
 
 /* [Preview] */
-// Show the rolls and the tape in the assembled preview. They are drawn in
-// previews only: an exported STL of the assembly never contains them.
-show_payload = true;
+// Draw the rolls and the tape on the assembly. Off by default, so that the
+// default render — and any STL exported from it — holds printed parts only.
+// Turn it on to look at how the tape runs, not for a file you will slice.
+show_payload = false;
 // Roll diameter drawn in the preview (mm).
 preview_roll_od = 50;
 // How the tape is drawn. "cut": after pressing and cutting, a strip on every
@@ -677,10 +678,8 @@ module assembly() {
         translate([racks * rack_l, 0, (racks + 1) * explode]) end_cap();
     }
     color("#8f2029") spindle_use();
-    // $preview is false in a full render, which is what writes an STL: the
-    // rolls and the tape are illustration, and must never be exported as
-    // plastic.
-    if (show_payload && $preview) {
+    // The rolls and the tape are illustration: drawn only when asked for.
+    if (show_payload) {
         color("#f1ead8") rolls();
         if (explode == 0) color("#ffffff", 0.75) tape();
     }

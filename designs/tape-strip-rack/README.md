@@ -20,7 +20,7 @@ The plate holds one rack, which makes a complete five-fin rack: four strips a la
 
 Assembled with two racks it takes 561 × 57 mm of table and stands 58 mm tall; with one rack it is 361 mm long.
 
-![The assembled four-view: cradle, racks and end cap as they print; the spindle prints on end, and the rolls and tape are not printed](previews/contact-sheet.png)
+![The assembled four-view: cradle, racks and end cap as they print; the spindle prints on end](previews/contact-sheet.png)
 
 ## Print settings
 
@@ -64,6 +64,7 @@ Measure the core of your own tape roll as well. `core_id` assumes 25.4 mm.
 | `land_ribs` | 3 | ribs per lane on each fin top. Fewer makes a strip easier to peel; 0 makes the top flat, for tape that will not stay put |
 | `fin_h` | 26 mm | height of the tape above the base: room for scissors and fingers |
 | `heel_l` | 30 mm | length of the palm pad behind the rolls; 0 removes it |
+| `show_payload` | false | draws the rolls and the tape on the assembly, to see how the tape runs. Leave it off for any file you export: they are not parts |
 | `lanes` | 2 | rolls side by side. One lane needs a narrower joint (`joint_neck=6`, `joint_tip=13`); the render stops and says so |
 
 All parameters are at the top of `tape-strip-rack.scad`, grouped in Customizer sections; override on the command line, for example `-D strip_len=50 -D fins_per_rack=4`. The fit proofs and the cutaway are selected with `part`.

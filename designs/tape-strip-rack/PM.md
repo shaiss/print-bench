@@ -45,15 +45,15 @@ A desk rack that turns one pull of tape into a row of equal strips, for someone 
 | Shot | What it sells | View | Look | Pose (`-D`) |
 |---|---|---|---|---|
 | product-hero | the whole rack as an object you would want on the table | 3/4 from the roll end | red, satin | `show_payload=false` |
-| hero | what one pull leaves behind: two tapes, eighteen strips | 3/4 | preview colours | default |
-| cradle | rolls, spindle and the gate the tapes pass under | close 3/4 | preview colours | default |
-| pad | the palm pad the steadying hand presses | from behind and above the rolls | preview colours | default |
-| section | the tape path: roll, under the gate, onto the fins | side, orthographic | preview colours | `part="cutaway"` |
+| hero | what one pull leaves behind: two tapes, eighteen strips | 3/4 | preview colours | `show_payload=true` |
+| cradle | rolls, spindle and the gate the tapes pass under | close 3/4 | preview colours | `show_payload=true` |
+| pad | the palm pad the steadying hand presses | from behind and above the rolls | preview colours | `show_payload=true` |
+| section | the tape path: roll, under the gate, onto the fins | side, orthographic | preview colours | `part="cutaway" show_payload=true` |
 | fins | ribbed lands and guide posts | close 3/4 | preview colours | `show_payload=false` |
 | joint | the drafted dovetail key, under a rack lifted off it | low, from the side | preview colours | `explode=16 show_payload=false` |
 | nested | two rack segments stored fin-into-gap, in two tones | 3/4 | preview colours | `part="nested"` |
 | nested-side | the same pair, read as two combs | side, orthographic | preview colours | `part="nested"` |
-| section-pull | the tape just pulled, clear of the fin tops, and the drafted key in its socket | side, orthographic, close | preview colours | `part="cutaway" cut_at="key" tape_pose="pulled"` |
+| section-pull | the tape just pulled, clear of the fin tops, and the drafted key in its socket | side, orthographic, close | preview colours | `part="cutaway" cut_at="key" tape_pose="pulled" show_payload=true` |
 | coupon | what to print first | 3/4 | plain | coupon wrapper |
 | contact-sheet | the assembled four-view; three of the four parts as they print | standard | preview colours | default |
 
@@ -98,4 +98,4 @@ Rows are in rank order. The B numbers are names, kept from the first ranking so 
 | 2026-11-22 | Walls start at a depth of their own; the spindle is one lofted polyhedron | CI's Manifold backend scored the cradle 67 and the spindle 59 on meshes the local gate passed. Neither solid changed shape |
 | 2026-11-22 | Presser (B3) up to second, load mark (B7) up to fifth | The customer review walked one session: twenty presses a pull against ten snips; and a backwards roll fails silently, steps later |
 | 2026-11-22 | Seam at the rear and a whisker-trim step on the page; two preview shots added (`section-pull`, `nested-side`), `nested` drawn in two tones | Printability review: an aligned seam in the dovetail reads as a tight joint; the gate's underside is a working surface; the nested shot read as one part and no shot showed the tape before pressing |
-| 2026-11-22 | Rolls and tape are drawn in previews only | The owner found them in the STL the site's workbench exports. An export holds printed parts and nothing else |
+| 2026-11-22 | Rolls and tape are off by default (`show_payload = false`) | The owner found them in the STL the site's workbench exports, and asked for a switch that defaults to off. The default render holds printed parts only; the shots that show the tape ask for it |

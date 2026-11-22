@@ -6,11 +6,12 @@ frozen once reviewed: a new region to show gets a NEW line in
 review rounds must align).
 
 - **contact-sheet** — the 2×2 iso / top / front / bottom-iso of the default
-  render: the assembled rack with rolls and cut tape. Cradle, racks and end
+  render: the assembled rack, printed parts only. Cradle, racks and end
   cap are in their print orientation here (the spindle prints on end). The
   bottom-iso is the bed-contact check: flat bases, the dovetail keys and
   sockets, nothing hanging.
-- **hero** — the whole assembly in 3/4 view after one pull and its cuts: the
+- **hero** — the whole assembly in 3/4 view after one pull and its cuts
+  (`show_payload=true`, as on every shot below that shows rolls or tape): the
   two tape ends parked on the fin nearest the rolls, one strip per lane on
   every later fin, the tails on the end cap's ledge.
 - **cradle** — close on the roll end from the front: two rolls on the
