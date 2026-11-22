@@ -160,11 +160,41 @@ def test_dotted_and_nested_protected_prefixes_extract():
     assert prot.extract_scope_paths("x", "nested sub/CLAUDE.md") == {
         "sub/CLAUDE.md"
     }
-    # Nested ``foo/scripts/bar`` must NOT look like a repo-root scripts/ path.
+    # Nested ``foo/scripts/bar`` (no ``..``) must NOT look like repo-root
+    # scripts/ — leave it unmatched so prose mentions stay non-paths.
     assert (
         prot.extract_scope_paths("x", "mention foo/scripts/bar casually")
         is None
     )
+    assert not prot.is_protected_path("foo/scripts/bar")
+    # No concrete path extracted → fail closed (unknown scope), not "safe".
+    reason_nested = prot.protected_scope_reason("x", "edit foo/scripts/bar")
+    assert reason_nested is not None
+    assert "could not be determined" in reason_nested
+
+
+def test_dotdot_prefix_before_root_only_dir_is_protected():
+    # CodeRabbit on #953: extract the full ``sub/../scripts/...`` token so
+    # normalize_repo_path yields ``scripts/...`` and the selector skips.
+    body = "Touches: docs/licensing.md\nAlso edit sub/../scripts/check.sh\n"
+    paths = prot.extract_scope_paths("x", body)
+    assert paths is not None
+    assert "sub/../scripts/check.sh" in paths
+    reason = prot.protected_scope_reason("x", body)
+    assert reason is not None
+    assert "protected path" in reason
+    # Plain nested scripts/ under a real parent stays unprotected as a path,
+    # and does not extract as a root-only token.
+    assert not prot.is_protected_path("sub/scripts/check.sh")
+    assert (
+        prot.extract_scope_paths("x", "edit sub/scripts/check.sh") is None
+    )
+
+
+def test_root_file_glob_suffix_is_indeterminate():
+    # CodeRabbit on #953: ``README.md*`` must not truncate to ``README.md``.
+    assert prot.extract_scope_paths("Update README.md*", "") is None
+    assert prot.extract_scope_paths("Update README.md", "") == {"README.md"}
 
 
 def test_safe_touches_plus_dotted_protected_still_skips():

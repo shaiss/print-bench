@@ -143,22 +143,34 @@ _ANY_DEPTH_FILES = (
 # ``./scripts/...``, ``./CLAUDE.md``, and ``sub/.github/...`` extract (Bugbot
 # on #953: the old lookbehind treated ``/`` as a path char and missed them).
 # Globs (*, ?, **) are kept so we can refuse them as undetermined.
-_SEG = r"[^\s`\"')\],:;|/]+"
-_PATH_REST = r"[^\s`\"')\],:;|]+"
+# Path segments stay printable and exclude format chars (e.g. U+200B) so a
+# capped adversarial body cannot quadratic-backtrack on (seg/){0,N}.
+_SEG = r"[^\s`\"')\],:;|/\x00-\x1f\x7f-\x9f\u200b-\u200f\ufeff]+"
+# PATH_REST may include further ``/`` segments; still excludes format chars.
+_PATH_REST = r"[^\s`\"')\],:;|\x00-\x1f\x7f-\x9f\u200b-\u200f\ufeff]+"
 _ROOT_ONLY_ALT = "|".join(re.escape(d) for d in _ROOT_ONLY_DIRS)
 _ANY_DEPTH_DIR_ALT = "|".join(re.escape(d) for d in _ANY_DEPTH_DIRS)
 _ROOT_FILE_ALT = "|".join(re.escape(f) for f in _ROOT_FILES)
 _ANY_DEPTH_FILE_ALT = "|".join(re.escape(f) for f in _ANY_DEPTH_FILES)
 _PATH_TOKEN = re.compile(
     r"(?i)(?<![A-Za-z0-9_./-])("
-    # ./scripts/foo or scripts/foo (repo-root prefixes only)
+    # scripts/foo or ./scripts/foo at repo root (no parent segments).
     + rf"(?:\./)?(?:{_ROOT_ONLY_ALT})/{_PATH_REST}"
-    # ./CLAUDE.md or CLAUDE.md at repo root
-    + rf"|(?:\./)?(?:{_ROOT_FILE_ALT})"
+    # sub/../scripts/foo — require at least one ``../`` so normalize can
+    # resolve to a root-only path (CodeRabbit on #953). Arbitrary
+    # ``seg/scripts/`` without ``..`` stays unmatched here (not protected).
+    # Bound parent/``../`` repeats so a capped adversarial body cannot
+    # quadratic-backtrack on this alternative.
+    + rf"|(?:\./)?(?:(?:{_SEG}/){{0,8}}\.\./){{1,4}}(?:{_ROOT_ONLY_ALT})/{_PATH_REST}"
+    # ./CLAUDE.md / README.md* at repo root — keep a trailing glob suffix so
+    # the glob check sees README.md* (not a truncated README.md). Limit the
+    # suffix to glob metacharacters so ordinary prose after a root file
+    # cannot quadratic-backtrack via _PATH_REST.
+    + rf"|(?:\./)?(?:{_ROOT_FILE_ALT})(?:[*?\[][^\s`\"')\],:;|]*)?"
     # sub/.github/x or .github/x (any depth; parent segments optional)
-    + rf"|(?:\./)?(?:{_SEG}/)*(?:{_ANY_DEPTH_DIR_ALT})/{_PATH_REST}"
+    + rf"|(?:\./)?(?:(?:{_SEG}/){{0,8}})?(?:{_ANY_DEPTH_DIR_ALT})/{_PATH_REST}"
     # sub/CLAUDE.md (any-depth instruction files; at least one parent)
-    + rf"|(?:\./)?(?:{_SEG}/)+(?:{_ANY_DEPTH_FILE_ALT})"
+    + rf"|(?:\./)?(?:{_SEG}/){{1,8}}(?:{_ANY_DEPTH_FILE_ALT})"
     + r")(?![A-Za-z0-9_./-])"
 )
 # Cap free-text path scans so ``(?:seg/)*`` cannot quadratic-backtrack on

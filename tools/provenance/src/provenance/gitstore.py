@@ -425,19 +425,29 @@ _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     # trailing lookahead omits '.' so ``key.`` (key then a dot) still redacts.
     (r"(?i)(?:ANTHROPIC_AUTH_TOKEN|ZAI_KEY)\s*[=:]\s*[0-9a-f]{32}\.[A-Za-z0-9]{16}", "***"),
     (r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{32}\.[A-Za-z0-9]{16}(?![A-Za-z0-9])", "***"),
-    # AWS secret access key sitting near an access-key id (40 chars of
-    # base64-ish, within ~80 chars of AKIA/ASIA — catch both orders).
-    # These MUST run before the standalone AKIA/ASIA patterns or the id
-    # is replaced first and the nearby secret is left behind. No
-    # lookbehind on [A-Za-z0-9/+=] — that class includes ``=``, which is
-    # the usual ``secret=…`` separator and would skip the value.
+    # Explicitly labelled AWS secret values first (CodeRabbit on #953): when
+    # an access-key id is followed by a 40-char request id AND a labelled
+    # secret, prefer redacting the labelled secret so the request id is not
+    # consumed by a nearby-pair rule (which would leave the secret).
     (
-        r"(?:AKIA|ASIA)[0-9A-Z]{16}"
+        r"(?i)(?:aws_?secret_?access_?key|secret_?access_?key)\s*[=:]\s*"
+        r"[A-Za-z0-9/+]{40}",
+        "***",
+    ),
+    # AWS secret access key sitting near an access-key id. Require a
+    # secret-shaped label before the 40-char value so a request identifier
+    # between the id and a labelled secret is not mistaken for the secret.
+    # These MUST run before the standalone AKIA/ASIA patterns or the id
+    # is replaced first and the nearby secret is left behind.
+    (
+        r"(?i)(?:AKIA|ASIA)[0-9A-Z]{16}"
         r"(?:[\s\S]{0,80}?)"
+        r"(?:aws_?)?secret(?:_?access_?key)?\s*[=:]\s*"
         r"[A-Za-z0-9/+]{40}",
         "***",
     ),
     (
+        r"(?i)(?:aws_?)?secret(?:_?access_?key)?\s*[=:]\s*"
         r"[A-Za-z0-9/+]{40}"
         r"(?:[\s\S]{0,80}?)"
         r"(?:AKIA|ASIA)[0-9A-Z]{16}",
@@ -448,9 +458,16 @@ _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     # Authorization Bearer values (header form before bare Bearer).
     (r"(?i)Authorization\s*:\s*Bearer\s+\S+", "Authorization: Bearer ***"),
     (r"(?i)\bBearer\s+[A-Za-z0-9._\-+/=]{20,}", "Bearer ***"),
-    # Credentials in URLs (user:pass@ before x-access-token form).
-    (r"(?i)https?://[^\s/@:]+:[^\s/@]+@", "https://***:***@"),
-    (r"(?i)x-access-token:[^\s/@]+@", "x-access-token:***@"),
+    # Credentials in URLs. Prefer x-access-token before generic user:pass
+    # so the token form keeps its scheme prefix. Stop userinfo at `/`, `?`,
+    # and `#` so a query/fragment `@` is not mistaken for userinfo
+    # (CodeRabbit on #953).
+    (
+        r"(?i)https?://x-access-token:[^\s/@?#]+@",
+        "https://***:***@",
+    ),
+    (r"(?i)(?<!://)x-access-token:[^\s/@?#]+@", "x-access-token:***@"),
+    (r"(?i)https?://[^\s/@:?#]+:[^\s/@?#]+@", "https://***:***@"),
     # Base64-encoded x-access-token basic-auth strings (Actions masks the
     # raw token but not this form — see credential_env / Git.secrets).
     (r"(?i)(?:AUTHORIZATION:\s*)?basic\s+[A-Za-z0-9+/]{20,}={0,2}", "basic ***"),

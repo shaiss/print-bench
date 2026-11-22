@@ -528,41 +528,65 @@ def test_redact_replaces_longest_first():
 
 # Pattern fixtures for scrub()/redact_patterns() — public diag artifacts must
 # never carry these shapes even when the value was never in the env.
+# Each row is (input, label, expected_redacted) so assertions catch both
+# incomplete redaction and over-redaction (CodeRabbit on #953).
+_AWS_REQ = "A" * 40
+_AWS_SECRET = "BcdeFGHIJKLMNOPQRSTUVWXYZabcdef012345678"
 _PATTERN_FIXTURES = [
-    ("ghp_" + "A" * 36, "ghp_"),
-    ("gho_" + "B" * 36, "gho_"),
-    ("ghs_" + "C" * 36, "ghs_"),
-    ("ghu_" + "D" * 36, "ghu_"),
-    ("ghr_" + "E" * 36, "ghr_"),
-    ("github_pat_" + "F" * 40, "github_pat_"),
-    ("sk-or-" + "G" * 40, "sk-or-"),
-    ("sk-ant-" + "H" * 40, "sk-ant-"),
-    ("AKIA" + ("I" * 16), "AKIA"),
-    ("ASIA" + ("J" * 16), "ASIA"),
-    ("AKIA" + ("K" * 16) + " secret=" + ("L" * 40), "aws-pair"),
-    ("Authorization: Bearer " + ("m" * 48), "auth-bearer"),
-    ("Bearer " + ("n" * 48), "bare-bearer"),
-    ("https://user:passw0rd@github.com/x", "url-userpass"),
-    ("https://x-access-token:deadbeefDEADBEEFdeadbeefDE@github.com/x.git", "x-access"),
-    ("AUTHORIZATION: basic " + ("YWJj" * 10) + "==", "basic-auth"),
+    ("ghp_" + "A" * 36, "ghp_", "***"),
+    ("gho_" + "B" * 36, "gho_", "***"),
+    ("ghs_" + "C" * 36, "ghs_", "***"),
+    ("ghu_" + "D" * 36, "ghu_", "***"),
+    ("ghr_" + "E" * 36, "ghr_", "***"),
+    ("github_pat_" + "F" * 40, "github_pat_", "***"),
+    ("sk-or-" + "G" * 40, "sk-or-", "***"),
+    ("sk-ant-" + "H" * 40, "sk-ant-", "***"),
+    ("AKIA" + ("I" * 16), "AKIA", "***"),
+    ("ASIA" + ("J" * 16), "ASIA", "***"),
+    ("AKIA" + ("K" * 16) + " secret=" + ("L" * 40), "aws-pair", "***"),
+    (
+        "AKIA"
+        + ("I" * 16)
+        + " request="
+        + _AWS_REQ
+        + " aws_secret_access_key="
+        + _AWS_SECRET,
+        "aws-id-then-reqid-then-labelled-secret",
+        "*** request=" + _AWS_REQ + " ***",
+    ),
+    ("Authorization: Bearer " + ("m" * 48), "auth-bearer", "Authorization: Bearer ***"),
+    ("Bearer " + ("n" * 48), "bare-bearer", "Bearer ***"),
+    ("https://user:passw0rd@github.com/x", "url-userpass", "https://***:***@github.com/x"),
+    (
+        "https://x-access-token:deadbeefDEADBEEFdeadbeefDE@github.com/x.git",
+        "x-access",
+        "https://***:***@github.com/x.git",
+    ),
+    (
+        "https://example.test:8443?owner=alice@example.test",
+        "url-query-at-not-userinfo",
+        "https://example.test:8443?owner=alice@example.test",
+    ),
+    ("AUTHORIZATION: basic " + ("YWJj" * 10) + "==", "basic-auth", "basic ***"),
     (
         "eyJhbGciOiJIUzI1NiJ9."
         + "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
         + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
         "jwt",
+        "***",
     ),
-    ("ghs_server.token-with.dots-and-dashes_ABCDEF", "ghs-dotted"),
+    ("ghs_server.token-with.dots-and-dashes_ABCDEF", "ghs-dotted", "***"),
     # Documented Z.AI key shape: 32 hex + '.' + 16 alnum.
-    ("a" * 32 + "." + "B" * 16, "zai-dotted"),
-    ("ANTHROPIC_AUTH_TOKEN=" + "c" * 32 + "." + "D" * 16, "zai-auth-env"),
+    ("a" * 32 + "." + "B" * 16, "zai-dotted", "***"),
+    ("ANTHROPIC_AUTH_TOKEN=" + "c" * 32 + "." + "D" * 16, "zai-auth-env", "***"),
     # Trailing '.' must not defeat the match (lookahead omits '.').
-    ("a" * 32 + "." + "B" * 16 + ".", "zai-followed-by-dot"),
+    ("a" * 32 + "." + "B" * 16 + ".", "zai-followed-by-dot", "***."),
     # Non-hex letter prefix — old [A-Za-z0-9.] lookbehind leaked these.
-    ("z" + "a" * 32 + "." + "B" * 16, "zai-letter-prefix"),
+    ("z" + "a" * 32 + "." + "B" * 16, "zai-letter-prefix", "z***"),
     # Literal backslash-n sequence (two chars), not a newline.
-    ("\\n" + "a" * 32 + "." + "B" * 16, "zai-backslash-n-prefix"),
+    ("\\n" + "a" * 32 + "." + "B" * 16, "zai-backslash-n-prefix", "\\n***"),
     # Uppercase hex id half.
-    ("A" * 32 + "." + "Bb0Cd1Ef2Gh3Ij45", "zai-uppercase-hex"),
+    ("A" * 32 + "." + "Bb0Cd1Ef2Gh3Ij45", "zai-uppercase-hex", "***"),
 ]
 
 
@@ -583,12 +607,16 @@ def test_redact_patterns_keeps_bare_64_hex_digest():
     assert digest in out
 
 
-@pytest.mark.parametrize("secret,label", _PATTERN_FIXTURES)
-def test_redact_patterns_covers_each_shape(secret, label):
+@pytest.mark.parametrize("secret,label,expected", _PATTERN_FIXTURES)
+def test_redact_patterns_covers_each_shape(secret, label, expected):
     text = f"prefix {secret} suffix"
     out = gitstore.redact_patterns(text)
-    assert secret not in out, f"pattern left {label!r}-shaped secret intact: {out!r}"
-    assert "***" in out
+    assert secret not in out or secret == expected, (
+        f"pattern left {label!r}-shaped secret intact: {out!r}"
+    )
+    assert out == f"prefix {expected} suffix", (
+        f"{label!r}: expected {expected!r} embedded, got {out!r}"
+    )
 
 
 def test_scrub_applies_exact_then_patterns():
