@@ -83,3 +83,11 @@ No AI tiers in v1 — the interface is the product.
 
 - 2026-11-06 — charter written from brief #978 at design-run scaffold;
   buckle source set and two-halves orientation recorded.
+- 2026-11-22 ~1:05 PM ET — Shai waived the B6 genuine-buckle
+  latch-measurement pre-merge blocker. His words, verbatim: "Assume for
+  now". Given in reply to the independent SA review offering two paths
+  (real buckle measurements, or a waiver):
+  https://github.com/shaiss/print-bench/pull/1001#pullrequestreview-6008979062.
+  Effect: the assumed latch numbers ship as-is. Measuring a genuine
+  buckle (#978) becomes a post-merge follow-up, not a merge blocker. No
+  geometry or parameter change.
