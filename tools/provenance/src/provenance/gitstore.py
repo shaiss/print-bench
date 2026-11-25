@@ -480,6 +480,19 @@ _SECRET_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     ),
     (r"(?i)(?<!://)x-access-token:[^\s/@?#]+@", "x-access-token:***@"),
     (r"(?i)https?://[^\s/@:?#]+:[^\s/@?#]+@", "https://***:***@"),
+    # ssh:// and git+ssh:// carry the same user:secret userinfo (issue #1069).
+    # Same character classes as the https rule above, so host:port and a
+    # query/fragment `@` stay untouched; the scheme is kept as written.
+    (r"(?i)((?:git\+)?ssh://)[^\s/@:?#]+:[^\s/@?#]+@", r"\1***:***@"),
+    # Token-only userinfo, no colon: https://<token>@host (issue #1069). The
+    # key-shape rules at the top catch a token by its prefix; an opaque one
+    # has no prefix to recognise, so ANY colon-less userinfo on these schemes
+    # is redacted, a plain login name included (ssh://git@host becomes
+    # ssh://***@host). Over-redaction is the safe direction for a public
+    # artifact. `:` is outside the class, so host:port and an already-redacted
+    # ***:***@ are never rewritten, and the rule is idempotent on its own
+    # output.
+    (r"(?i)((?:https?|(?:git\+)?ssh)://)[^\s/@:?#]+@", r"\1***@"),
     # Base64-encoded x-access-token basic-auth strings (Actions masks the
     # raw token but not this form — see credential_env / Git.secrets).
     (r"(?i)(?:AUTHORIZATION:\s*)?basic\s+[A-Za-z0-9+/]{20,}={0,2}", "basic ***"),
