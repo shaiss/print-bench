@@ -532,6 +532,9 @@ def test_redact_replaces_longest_first():
 # incomplete redaction and over-redaction (CodeRabbit on #953).
 _AWS_REQ = "A" * 40
 _AWS_SECRET = "BcdeFGHIJKLMNOPQRSTUVWXYZabcdef012345678"
+# A token with no well-known prefix (issue #1069): only the URL-userinfo rule
+# can redact it. 40 chars, mixed alnum, deliberately not hex.
+_OPAQUE_TOKEN = "x9" * 20
 _PATTERN_FIXTURES = [
     ("ghp_" + "A" * 36, "ghp_", "***"),
     ("gho_" + "B" * 36, "gho_", "***"),
@@ -604,6 +607,84 @@ _PATTERN_FIXTURES = [
         "url-query-at-not-userinfo",
         "https://example.test:8443?owner=alice@example.test",
     ),
+    # --- issue #1069: ssh/git+ssh userinfo and token-only userinfo -----------
+    # user:secret on the two ssh spellings; the scheme survives as written.
+    (
+        "ssh://user:passw0rd@host.example/o/r.git",
+        "ssh-userpass",
+        "ssh://***:***@host.example/o/r.git",
+    ),
+    (
+        "git+ssh://user:passw0rd@host.example/o/r.git",
+        "git+ssh-userpass",
+        "git+ssh://***:***@host.example/o/r.git",
+    ),
+    (
+        "GIT+SSH://user:passw0rd@host.example/o/r.git",
+        "git+ssh-userpass-uppercase-scheme",
+        "GIT+SSH://***:***@host.example/o/r.git",
+    ),
+    (
+        "ssh://x-access-token:deadbeefDEADBEEFdeadbeefDE@host.example/o/r.git",
+        "ssh-x-access",
+        "ssh://***:***@host.example/o/r.git",
+    ),
+    # Token-only userinfo. The prefixed GitHub tokens were already caught by
+    # the key-shape rules; these rows pin the exact embedded output.
+    ("https://ghp_" + "A" * 36 + "@github.com/o/r.git", "url-token-only-ghp", "https://***@github.com/o/r.git"),
+    ("https://gho_" + "B" * 36 + "@github.com/o/r.git", "url-token-only-gho", "https://***@github.com/o/r.git"),
+    ("https://ghs_" + "C" * 36 + "@github.com/o/r.git", "url-token-only-ghs", "https://***@github.com/o/r.git"),
+    (
+        "https://github_pat_" + "F" * 40 + "@github.com/o/r.git",
+        "url-token-only-github_pat",
+        "https://***@github.com/o/r.git",
+    ),
+    # An opaque token has no prefix to recognise: the userinfo rule alone
+    # redacts it (the leak this issue was filed for).
+    ("https://" + _OPAQUE_TOKEN + "@github.com/o/r.git", "url-token-only-opaque", "https://***@github.com/o/r.git"),
+    ("http://" + _OPAQUE_TOKEN + "@host.example/o/r.git", "url-token-only-opaque-http", "http://***@host.example/o/r.git"),
+    ("ssh://" + _OPAQUE_TOKEN + "@host.example/o/r.git", "ssh-token-only-opaque", "ssh://***@host.example/o/r.git"),
+    (
+        "git+ssh://" + _OPAQUE_TOKEN + "@host.example:2222/o/r.git",
+        "git+ssh-token-only-opaque-with-port",
+        "git+ssh://***@host.example:2222/o/r.git",
+    ),
+    # Any colon-less userinfo goes, a plain login name included.
+    ("ssh://git@github.com/o/r.git", "ssh-login-name", "ssh://***@github.com/o/r.git"),
+    # Negative controls: an `@` that is not userinfo must survive unchanged on
+    # every scheme the rules cover (the #953 query-string fix, kept).
+    (
+        "https://example.test?owner=alice@example.test",
+        "url-query-at-no-port-not-userinfo",
+        "https://example.test?owner=alice@example.test",
+    ),
+    (
+        "https://example.test/a/b?owner=alice@example.test",
+        "url-path-then-query-at-not-userinfo",
+        "https://example.test/a/b?owner=alice@example.test",
+    ),
+    (
+        "https://example.test#alice@example.test",
+        "url-fragment-at-not-userinfo",
+        "https://example.test#alice@example.test",
+    ),
+    (
+        "ssh://host.example:2222/o/r.git",
+        "ssh-host-port-no-userinfo",
+        "ssh://host.example:2222/o/r.git",
+    ),
+    (
+        "ssh://host.example:2222?owner=alice@example.test",
+        "ssh-query-at-not-userinfo",
+        "ssh://host.example:2222?owner=alice@example.test",
+    ),
+    (
+        "git+ssh://host.example?owner=alice@example.test",
+        "git+ssh-query-at-no-port-not-userinfo",
+        "git+ssh://host.example?owner=alice@example.test",
+    ),
+    # scp-style remote: no scheme, the `git` login is not a secret.
+    ("git@github.com:o/r.git", "scp-style-remote-untouched", "git@github.com:o/r.git"),
     ("AUTHORIZATION: basic " + ("YWJj" * 10) + "==", "basic-auth", "basic ***"),
     (
         "eyJhbGciOiJIUzI1NiJ9."
