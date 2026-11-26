@@ -1,0 +1,6 @@
+# Multi-object 3MF plate deliverable — three distinct objects.
+# Never print a merged STL of these; STL carries no object separation.
+# HITL ladder-plate-layout = YES: 3-step + 2-step + reference head.
+reference-head
+ladder-3
+ladder-2
