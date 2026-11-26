@@ -11,6 +11,7 @@ import pathlib
 import re
 
 from conftest import REPO, raw_brief, raw_pr
+from conftest import contract as load_contract
 from provenance import contract, digest
 
 FOOTER = digest.FOOTER
@@ -148,6 +149,44 @@ def test_death_notice_is_told_from_a_release():
     assert re.search(r"^DEATH_PREFIX='([^']*)'$", drifted, re.M).group(1) != digest.DEATH_PREFIX
 
 
+def _cooldown_body(text: str) -> str:
+    """``post_burn_cooldown``'s comment as bash builds it, from scripts/routine-lock-cleanup.sh's own
+    variables: its printf format, ``%s`` filled in argument order, ``\\n`` expanded."""
+    fn = re.search(r"^post_burn_cooldown\(\) \{\n(.*?)^\}$", text, re.M | re.S)
+    assert fn, "post_burn_cooldown() not found"
+    call = re.search(r"body=\"\$\(printf '([^']*)' \\\n\s*(.*?)\)\"\n", fn.group(1), re.S)
+    assert call, "post_burn_cooldown's printf not found"
+    fmt, args = call.group(1), re.findall(r'"\$([A-Z_]+)"', call.group(2))
+    values = {"COOLDOWN_MARKER": re.search(r"^COOLDOWN_MARKER='([^']*)'$", text, re.M).group(1),
+              "COOLDOWN_HTML_MARKER": re.search(r"^COOLDOWN_HTML_MARKER='([^']*)'$", text, re.M).group(1),
+              "ROUTINE": "backlog-burn", "OUTCOME": "success",
+              "RUN_URL": "https://github.com/shaiss/print-bench/actions/runs/1",
+              "BURN_COOLDOWN_HOURS": re.search(r"^BURN_COOLDOWN_HOURS=([0-9]+)$", text, re.M).group(1)}
+    assert fmt.count("%s") == len(args) and args[:2] == ["COOLDOWN_MARKER", "COOLDOWN_HTML_MARKER"], args
+    out = fmt.replace("\\n", "\n")
+    for a in args:
+        out = out.replace("%s", values[a], 1)
+    return out
+
+
+def test_burn_cooldown_lead_pinned_to_the_script():
+    """routine-lock-cleanup.sh's picker cooldown (#924) — the comment it posts for a run that neither
+    delivered nor declined — classifies as ``burn_cooldown``, built from the script's own printf and
+    variables; its marker is kept. The rule is the WHOLE first line, so a longer line is not one, and a
+    reworded marker in the script fails the pin."""
+    text = (REPO / "scripts" / "routine-lock-cleanup.sh").read_text(encoding="utf-8")
+    assert re.search(r"^COOLDOWN_MARKER='([^']*)'$", text, re.M).group(1) == digest.COOLDOWN_LINE
+    body = _cooldown_body(text)
+    assert body.startswith(digest.COOLDOWN_LINE + "\n\n<!-- burn-cooldown:v1 -->\n"), body[:80]
+    d = digest.body_digest(body)
+    assert (d["lead"], d["lead_fields"], d["marker_lines"]) == ("burn_cooldown", {}, ["<!-- burn-cooldown:v1 -->"])
+    assert d["digest"] == "body-digest@3"
+    for near in (digest.COOLDOWN_LINE + " — 24 h", "🚢 BURN COOLDOWN", "🚢 burn-cooldown"):
+        assert digest.classify_lead(near + "\n")[0] is None, near
+    drifted = text.replace("COOLDOWN_MARKER='🚢 BURN-COOLDOWN'", "COOLDOWN_MARKER='🚢 PICKER-COOLDOWN'")
+    assert digest.classify_lead(_cooldown_body(drifted))[0] is None
+
+
 def _settle_body(text: str) -> str:
     """``SHIP_LOCK_SETTLE_BODY`` as bash expands it, from scripts/design-run-deliver.sh's own variables."""
     lock = re.search(r"^STOP_LOCK_MARKER='([^']*)'$", text, re.M)
@@ -190,6 +229,14 @@ def test_message_digest_trailers():
     assert [t["key"] for t in d["trailers"]] == ["Co-Authored-By", "Claude-Session"]
     assert digest.message_digest("Add design: x (#636)")["subject_pr"] == 636
     assert digest.message_digest(digest.REGEN_SUBJECT + "\n\nPreview-Diff: all-noise")["subject_regen"]
+
+
+def test_contract_formats_name_the_digest_versions_written():
+    """The contract's formats table names the digest versions the code stamps, so a version bump
+    cannot ship a contract that still advertises the older format."""
+    formats = load_contract()["formats"]
+    assert formats["body_digest"] == digest.DIGEST_VERSION
+    assert formats["message_digest"] == digest.MESSAGE_DIGEST_VERSION
 
 
 def test_real_fixture_counts_survive_digesting():
